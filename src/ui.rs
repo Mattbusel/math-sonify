@@ -5,6 +5,8 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::sonification::chord_intervals_for;
 use crate::presets::{PRESETS, load_preset};
+use crate::audio::WavRecorder;
+use hound;
 
 /// Shared mutable UI state — written by the UI thread, read by the sim thread.
 pub struct AppState {
@@ -20,6 +22,14 @@ pub struct AppState {
     pub current_deriv: Vec<f64>,
     pub kuramoto_phases: Vec<f64>,
     pub order_param: f64,
+    pub sample_rate: u32,
+    pub midi_enabled: bool,
+    // LFO
+    pub lfo_enabled: bool,
+    pub lfo_rate: f32,
+    pub lfo_depth: f32,
+    pub lfo_target: String,
+    pub lfo_phase: f64,
 }
 
 impl AppState {
@@ -37,18 +47,31 @@ impl AppState {
             current_deriv: Vec::new(),
             kuramoto_phases: Vec::new(),
             order_param: 0.0,
+            sample_rate: 44100,
+            midi_enabled: false,
+            lfo_enabled: false,
+            lfo_rate: 0.05,
+            lfo_depth: 0.3,
+            lfo_target: "speed".into(),
+            lfo_phase: 0.0,
         }
     }
 }
 
 pub type SharedState = Arc<Mutex<AppState>>;
 
+fn lcg_rand(seed: &mut u64) -> f64 {
+    *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    (*seed >> 33) as f64 / u32::MAX as f64
+}
+
 /// Draw the full UI. Called each egui frame.
 pub fn draw_ui(
     ctx: &Context,
     state: &SharedState,
-    viz_points: &[(f32, f32, f32)],
+    viz_points: &[(f32, f32, f32, f32, bool)],
     waveform: &Arc<Mutex<Vec<f32>>>,
+    recording: &WavRecorder,
 ) {
     // Apply neon dark visuals
     {
@@ -66,6 +89,29 @@ pub fn draw_ui(
     }
 
     let mut st = state.lock();
+
+    // Keyboard shortcuts
+    ctx.input(|i| {
+        if i.key_pressed(Key::Space) {
+            st.paused = !st.paused;
+        }
+        if i.key_pressed(Key::ArrowUp) {
+            st.config.audio.master_volume = (st.config.audio.master_volume + 0.05).min(1.0);
+        }
+        if i.key_pressed(Key::ArrowDown) {
+            st.config.audio.master_volume = (st.config.audio.master_volume - 0.05).max(0.0);
+        }
+        if i.key_pressed(Key::ArrowRight) {
+            st.config.system.speed = (st.config.system.speed * 1.2).min(10.0);
+        }
+        if i.key_pressed(Key::ArrowLeft) {
+            st.config.system.speed = (st.config.system.speed / 1.2).max(0.1);
+        }
+        if i.key_pressed(Key::Num1) { st.viz_tab = 0; }
+        if i.key_pressed(Key::Num2) { st.viz_tab = 1; }
+        if i.key_pressed(Key::Num3) { st.viz_tab = 2; }
+        if i.key_pressed(Key::Num4) { st.viz_tab = 3; }
+    });
 
     SidePanel::left("controls").min_width(300.0).max_width(340.0).show(ctx, |ui| {
         ScrollArea::vertical().show(ui, |ui| {
@@ -139,6 +185,50 @@ pub fn draw_ui(
                         }
                         _ => {}
                     }
+                });
+
+                // Randomize button
+                if ui.button("🎲 Randomize").clicked() {
+                    let mut seed = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_nanos() as u64;
+                    let vary = |v: f64, s: &mut u64| v * (0.8 + lcg_rand(s) * 0.4);
+                    match st.config.system.name.as_str() {
+                        "lorenz" => {
+                            st.config.lorenz.sigma = vary(st.config.lorenz.sigma, &mut seed).clamp(1.0, 20.0);
+                            st.config.lorenz.rho   = vary(st.config.lorenz.rho,   &mut seed).clamp(10.0, 50.0);
+                            st.config.lorenz.beta  = vary(st.config.lorenz.beta,  &mut seed).clamp(0.5, 5.0);
+                        }
+                        "rossler" => {
+                            st.config.rossler.a = vary(st.config.rossler.a, &mut seed).clamp(0.01, 0.5);
+                            st.config.rossler.b = vary(st.config.rossler.b, &mut seed).clamp(0.01, 0.5);
+                            st.config.rossler.c = vary(st.config.rossler.c, &mut seed).clamp(1.0, 15.0);
+                        }
+                        "kuramoto" => {
+                            st.config.kuramoto.coupling = vary(st.config.kuramoto.coupling, &mut seed).clamp(0.0, 5.0);
+                        }
+                        _ => {}
+                    }
+                    st.system_changed = true;
+                }
+
+                // LFO / Auto-Wander
+                CollapsingHeader::new("Auto-Wander (LFO)").default_open(false).show(ui, |ui| {
+                    ui.checkbox(&mut st.lfo_enabled, "Enable LFO");
+                    ui.add(Slider::new(&mut st.lfo_rate, 0.01..=2.0).text("Rate Hz").logarithmic(true));
+                    ui.add(Slider::new(&mut st.lfo_depth, 0.0..=1.0).text("Depth"));
+                    let lfo_targets = ["speed", "sigma", "rho", "beta", "a", "b", "c", "coupling"];
+                    let current_target = st.lfo_target.clone();
+                    ComboBox::from_label("Target")
+                        .selected_text(&current_target)
+                        .show_ui(ui, |ui| {
+                            for t in &lfo_targets {
+                                if ui.selectable_label(current_target == *t, *t).clicked() {
+                                    st.lfo_target = t.to_string();
+                                }
+                            }
+                        });
                 });
             });
 
@@ -230,6 +320,52 @@ pub fn draw_ui(
                     st.paused = !st.paused;
                 }
 
+                ui.add_space(4.0);
+
+                // Record WAV button
+                let st_sample_rate = st.sample_rate;
+                let is_recording = recording.try_lock().map(|r| r.is_some()).unwrap_or(false);
+                let rec_label = if is_recording { "⏹  Stop Recording" } else { "⏺  Record WAV" };
+                let rec_color = if is_recording { Color32::from_rgb(180, 30, 30) } else { Color32::from_rgb(30, 120, 30) };
+                if ui.add(Button::new(rec_label).fill(rec_color).min_size(Vec2::new(200.0, 32.0))).clicked() {
+                    if is_recording {
+                        if let Some(mut lock) = recording.try_lock() { *lock = None; }
+                    } else {
+                        let secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        let filename = format!("recording_{}.wav", secs);
+                        let spec = hound::WavSpec {
+                            channels: 2,
+                            sample_rate: st_sample_rate,
+                            bits_per_sample: 32,
+                            sample_format: hound::SampleFormat::Float,
+                        };
+                        if let Ok(writer) = hound::WavWriter::create(&filename, spec) {
+                            if let Some(mut lock) = recording.try_lock() {
+                                *lock = Some(writer);
+                            }
+                        }
+                    }
+                }
+
+                ui.add_space(4.0);
+
+                // Save Config button
+                if ui.add(Button::new("💾  Save Config").fill(Color32::from_rgb(40, 60, 40)).min_size(Vec2::new(200.0, 28.0))).clicked() {
+                    let toml_str = toml::to_string_pretty(&st.config).unwrap_or_default();
+                    let _ = std::fs::write("config.toml", toml_str);
+                }
+
+                ui.add_space(4.0);
+
+                // MIDI toggle
+                ui.checkbox(&mut st.midi_enabled, "MIDI Output");
+                if st.midi_enabled {
+                    ui.label(RichText::new("Sending to first MIDI port").small().color(Color32::from_rgb(100, 200, 100)));
+                }
+
                 ui.add_space(8.0);
                 let chaos = st.chaos_level;
                 let chaos_color = lerp_color(
@@ -242,6 +378,11 @@ pub fn draw_ui(
                         .text(format!("Chaos  {:.0}%", chaos * 100.0))
                         .fill(chaos_color)
                 );
+
+                ui.add_space(4.0);
+                ui.label(RichText::new("Space: pause  |  ↑↓: volume  |  ←→: speed  |  1-4: tabs")
+                    .small()
+                    .color(Color32::from_rgb(90, 100, 130)));
             });
         });
     });
@@ -263,9 +404,27 @@ pub fn draw_ui(
             st.viz_tab = viz_tab;
         });
 
+        // Trail length slider + projection buttons for Phase Portrait tab
+        let viz_tab = st.viz_tab;
+        if viz_tab == 0 {
+            ui.horizontal(|ui| {
+                ui.label("Trail:");
+                ui.add(Slider::new(&mut st.config.viz.trail_length, 100..=2000).text("pts"));
+                ui.separator();
+                ui.label("Projection:");
+                for (i, label) in ["XY", "XZ", "YZ"].iter().enumerate() {
+                    let selected = st.viz_projection == i;
+                    let color = if selected { Color32::from_rgb(0, 150, 220) } else { Color32::from_rgb(40, 40, 70) };
+                    if ui.add(Button::new(*label).fill(color).min_size(Vec2::new(36.0, 22.0))).clicked() {
+                        st.viz_projection = i;
+                    }
+                }
+            });
+        }
+
         ui.separator();
 
-        let viz_tab = st.viz_tab;
+        let projection = st.viz_projection;
         let system_name = st.config.system.name.clone();
         let mode_name = st.config.sonification.mode.clone();
         let freqs = [
@@ -284,7 +443,7 @@ pub fn draw_ui(
         drop(st); // release lock before painting
 
         match viz_tab {
-            0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv),
+            0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection),
             1 => draw_waveform(ui, waveform),
             2 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
             3 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases),
@@ -303,7 +462,6 @@ fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
 }
 
 fn speed_color(speed_norm: f32) -> Color32 {
-    // deep blue -> cyan -> white
     if speed_norm < 0.5 {
         lerp_color(
             Color32::from_rgb(20, 40, 180),
@@ -319,7 +477,15 @@ fn speed_color(speed_norm: f32) -> Color32 {
     }
 }
 
-fn draw_phase_portrait(ui: &mut Ui, points: &[(f32, f32, f32)], system_name: &str, mode_name: &str, current_state: &[f64], current_deriv: &[f64]) {
+fn draw_phase_portrait(
+    ui: &mut Ui,
+    points: &[(f32, f32, f32, f32, bool)],
+    system_name: &str,
+    mode_name: &str,
+    current_state: &[f64],
+    current_deriv: &[f64],
+    projection: usize,
+) {
     let avail = ui.available_size();
     let (response, painter) = ui.allocate_painter(avail, Sense::hover());
     let rect = response.rect;
@@ -337,9 +503,19 @@ fn draw_phase_portrait(ui: &mut Ui, points: &[(f32, f32, f32)], system_name: &st
         return;
     }
 
+    // Extract projected coordinates
+    let proj_pts: Vec<(f32, f32, f32, bool)> = points.iter().map(|&(x, y, z, s, c)| {
+        let (pa, pb) = match projection {
+            1 => (x, z), // XZ
+            2 => (y, z), // YZ
+            _ => (x, y), // XY
+        };
+        (pa, pb, s, c)
+    }).collect();
+
     // Compute bounds
     let (mut min_x, mut max_x, mut min_y, mut max_y) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
-    for &(x, y, _) in points {
+    for &(x, y, _, _) in &proj_pts {
         min_x = min_x.min(x); max_x = max_x.max(x);
         min_y = min_y.min(y); max_y = max_y.max(y);
     }
@@ -360,12 +536,12 @@ fn draw_phase_portrait(ui: &mut Ui, points: &[(f32, f32, f32)], system_name: &st
     painter.line_segment([Pos2::new(rect.left(), origin.y), Pos2::new(rect.right(), origin.y)], Stroke::new(1.0, grid_color));
     painter.line_segment([Pos2::new(origin.x, rect.top()), Pos2::new(origin.x, rect.bottom())], Stroke::new(1.0, grid_color));
 
-    let n = points.len();
+    let n = proj_pts.len();
 
     // Draw trail
-    for (idx, w) in points.windows(2).enumerate() {
-        let (x0, y0, s0) = w[0];
-        let (x1, y1, _) = w[1];
+    for (idx, w) in proj_pts.windows(2).enumerate() {
+        let (x0, y0, s0, _) = w[0];
+        let (x1, y1, _, _) = w[1];
         let p0 = to_screen(x0, y0);
         let p1 = to_screen(x1, y1);
         let recency = idx as f32 / n as f32;
@@ -377,7 +553,6 @@ fn draw_phase_portrait(ui: &mut Ui, points: &[(f32, f32, f32)], system_name: &st
             (col.b() as f32 * recency) as u8,
             alpha,
         );
-        // Glow pass
         let glow_col = Color32::from_rgba_premultiplied(
             (col.r() as f32 * recency * 0.3) as u8,
             (col.g() as f32 * recency * 0.3) as u8,
@@ -388,8 +563,16 @@ fn draw_phase_portrait(ui: &mut Ui, points: &[(f32, f32, f32)], system_name: &st
         painter.line_segment([p0, p1], Stroke::new(1.5, col_a));
     }
 
+    // Poincaré section dots
+    for &(x, y, _, crossing) in &proj_pts {
+        if crossing {
+            let pos = to_screen(x, y);
+            painter.circle_filled(pos, 2.5, Color32::from_rgb(255, 100, 255));
+        }
+    }
+
     // Live position dot
-    if let Some(&(x, y, _)) = points.last() {
+    if let Some(&(x, y, _, _)) = proj_pts.last() {
         let pos = to_screen(x, y);
         painter.circle_filled(pos, 8.0, Color32::from_rgba_premultiplied(0, 150, 255, 60));
         painter.circle_filled(pos, 5.0, Color32::WHITE);
@@ -411,8 +594,18 @@ fn draw_phase_portrait(ui: &mut Ui, points: &[(f32, f32, f32)], system_name: &st
         Color32::from_rgb(100, 120, 160),
     );
 
+    // Projection label
+    let proj_label = match projection { 1 => "XZ Projection", 2 => "YZ Projection", _ => "XY Projection" };
+    painter.text(
+        rect.left_top() + Vec2::new(8.0, 40.0),
+        Align2::LEFT_TOP,
+        proj_label,
+        FontId::proportional(11.0),
+        Color32::from_rgb(80, 100, 160),
+    );
+
     // Derivative arrow at current position
-    if let (Some(&(lx, ly, _)), true) = (points.last(), current_deriv.len() >= 2) {
+    if let (Some(&(lx, ly, _, _)), true) = (proj_pts.last(), current_deriv.len() >= 2) {
         let pos = to_screen(lx, ly);
         let dx = current_deriv[0] as f32;
         let dy = current_deriv[1] as f32;
@@ -420,21 +613,21 @@ fn draw_phase_portrait(ui: &mut Ui, points: &[(f32, f32, f32)], system_name: &st
         let scale = 40.0f32;
         let arrow_end = Pos2::new(
             pos.x + (dx / mag) * scale,
-            pos.y - (dy / mag) * scale, // y flipped
+            pos.y - (dy / mag) * scale,
         );
         painter.line_segment([pos, arrow_end], Stroke::new(4.0, Color32::from_rgba_premultiplied(255, 200, 0, 40)));
         painter.line_segment([pos, arrow_end], Stroke::new(1.5, Color32::from_rgb(255, 220, 0)));
         painter.circle_filled(arrow_end, 3.0, Color32::from_rgb(255, 220, 0));
     }
 
-    // Equation overlay (bottom-left corner)
+    // Equation overlay
     let eq_text = equation_text(system_name);
     if !eq_text.is_empty() {
         let eq_pos = rect.left_bottom() + Vec2::new(8.0, -8.0);
         painter.text(eq_pos, Align2::LEFT_BOTTOM, eq_text, FontId::monospace(10.0), Color32::from_rgba_premultiplied(150, 180, 255, 180));
     }
 
-    // State values (top-right, live numbers)
+    // State values
     if !current_state.is_empty() {
         let var_names = dim_names(system_name);
         for (i, (&val, name)) in current_state.iter().zip(var_names.iter()).enumerate().take(6) {
@@ -464,7 +657,6 @@ fn draw_waveform(ui: &mut Ui, waveform: &Arc<Mutex<Vec<f32>>>) {
         return;
     }
 
-    // Draw zero line
     let cy = rect.center().y;
     painter.line_segment(
         [Pos2::new(rect.left(), cy), Pos2::new(rect.right(), cy)],
@@ -486,7 +678,6 @@ fn draw_waveform(ui: &mut Ui, waveform: &Arc<Mutex<Vec<f32>>>) {
         painter.line_segment([w[0], w[1]], Stroke::new(1.5, neon_green));
     }
 
-    // RMS bar on right edge
     let rms = (samples.iter().map(|&s| s * s).sum::<f32>() / n as f32).sqrt();
     let bar_h = (rms * rect.height()).clamp(0.0, rect.height());
     let bar_rect = Rect::from_min_size(
@@ -502,7 +693,6 @@ fn draw_waveform(ui: &mut Ui, waveform: &Arc<Mutex<Vec<f32>>>) {
         Color32::from_rgb(0, 220, 100),
     );
 
-    // Spectrum bar graph (DFT approximation, 32 bins)
     if samples.len() >= 64 {
         let n_bins = 32usize;
         let n_dft = samples.len().min(2048);
@@ -527,12 +717,12 @@ fn draw_waveform(ui: &mut Ui, waveform: &Arc<Mutex<Vec<f32>>>) {
                 im += s * angle.sin();
             }
             let mag = ((re * re + im * im) / n_dft as f32).sqrt();
-            let bar_h = (mag * 200.0).clamp(0.0, bin_h_max);
+            let bar_h2 = (mag * 200.0).clamp(0.0, bin_h_max);
             let bar_w = (rect.width() / n_bins as f32) - 1.0;
             let bx = rect.left() + bin as f32 * (rect.width() / n_bins as f32);
             let bar_rect2 = Rect::from_min_size(
-                Pos2::new(bx, spec_y + bin_h_max - bar_h),
-                Vec2::new(bar_w.max(1.0), bar_h),
+                Pos2::new(bx, spec_y + bin_h_max - bar_h2),
+                Vec2::new(bar_w.max(1.0), bar_h2),
             );
             painter.rect_filled(bar_rect2, 0.0, hue_to_color(bin as f32 / n_bins as f32, 0.8));
         }
@@ -564,7 +754,6 @@ fn draw_note_map(ui: &mut Ui, freqs: &[f32; 4], voice_levels: &[f32; 4], chord_i
     ];
     let chord_color = Color32::from_rgb(200, 100, 255);
 
-    // Log frequency axis: 50 Hz to 4000 Hz
     let freq_min = 50.0f32.ln();
     let freq_max = 4000.0f32.ln();
     let freq_to_x = |f: f32| {
@@ -572,7 +761,6 @@ fn draw_note_map(ui: &mut Ui, freqs: &[f32; 4], voice_levels: &[f32; 4], chord_i
         rect.left() + ((ln_f - freq_min) / (freq_max - freq_min)) * rect.width()
     };
 
-    // Draw frequency axis labels
     for &lf in &[55.0f32, 110.0, 220.0, 440.0, 880.0, 1760.0, 3520.0] {
         let x = freq_to_x(lf);
         if x >= rect.left() && x <= rect.right() {
@@ -606,7 +794,6 @@ fn draw_note_map(ui: &mut Ui, freqs: &[f32; 4], voice_levels: &[f32; 4], chord_i
         );
         painter.rect_filled(bar_rect, 3.0, voice_colors[i]);
 
-        // Note label
         painter.text(
             Pos2::new(x, y - 2.0),
             Align2::CENTER_BOTTOM,
@@ -615,7 +802,6 @@ fn draw_note_map(ui: &mut Ui, freqs: &[f32; 4], voice_levels: &[f32; 4], chord_i
             voice_colors[i],
         );
 
-        // Chord interval bars above root (voice 0)
         if i == 0 {
             for (k, &interval) in chord_intervals.iter().enumerate() {
                 if interval.abs() < 0.001 { continue; }
@@ -743,18 +929,15 @@ fn draw_math_view(
 
     let mid_x = rect.center().x;
 
-    // --- LEFT: Equations + live state ---
     let mut y = rect.top() + 20.0;
     let x = rect.left() + 20.0;
 
-    // System title
     painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
         format!("System: {}", system_name),
         FontId::proportional(18.0),
         Color32::from_rgb(100, 180, 255));
     y += 30.0;
 
-    // Equations
     let eq_lines = equation_lines(system_name);
     painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
         "Equations of Motion:", FontId::proportional(13.0), Color32::from_rgb(150, 150, 200));
@@ -766,7 +949,6 @@ fn draw_math_view(
     }
     y += 15.0;
 
-    // State vector
     painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
         "State  ->  dx/dt", FontId::proportional(13.0), Color32::from_rgb(150, 150, 200));
     y += 20.0;
@@ -777,12 +959,8 @@ fn draw_math_view(
         let state_text = format!("{} = {:+8.4}", name, val);
         let deriv_text = format!("  {:+8.4}/s", dv);
 
-        // Color bar showing magnitude
         let bar_w = (val.abs() as f32 * 20.0).clamp(0.0, 120.0);
-        let bar_rect = Rect::from_min_size(
-            Pos2::new(x, y + 2.0),
-            Vec2::new(bar_w, 12.0),
-        );
+        let bar_rect = Rect::from_min_size(Pos2::new(x, y + 2.0), Vec2::new(bar_w, 12.0));
         let hue = i as f32 / 8.0;
         let bar_color = hue_to_color(hue, 0.6);
         painter.rect_filled(bar_rect, 2.0, bar_color);
@@ -794,7 +972,6 @@ fn draw_math_view(
         y += 16.0;
     }
 
-    // Chaos meter
     y += 15.0;
     painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
         format!("Chaos Level: {:.1}%", chaos_level * 100.0),
@@ -807,7 +984,6 @@ fn draw_math_view(
     let chaos_color = lerp_color(Color32::from_rgb(0, 100, 255), Color32::from_rgb(255, 30, 30), chaos_level);
     painter.rect_filled(fill_rect, 4.0, chaos_color);
 
-    // --- RIGHT: System-specific math visualization ---
     let right_rect = Rect::from_min_max(
         Pos2::new(mid_x + 10.0, rect.top() + 10.0),
         rect.max,
@@ -843,7 +1019,6 @@ fn draw_kuramoto_circle(painter: &Painter, rect: Rect, phases: &[f64], order_par
         painter.circle_filled(Pos2::new(px, py), 5.0, col);
     }
 
-    // Order parameter arrow
     let (sin_sum, cos_sum): (f64, f64) = phases.iter().fold((0.0, 0.0), |(s, c), &ph| (s + ph.sin(), c + ph.cos()));
     let mean_phase = sin_sum.atan2(cos_sum) as f32;
     let r = order_param as f32;
@@ -865,7 +1040,6 @@ fn draw_phase_clock(painter: &Painter, rect: Rect, state: &[f64], deriv: &[f64])
     painter.text(center + Vec2::new(0.0, -radius - 16.0), Align2::CENTER_BOTTOM,
         "Phase Velocity", FontId::proportional(13.0), Color32::from_rgb(150, 150, 200));
 
-    // Radial tick marks
     for i in 0..12 {
         let a = i as f32 * std::f32::consts::TAU / 12.0;
         let inner = Pos2::new(center.x + (radius - 8.0) * a.cos(), center.y - (radius - 8.0) * a.sin());
@@ -883,7 +1057,6 @@ fn draw_phase_clock(painter: &Painter, rect: Rect, state: &[f64], deriv: &[f64])
         let dangle = dy.atan2(dx);
         let dmag = (dx * dx + dy * dy).sqrt();
 
-        // Position hand
         let pos_end = Pos2::new(
             center.x + radius * 0.8 * angle.cos(),
             center.y - radius * 0.8 * angle.sin(),
@@ -891,7 +1064,6 @@ fn draw_phase_clock(painter: &Painter, rect: Rect, state: &[f64], deriv: &[f64])
         painter.line_segment([center, pos_end], Stroke::new(2.0, Color32::from_rgb(0, 180, 255)));
         painter.circle_filled(pos_end, 4.0, Color32::from_rgb(0, 200, 255));
 
-        // Velocity hand
         let vel_scale = (dmag / 100.0).clamp(0.0, 1.0);
         let vel_end = Pos2::new(
             center.x + radius * vel_scale * dangle.cos(),

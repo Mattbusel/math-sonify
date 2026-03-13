@@ -20,13 +20,12 @@ use crate::sonification::{
     DirectMapping, OrbitalResonance, GranularMapping, SpectralMapping,
     chord_intervals_for,
 };
-use crate::audio::AudioEngine;
+use crate::audio::{AudioEngine, WavRecorder};
+use midir;
 use crate::ui::{AppState, SharedState, draw_ui};
 
 // Channel capacity (sim -> audio). Only the latest value matters.
 const CHANNEL_CAP: usize = 16;
-// How many trajectory points to store for visualization.
-const VIZ_HISTORY: usize = 1024;
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -38,18 +37,22 @@ fn main() -> anyhow::Result<()> {
     let shared = Arc::new(Mutex::new(AppState::new(config.clone())));
 
     // Visualization history (shared between sim and UI)
-    let viz_history: Arc<Mutex<Vec<(f32, f32, f32)>>> =
-        Arc::new(Mutex::new(Vec::with_capacity(VIZ_HISTORY)));
+    // Tuple: (x, y, z, speed_norm, is_crossing)
+    let viz_history: Arc<Mutex<Vec<(f32, f32, f32, f32, bool)>>> =
+        Arc::new(Mutex::new(Vec::with_capacity(2000)));
 
     // Waveform capture buffer
     let waveform_buf: Arc<parking_lot::Mutex<Vec<f32>>> =
         Arc::new(parking_lot::Mutex::new(Vec::with_capacity(2048)));
 
+    // WAV recording shared state
+    let recording: WavRecorder = Arc::new(parking_lot::Mutex::new(None));
+
     // Channel: sim thread -> audio thread
     let (tx, rx) = bounded::<AudioParams>(CHANNEL_CAP);
 
     // Audio engine
-    let _audio = AudioEngine::start(
+    let (_audio, actual_sr) = AudioEngine::start(
         rx,
         config.audio.sample_rate,
         config.audio.reverb_wet,
@@ -57,7 +60,11 @@ fn main() -> anyhow::Result<()> {
         config.audio.delay_feedback,
         config.audio.master_volume,
         waveform_buf.clone(),
+        recording.clone(),
     )?;
+
+    // Store actual sample rate in AppState
+    shared.lock().sample_rate = actual_sr;
 
     // Simulation thread
     let shared_sim = shared.clone();
@@ -65,6 +72,9 @@ fn main() -> anyhow::Result<()> {
     thread::spawn(move || {
         sim_thread(shared_sim, viz_sim, tx);
     });
+
+    // MIDI output thread
+    start_midi_thread(shared.clone());
 
     // UI (eframe -- runs on main thread)
     let options = eframe::NativeOptions {
@@ -82,6 +92,7 @@ fn main() -> anyhow::Result<()> {
                 shared: shared.clone(),
                 viz_history: viz_history.clone(),
                 waveform_buf: waveform_buf.clone(),
+                recording: recording.clone(),
             })
         }),
     ).map_err(|e| anyhow::anyhow!("eframe error: {e}"))?;
@@ -91,14 +102,15 @@ fn main() -> anyhow::Result<()> {
 
 struct SonifyApp {
     shared: SharedState,
-    viz_history: Arc<Mutex<Vec<(f32, f32, f32)>>>,
+    viz_history: Arc<Mutex<Vec<(f32, f32, f32, f32, bool)>>>,
     waveform_buf: Arc<parking_lot::Mutex<Vec<f32>>>,
+    recording: WavRecorder,
 }
 
 impl eframe::App for SonifyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let points = self.viz_history.lock().clone();
-        draw_ui(ctx, &self.shared, &points, &self.waveform_buf);
+        draw_ui(ctx, &self.shared, &points, &self.waveform_buf, &self.recording);
         ctx.request_repaint_after(Duration::from_millis(33)); // ~30 fps UI
     }
 }
@@ -109,7 +121,7 @@ impl eframe::App for SonifyApp {
 
 fn sim_thread(
     shared: SharedState,
-    viz: Arc<Mutex<Vec<(f32, f32, f32)>>>,
+    viz: Arc<Mutex<Vec<(f32, f32, f32, f32, bool)>>>,
     tx: crossbeam_channel::Sender<AudioParams>,
 ) {
     let initial_config = shared.lock().config.clone();
@@ -127,7 +139,7 @@ fn sim_thread(
         }
         next_tick += control_period;
 
-        let (paused, config, sys_changed, mode_changed) = {
+        let (paused, mut config, sys_changed, mode_changed) = {
             let mut st = shared.lock();
             let p = st.paused;
             let c = st.config.clone();
@@ -142,6 +154,28 @@ fn sim_thread(
         if sys_changed  { system = build_system(&config); }
         if mode_changed { mapper = build_mapper(&config.sonification.mode); }
 
+        // Apply LFO modulation
+        let (lfo_enabled, lfo_rate, lfo_depth, lfo_target, lfo_phase) = {
+            let st = shared.lock();
+            (st.lfo_enabled, st.lfo_rate, st.lfo_depth, st.lfo_target.clone(), st.lfo_phase)
+        };
+
+        if lfo_enabled {
+            let new_phase = lfo_phase + lfo_rate as f64 * (1.0 / control_rate_hz);
+            shared.lock().lfo_phase = new_phase;
+            let lfo_val = new_phase.sin() * lfo_depth as f64;
+            match lfo_target.as_str() {
+                "sigma" => config.lorenz.sigma *= 1.0 + lfo_val,
+                "rho"   => config.lorenz.rho *= 1.0 + lfo_val,
+                "beta"  => config.lorenz.beta *= 1.0 + lfo_val,
+                "a"     => config.rossler.a = (config.rossler.a * (1.0 + lfo_val)).max(0.001),
+                "c"     => config.rossler.c *= 1.0 + lfo_val,
+                "coupling" => config.kuramoto.coupling = (config.kuramoto.coupling * (1.0 + lfo_val)).max(0.0),
+                "speed" => config.system.speed = (config.system.speed * (1.0 + lfo_val)).clamp(0.05, 20.0),
+                _ => {}
+            }
+        }
+
         // Integrate enough steps to cover one control period at the configured speed
         let steps = ((config.system.speed / control_rate_hz) / config.system.dt)
             .round() as usize;
@@ -154,9 +188,18 @@ fn sim_thread(
             let state = system.state();
             if state.len() >= 2 {
                 let mut vh = viz.lock();
-                if vh.len() >= VIZ_HISTORY { vh.drain(0..256); }
+                let max_trail = config.viz.trail_length;
+                if vh.len() >= max_trail {
+                    let excess = vh.len().saturating_sub(max_trail - 1);
+                    vh.drain(0..excess);
+                }
                 let speed_norm = (system.speed() as f32 / 100.0).clamp(0.0, 1.0);
-                vh.push((state[0] as f32, state[1] as f32, speed_norm));
+                let z = if state.len() >= 3 { state[2] as f32 } else { 0.0 };
+                // Detect upward z-crossing (Poincaré section)
+                let prev_z = vh.last().map(|p| p.2).unwrap_or(0.0);
+                let mean_z_approx = 25.0f32;
+                let is_crossing = prev_z < mean_z_approx && z >= mean_z_approx;
+                vh.push((state[0] as f32, state[1] as f32, z, speed_norm, is_crossing));
             }
         }
 
@@ -184,10 +227,7 @@ fn sim_thread(
             // For Kuramoto: store phases and order param
             if config.system.name == "kuramoto" {
                 st.kuramoto_phases = system.state().to_vec();
-                // order_param exposed via current_deriv indirectly; need cast
-                // We detect kuramoto by name and store order_param separately
                 st.order_param = {
-                    // Compute from phases stored in current_state
                     let phases = &st.current_state;
                     let n = phases.len() as f64;
                     if n > 0.0 {
@@ -226,4 +266,83 @@ fn build_mapper(mode: &str) -> Box<dyn Sonification> {
         "spectral" => Box::new(SpectralMapping::new()),
         _          => Box::new(DirectMapping::new()),
     }
+}
+
+// ---------------------------------------------------------------------------
+// MIDI output thread
+// ---------------------------------------------------------------------------
+
+fn start_midi_thread(shared: SharedState) {
+    std::thread::spawn(move || {
+        let midi_out = match midir::MidiOutput::new("Math Sonify") {
+            Ok(m) => m,
+            Err(e) => { log::warn!("MIDI init failed: {e}"); return; }
+        };
+        let ports = midi_out.ports();
+        if ports.is_empty() {
+            log::info!("No MIDI output ports found");
+            return;
+        }
+        let port = &ports[0];
+        let port_name = midi_out.port_name(port).unwrap_or_default();
+        log::info!("MIDI output: {port_name}");
+        let mut conn = match midi_out.connect(port, "math-sonify-out") {
+            Ok(c) => c,
+            Err(e) => { log::warn!("MIDI connect failed: {e}"); return; }
+        };
+
+        let mut last_notes = [255u8; 4];
+        let mut last_chaos = 0.0f32;
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(20)); // 50 Hz
+
+            let (freqs, amps, chaos, midi_enabled) = {
+                let st = shared.lock();
+                if !st.midi_enabled {
+                    ([0.0f32; 4], [0.0f32; 4], 0.0f32, false)
+                } else {
+                    let f = [
+                        st.config.sonification.base_frequency as f32,
+                        st.config.sonification.base_frequency as f32 * 1.5,
+                        st.config.sonification.base_frequency as f32 * 2.0,
+                        st.config.sonification.base_frequency as f32 * 2.5,
+                    ];
+                    (f, st.config.sonification.voice_levels, st.chaos_level, true)
+                }
+            };
+
+            if !midi_enabled { continue; }
+
+            for (i, (&freq, &amp)) in freqs.iter().zip(amps.iter()).enumerate() {
+                let channel = i as u8;
+                let new_note = hz_to_midi(freq).clamp(0, 127);
+                let velocity = (amp * 100.0).min(127.0) as u8;
+
+                if last_notes[i] != new_note {
+                    if last_notes[i] != 255 {
+                        let _ = conn.send(&[0x80 | channel, last_notes[i], 0]);
+                    }
+                    if velocity > 0 {
+                        let _ = conn.send(&[0x90 | channel, new_note, velocity]);
+                        last_notes[i] = new_note;
+                    } else {
+                        last_notes[i] = 255;
+                    }
+                }
+            }
+
+            // Chaos as CC#1 (mod wheel) on channel 0
+            let new_chaos_val = (chaos * 127.0) as u8;
+            if (chaos - last_chaos).abs() > 0.01 {
+                let _ = conn.send(&[0xB0, 1, new_chaos_val]);
+                last_chaos = chaos;
+            }
+        }
+    });
+}
+
+fn hz_to_midi(hz: f32) -> u8 {
+    if hz < 20.0 { return 255; }
+    (69.0 + 12.0 * (hz / 440.0).log2()).round().clamp(0.0, 127.0) as u8
 }

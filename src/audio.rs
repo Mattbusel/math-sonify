@@ -2,6 +2,7 @@
 /// synthesizes stereo PCM, applies effects chain, outputs via cpal.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use hound;
 use cpal::{Stream, SampleFormat};
 use std::sync::Arc;
 use parking_lot::Mutex;
@@ -11,6 +12,8 @@ use crate::sonification::{AudioParams, SonifMode};
 use crate::synth::{
     Oscillator, OscShape, BiquadFilter, Freeverb, DelayLine, Limiter, GrainEngine,
 };
+
+pub type WavRecorder = Arc<parking_lot::Mutex<Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>>>;
 
 pub struct AudioEngine {
     _stream: Stream,
@@ -25,7 +28,8 @@ impl AudioEngine {
         delay_feedback: f32,
         master_volume: f32,
         waveform: Arc<Mutex<Vec<f32>>>,
-    ) -> anyhow::Result<Self> {
+        recording: WavRecorder,
+    ) -> anyhow::Result<(Self, u32)> {
         let host = cpal::default_host();
         let device = host.default_output_device()
             .ok_or_else(|| anyhow::anyhow!("No audio output device"))?;
@@ -38,7 +42,7 @@ impl AudioEngine {
 
         let sr = actual_sr as f32;
         // Initialize with config values; thereafter updated dynamically via AudioParams
-        let synth_state = Arc::new(Mutex::new(SynthState::new(sr, reverb_wet, delay_ms, delay_feedback, waveform)));
+        let synth_state = Arc::new(Mutex::new(SynthState::new(sr, reverb_wet, delay_ms, delay_feedback, waveform, recording)));
         // Store master_volume in the SynthState initial value
         synth_state.lock().master_volume = master_volume;
         let synth_state_clone = synth_state.clone();
@@ -99,7 +103,7 @@ impl AudioEngine {
         };
 
         stream.play()?;
-        Ok(Self { _stream: stream })
+        Ok((Self { _stream: stream }, actual_sr))
     }
 }
 
@@ -123,10 +127,11 @@ struct SynthState {
     freq_smooth_rate: f32,
     chord_intervals: [f32; 3],
     pub waveform: Arc<Mutex<Vec<f32>>>,
+    pub recording: WavRecorder,
 }
 
 impl SynthState {
-    fn new(sample_rate: f32, reverb_wet: f32, delay_ms: f32, delay_feedback: f32, waveform: Arc<Mutex<Vec<f32>>>) -> Self {
+    fn new(sample_rate: f32, reverb_wet: f32, delay_ms: f32, delay_feedback: f32, waveform: Arc<Mutex<Vec<f32>>>, recording: WavRecorder) -> Self {
         let mut reverb = Freeverb::new(sample_rate);
         reverb.wet = reverb_wet;
         let mut delay = DelayLine::new(2000.0, sample_rate);
@@ -159,6 +164,7 @@ impl SynthState {
             freq_smooth_rate: 0.01,
             chord_intervals: [0.0; 3],
             waveform,
+            recording,
         }
     }
 
@@ -206,6 +212,14 @@ impl SynthState {
             wf.push(lo);
             let excess = wf.len().saturating_sub(2048);
             if excess > 0 { wf.drain(0..excess); }
+        }
+
+        // WAV recording (non-blocking)
+        if let Some(mut rec) = self.recording.try_lock() {
+            if let Some(ref mut writer) = *rec {
+                let _ = writer.write_sample(lo);
+                let _ = writer.write_sample(ro);
+            }
         }
 
         (lo, ro)
