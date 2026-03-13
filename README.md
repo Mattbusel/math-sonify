@@ -20,7 +20,6 @@ Crank up the coupling constant on the Kuramoto oscillators and listen to synchro
 ### Lorenz Attractor — Phase Portrait
 The butterfly attractor traced in real time. Color encodes trajectory speed (deep blue → cyan → white). The gold arrow shows the current velocity vector (dx/dt). Equations visible bottom-left, live state values top-right.
 
-![Lorenz Phase Portrait](screenshots/lorenz-phase-portrait.png)
 
 ### Kuramoto Oscillators — Math View
 8 coupled phase oscillators shown on a unit circle. The gold arrow is the order parameter — watch it grow as you raise the coupling constant K, showing the synchronization phase transition live.
