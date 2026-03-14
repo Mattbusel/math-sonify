@@ -1,11 +1,13 @@
 use egui::*;
 use parking_lot::Mutex;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::config::Config;
 use crate::sonification::chord_intervals_for;
-use crate::presets::{PRESETS, load_preset};
-use crate::audio::WavRecorder;
+use crate::patches::{PRESETS, load_preset, save_patch, list_patches, load_patch_file};
+use crate::audio::{WavRecorder, LoopExportPending};
+use crate::systems::*;
 use hound;
 
 /// Shared mutable UI state — written by the UI thread, read by the sim thread.
@@ -15,7 +17,7 @@ pub struct AppState {
     pub system_changed: bool,
     pub mode_changed: bool,
     pub viz_projection: usize,  // 0=XY, 1=XZ, 2=YZ
-    pub viz_tab: usize,         // 0=Phase, 1=Waveform, 2=Notes, 3=Math View
+    pub viz_tab: usize,         // 0=Phase, 1=Waveform, 2=Notes, 3=Math View, 4=Bifurcation
     pub selected_preset: String,
     pub chaos_level: f32,
     pub current_state: Vec<f64>,
@@ -30,6 +32,26 @@ pub struct AppState {
     pub lfo_depth: f32,
     pub lfo_target: String,
     pub lfo_phase: f64,
+    // BPM Sync
+    pub bpm: f32,
+    pub bpm_sync: bool,
+    // Automation
+    pub auto_recording: bool,
+    pub auto_playing: bool,
+    pub auto_loop: bool,
+    pub auto_events: Vec<(f64, String, f64)>,
+    pub auto_play_pos: usize,
+    pub auto_start_time: Instant,
+    // Patch UI
+    pub patch_name_input: String,
+    pub patch_list: Vec<String>,
+    // Theme
+    pub theme: String,
+    // Bifurcation
+    pub bifurc_computing: bool,
+    pub bifurc_param: String,
+    // Loop export
+    pub loop_bars: u32,
 }
 
 impl AppState {
@@ -54,6 +76,20 @@ impl AppState {
             lfo_depth: 0.3,
             lfo_target: "speed".into(),
             lfo_phase: 0.0,
+            bpm: 120.0,
+            bpm_sync: false,
+            auto_recording: false,
+            auto_playing: false,
+            auto_loop: true,
+            auto_events: Vec::new(),
+            auto_play_pos: 0,
+            auto_start_time: Instant::now(),
+            patch_name_input: String::new(),
+            patch_list: list_patches(),
+            theme: "neon".into(),
+            bifurc_computing: false,
+            bifurc_param: "rho".into(),
+            loop_bars: 4,
         }
     }
 }
@@ -65,6 +101,54 @@ fn lcg_rand(seed: &mut u64) -> f64 {
     (*seed >> 33) as f64 / u32::MAX as f64
 }
 
+fn apply_theme(ctx: &Context, theme: &str) {
+    let mut visuals = ctx.style().visuals.clone();
+    visuals.dark_mode = true;
+    match theme {
+        "vaporwave" => {
+            visuals.window_fill = Color32::from_rgb(20, 10, 30);
+            visuals.panel_fill = Color32::from_rgb(20, 10, 30);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(35, 15, 50);
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(50, 20, 70);
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(80, 30, 100);
+            visuals.widgets.active.bg_fill = Color32::from_rgb(200, 50, 150);
+            visuals.selection.bg_fill = Color32::from_rgb(180, 40, 130);
+            visuals.override_text_color = Some(Color32::from_rgb(255, 180, 230));
+        }
+        "crt" => {
+            visuals.window_fill = Color32::from_rgb(0, 0, 0);
+            visuals.panel_fill = Color32::from_rgb(0, 0, 0);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(0, 10, 0);
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(0, 20, 0);
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(0, 40, 0);
+            visuals.widgets.active.bg_fill = Color32::from_rgb(0, 150, 0);
+            visuals.selection.bg_fill = Color32::from_rgb(0, 120, 0);
+            visuals.override_text_color = Some(Color32::from_rgb(0, 255, 60));
+        }
+        "solar" => {
+            visuals.window_fill = Color32::from_rgb(20, 10, 0);
+            visuals.panel_fill = Color32::from_rgb(20, 10, 0);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(35, 18, 0);
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(50, 28, 0);
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(80, 45, 0);
+            visuals.widgets.active.bg_fill = Color32::from_rgb(200, 120, 0);
+            visuals.selection.bg_fill = Color32::from_rgb(180, 100, 0);
+            visuals.override_text_color = Some(Color32::from_rgb(255, 210, 100));
+        }
+        _ => { // neon (default)
+            visuals.window_fill = Color32::from_rgb(12, 12, 20);
+            visuals.panel_fill = Color32::from_rgb(12, 12, 20);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(20, 20, 35);
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(25, 25, 45);
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(30, 30, 60);
+            visuals.widgets.active.bg_fill = Color32::from_rgb(0, 120, 200);
+            visuals.selection.bg_fill = Color32::from_rgb(0, 100, 180);
+            visuals.override_text_color = Some(Color32::from_rgb(200, 210, 230));
+        }
+    }
+    ctx.set_visuals(visuals);
+}
+
 /// Draw the full UI. Called each egui frame.
 pub fn draw_ui(
     ctx: &Context,
@@ -72,21 +156,11 @@ pub fn draw_ui(
     viz_points: &[(f32, f32, f32, f32, bool)],
     waveform: &Arc<Mutex<Vec<f32>>>,
     recording: &WavRecorder,
+    loop_export: &LoopExportPending,
+    bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>,
 ) {
-    // Apply neon dark visuals
-    {
-        let mut visuals = ctx.style().visuals.clone();
-        visuals.dark_mode = true;
-        visuals.window_fill = Color32::from_rgb(12, 12, 20);
-        visuals.panel_fill = Color32::from_rgb(12, 12, 20);
-        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(20, 20, 35);
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(25, 25, 45);
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(30, 30, 60);
-        visuals.widgets.active.bg_fill = Color32::from_rgb(0, 120, 200);
-        visuals.selection.bg_fill = Color32::from_rgb(0, 100, 180);
-        visuals.override_text_color = Some(Color32::from_rgb(200, 210, 230));
-        ctx.set_visuals(visuals);
-    }
+    let theme = state.lock().theme.clone();
+    apply_theme(ctx, &theme);
 
     let mut st = state.lock();
 
@@ -111,10 +185,26 @@ pub fn draw_ui(
         if i.key_pressed(Key::Num2) { st.viz_tab = 1; }
         if i.key_pressed(Key::Num3) { st.viz_tab = 2; }
         if i.key_pressed(Key::Num4) { st.viz_tab = 3; }
+        if i.key_pressed(Key::Num5) { st.viz_tab = 4; }
     });
 
     SidePanel::left("controls").min_width(300.0).max_width(340.0).show(ctx, |ui| {
         ScrollArea::vertical().show(ui, |ui| {
+
+            // ---- THEME ----
+            ui.horizontal(|ui| {
+                ui.label("Theme:");
+                for t in &["neon", "vaporwave", "crt", "solar"] {
+                    let selected = st.theme == *t;
+                    let color = if selected { Color32::from_rgb(0, 150, 220) } else { Color32::from_rgb(40, 40, 70) };
+                    if ui.add(Button::new(*t).fill(color).min_size(Vec2::new(60.0, 20.0))).clicked() {
+                        st.theme = t.to_string();
+                    }
+                }
+            });
+
+            ui.separator();
+
             // ---- PRESETS ----
             CollapsingHeader::new("PRESETS").default_open(true).show(ui, |ui| {
                 let preset_names: Vec<&str> = PRESETS.iter().map(|p| p.name).collect();
@@ -135,6 +225,37 @@ pub fn draw_ui(
                 }
                 if let Some(p) = PRESETS.iter().find(|p| p.name == st.selected_preset.as_str()) {
                     ui.label(egui::RichText::new(p.description).italics().color(Color32::from_rgb(140, 160, 200)));
+                }
+            });
+
+            ui.separator();
+
+            // ---- PATCHES ----
+            CollapsingHeader::new("PATCHES").default_open(false).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(TextEdit::singleline(&mut st.patch_name_input).desired_width(140.0).hint_text("Patch name..."));
+                    if ui.button("Save").clicked() {
+                        let name = st.patch_name_input.clone();
+                        if !name.is_empty() {
+                            save_patch(&name, &st.config);
+                            st.patch_list = list_patches();
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                let patches = st.patch_list.clone();
+                if patches.is_empty() {
+                    ui.label(RichText::new("No patches saved yet").color(Color32::from_rgb(100, 100, 120)).small());
+                } else {
+                    for patch_name in &patches {
+                        if ui.button(patch_name).clicked() {
+                            if let Some(cfg) = load_patch_file(patch_name) {
+                                st.config = cfg;
+                                st.system_changed = true;
+                                st.mode_changed = true;
+                            }
+                        }
+                    }
                 }
             });
 
@@ -236,18 +357,18 @@ pub fn draw_ui(
 
             // ---- SONIFICATION ----
             CollapsingHeader::new("SONIFICATION").default_open(true).show(ui, |ui| {
-                let modes = ["direct", "orbital", "granular", "spectral"];
+                let modes = ["direct", "orbital", "granular", "spectral", "fm"];
                 let current_mode = st.config.sonification.mode.clone();
-                ComboBox::from_label("Mode")
-                    .selected_text(&current_mode)
-                    .show_ui(ui, |ui| {
-                        for m in &modes {
-                            if ui.selectable_label(current_mode == *m, *m).clicked() {
-                                st.config.sonification.mode = m.to_string();
-                                st.mode_changed = true;
-                            }
+                ui.horizontal_wrapped(|ui| {
+                    for m in &modes {
+                        let selected = current_mode == *m;
+                        let color = if selected { Color32::from_rgb(0, 150, 220) } else { Color32::from_rgb(40, 40, 70) };
+                        if ui.add(Button::new(*m).fill(color).min_size(Vec2::new(55.0, 22.0))).clicked() {
+                            st.config.sonification.mode = m.to_string();
+                            st.mode_changed = true;
                         }
-                    });
+                    }
+                });
 
                 let scales = ["pentatonic", "chromatic", "just_intonation", "microtonal"];
                 let current_scale = st.config.sonification.scale.clone();
@@ -295,6 +416,24 @@ pub fn draw_ui(
                     ui.add(Slider::new(&mut st.config.sonification.voice_levels[i], 0.0..=1.0)
                         .text(format!("Voice {}", i + 1)));
                 }
+
+                // Per-voice waveform shapes
+                ui.add_space(4.0);
+                ui.label("Voice Waveforms:");
+                let shapes = ["sine", "triangle", "saw"];
+                for i in 0..4 {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("V{}:", i + 1));
+                        let current_shape = st.config.sonification.voice_shapes[i].clone();
+                        for s in &shapes {
+                            let selected = current_shape == *s;
+                            let color = if selected { Color32::from_rgb(0, 150, 220) } else { Color32::from_rgb(40, 40, 70) };
+                            if ui.add(Button::new(*s).fill(color).min_size(Vec2::new(50.0, 18.0))).clicked() {
+                                st.config.sonification.voice_shapes[i] = s.to_string();
+                            }
+                        }
+                    });
+                }
             });
 
             ui.separator();
@@ -304,6 +443,26 @@ pub fn draw_ui(
                 ui.add(Slider::new(&mut st.config.audio.reverb_wet, 0.0..=1.0).text("Reverb"));
                 ui.add(Slider::new(&mut st.config.audio.delay_ms, 0.0..=1000.0).text("Delay ms"));
                 ui.add(Slider::new(&mut st.config.audio.delay_feedback, 0.0..=0.95).text("Delay FB"));
+
+                // BPM Sync
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.add(Slider::new(&mut st.bpm, 60.0..=200.0).text("BPM"));
+                    let sync_color = if st.bpm_sync { Color32::from_rgb(0, 180, 0) } else { Color32::from_rgb(60, 60, 60) };
+                    if ui.add(Button::new("Sync").fill(sync_color).min_size(Vec2::new(44.0, 22.0))).clicked() {
+                        st.bpm_sync = !st.bpm_sync;
+                    }
+                });
+                if st.bpm_sync {
+                    ui.label(RichText::new(format!("Delay: {:.0}ms  LFO: {:.2}Hz", 60000.0 / st.bpm, st.bpm / 60.0 * 0.25))
+                        .small().color(Color32::from_rgb(100, 200, 100)));
+                }
+
+                // Bitcrusher
+                ui.add_space(4.0);
+                ui.label("Bitcrusher:");
+                ui.add(Slider::new(&mut st.config.audio.bit_depth, 1.0..=16.0).text("Bit Depth"));
+                ui.add(Slider::new(&mut st.config.audio.rate_crush, 0.0..=1.0).text("Rate Crush"));
             });
 
             ui.separator();
@@ -352,6 +511,78 @@ pub fn draw_ui(
 
                 ui.add_space(4.0);
 
+                // Loop Export
+                ui.horizontal(|ui| {
+                    ui.label("Bars:");
+                    let bars_options = [1u32, 2, 4, 8, 16];
+                    let current_bars = st.loop_bars;
+                    ComboBox::from_id_source("loop_bars")
+                        .selected_text(format!("{}", current_bars))
+                        .width(60.0)
+                        .show_ui(ui, |ui| {
+                            for &b in &bars_options {
+                                if ui.selectable_label(current_bars == b, format!("{}", b)).clicked() {
+                                    st.loop_bars = b;
+                                }
+                            }
+                        });
+
+                    let is_exporting = loop_export.try_lock().map(|p| p.is_some()).unwrap_or(false);
+                    let export_label = if is_exporting { "Exporting..." } else { "Export Loop" };
+                    let export_color = if is_exporting { Color32::from_rgb(180, 120, 0) } else { Color32::from_rgb(0, 100, 100) };
+                    if !is_exporting && ui.add(Button::new(export_label).fill(export_color)).clicked() {
+                        let bars = st.loop_bars;
+                        let bpm = st.bpm;
+                        let sr = st.sample_rate;
+                        // total samples = bars * beats_per_bar(4) * seconds_per_beat * sample_rate
+                        let total_samples = ((bars as f64 * 4.0 * 60.0 / bpm as f64) * sr as f64) as u64;
+                        if let Some(mut lock) = loop_export.try_lock() {
+                            *lock = Some(total_samples);
+                        }
+                    }
+                });
+
+                ui.add_space(4.0);
+
+                // Automation
+                CollapsingHeader::new("Automate").default_open(false).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let rec_color = if st.auto_recording { Color32::from_rgb(180, 30, 30) } else { Color32::from_rgb(60, 40, 40) };
+                        if ui.add(Button::new("⏺ Rec").fill(rec_color).min_size(Vec2::new(50.0, 24.0))).clicked() {
+                            st.auto_recording = !st.auto_recording;
+                            if st.auto_recording {
+                                st.auto_playing = false;
+                                st.auto_events.clear();
+                                st.auto_start_time = Instant::now();
+                            }
+                        }
+                        let play_color = if st.auto_playing { Color32::from_rgb(0, 150, 0) } else { Color32::from_rgb(40, 60, 40) };
+                        if ui.add(Button::new("▶ Play").fill(play_color).min_size(Vec2::new(50.0, 24.0))).clicked() {
+                            st.auto_playing = !st.auto_playing;
+                            if st.auto_playing {
+                                st.auto_recording = false;
+                                st.auto_play_pos = 0;
+                                st.auto_start_time = Instant::now();
+                            }
+                        }
+                        if ui.button("■ Stop").clicked() {
+                            st.auto_recording = false;
+                            st.auto_playing = false;
+                        }
+                    });
+                    ui.checkbox(&mut st.auto_loop, "Loop playback");
+                    ui.label(RichText::new(format!("{} events recorded", st.auto_events.len())).small()
+                        .color(Color32::from_rgb(100, 150, 200)));
+                    if st.auto_recording {
+                        ui.label(RichText::new("● Recording...").color(Color32::from_rgb(255, 80, 80)));
+                    }
+                    if st.auto_playing {
+                        ui.label(RichText::new("► Playing back").color(Color32::from_rgb(80, 255, 80)));
+                    }
+                });
+
+                ui.add_space(4.0);
+
                 // Save Config button
                 if ui.add(Button::new("💾  Save Config").fill(Color32::from_rgb(40, 60, 40)).min_size(Vec2::new(200.0, 28.0))).clicked() {
                     let toml_str = toml::to_string_pretty(&st.config).unwrap_or_default();
@@ -380,7 +611,7 @@ pub fn draw_ui(
                 );
 
                 ui.add_space(4.0);
-                ui.label(RichText::new("Space: pause  |  ↑↓: volume  |  ←→: speed  |  1-4: tabs")
+                ui.label(RichText::new("Space: pause  |  ↑↓: volume  |  ←→: speed  |  1-5: tabs")
                     .small()
                     .color(Color32::from_rgb(90, 100, 130)));
             });
@@ -391,12 +622,12 @@ pub fn draw_ui(
     CentralPanel::default().show(ctx, |ui| {
         // Tab bar
         ui.horizontal(|ui| {
-            let tabs = ["Phase Portrait", "Waveform", "Note Map", "Math View"];
+            let tabs = ["Phase Portrait", "Waveform", "Note Map", "Math View", "Bifurcation"];
             let mut viz_tab = st.viz_tab;
             for (i, name) in tabs.iter().enumerate() {
                 let selected = viz_tab == i;
                 let color = if selected { Color32::from_rgb(0, 150, 220) } else { Color32::from_rgb(60, 60, 90) };
-                let btn = Button::new(*name).fill(color).min_size(Vec2::new(120.0, 28.0));
+                let btn = Button::new(*name).fill(color).min_size(Vec2::new(110.0, 28.0));
                 if ui.add(btn).clicked() {
                     viz_tab = i;
                 }
@@ -418,6 +649,61 @@ pub fn draw_ui(
                     if ui.add(Button::new(*label).fill(color).min_size(Vec2::new(36.0, 22.0))).clicked() {
                         st.viz_projection = i;
                     }
+                }
+            });
+        }
+
+        // Bifurcation controls
+        if viz_tab == 4 {
+            ui.horizontal(|ui| {
+                let params = ["rho", "sigma", "coupling", "c"];
+                let current_bp = st.bifurc_param.clone();
+                ComboBox::from_id_source("bifurc_param")
+                    .selected_text(&current_bp)
+                    .width(100.0)
+                    .show_ui(ui, |ui| {
+                        for p in &params {
+                            if ui.selectable_label(current_bp == *p, *p).clicked() {
+                                st.bifurc_param = p.to_string();
+                            }
+                        }
+                    });
+                let computing = st.bifurc_computing;
+                let compute_color = if computing { Color32::from_rgb(100, 60, 0) } else { Color32::from_rgb(0, 80, 120) };
+                if !computing && ui.add(Button::new("Compute").fill(compute_color)).clicked() {
+                    st.bifurc_computing = true;
+                    // Start computation in background thread
+                    let param = st.bifurc_param.clone();
+                    let sys_name = st.config.system.name.clone();
+                    let lorenz_cfg = st.config.lorenz.clone();
+                    let rossler_cfg = st.config.rossler.clone();
+                    let kuramoto_cfg = st.config.kuramoto.clone();
+                    let bifurc_data_clone = bifurc_data.clone();
+                    let state_clone = state.clone();
+                    std::thread::spawn(move || {
+                        let mut result = Vec::new();
+                        let steps = 200usize;
+                        let (pmin, pmax) = param_range(&param);
+                        for i in 0..steps {
+                            let pval = pmin + (pmax - pmin) * i as f64 / (steps - 1) as f64;
+                            let mut sys: Box<dyn DynamicalSystem> = build_bifurc_system(&sys_name, &param, pval, &lorenz_cfg, &rossler_cfg, &kuramoto_cfg);
+                            // Warmup
+                            for _ in 0..2000 { sys.step(0.005); }
+                            // Record
+                            for _ in 0..100 {
+                                sys.step(0.005);
+                                let state_v = sys.state();
+                                if !state_v.is_empty() {
+                                    result.push((pval as f32, state_v[0] as f32));
+                                }
+                            }
+                        }
+                        *bifurc_data_clone.lock() = result;
+                        state_clone.lock().bifurc_computing = false;
+                    });
+                }
+                if computing {
+                    ui.label(RichText::new("Computing...").color(Color32::from_rgb(255, 200, 0)));
                 }
             });
         }
@@ -447,9 +733,78 @@ pub fn draw_ui(
             1 => draw_waveform(ui, waveform),
             2 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
             3 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases),
+            4 => draw_bifurc_diagram(ui, bifurc_data),
             _ => {}
         }
     });
+}
+
+fn param_range(param: &str) -> (f64, f64) {
+    match param {
+        "rho" => (20.0, 50.0),
+        "sigma" => (5.0, 20.0),
+        "coupling" => (0.0, 5.0),
+        "c" => (3.0, 10.0),
+        _ => (0.0, 1.0),
+    }
+}
+
+fn build_bifurc_system(
+    sys_name: &str,
+    param: &str,
+    pval: f64,
+    lorenz: &crate::config::LorenzConfig,
+    rossler: &crate::config::RosslerConfig,
+    kuramoto: &crate::config::KuramotoConfig,
+) -> Box<dyn DynamicalSystem> {
+    match (sys_name, param) {
+        ("lorenz", "rho") => Box::new(Lorenz::new(lorenz.sigma, pval, lorenz.beta)),
+        ("lorenz", "sigma") => Box::new(Lorenz::new(pval, lorenz.rho, lorenz.beta)),
+        ("rossler", "c") => Box::new(Rossler::new(rossler.a, rossler.b, pval)),
+        ("kuramoto", "coupling") => Box::new(Kuramoto::new(kuramoto.n_oscillators, pval)),
+        _ => Box::new(Lorenz::new(lorenz.sigma, pval.clamp(20.0, 50.0), lorenz.beta)),
+    }
+}
+
+fn draw_bifurc_diagram(ui: &mut Ui, bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>) {
+    let avail = ui.available_size();
+    let (response, painter) = ui.allocate_painter(avail, Sense::hover());
+    let rect = response.rect;
+    painter.rect_filled(rect, 0.0, Color32::from_rgb(8, 8, 18));
+
+    let data = if let Some(d) = bifurc_data.try_lock() { d.clone() } else { return; };
+
+    if data.is_empty() {
+        painter.text(rect.center(), Align2::CENTER_CENTER,
+            "Click 'Compute' to generate bifurcation diagram",
+            FontId::proportional(16.0), Color32::from_rgb(80, 80, 120));
+        return;
+    }
+
+    let mut min_x = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut min_y = f32::MAX;
+    let mut max_y = f32::MIN;
+    for &(x, y) in &data {
+        min_x = min_x.min(x); max_x = max_x.max(x);
+        min_y = min_y.min(y); max_y = max_y.max(y);
+    }
+    let rx = (max_x - min_x).max(1e-3);
+    let ry = (max_y - min_y).max(1e-3);
+    let pad = 20.0f32;
+
+    for &(x, y) in &data {
+        let sx = rect.left() + pad + ((x - min_x) / rx) * (rect.width() - 2.0 * pad);
+        let sy = rect.bottom() - pad - ((y - min_y) / ry) * (rect.height() - 2.0 * pad);
+        painter.circle_filled(Pos2::new(sx, sy), 1.0, Color32::from_rgba_premultiplied(0, 200, 255, 180));
+    }
+
+    painter.text(rect.left_top() + Vec2::new(8.0, 8.0), Align2::LEFT_TOP,
+        format!("Bifurcation Diagram  ({} points)", data.len()),
+        FontId::proportional(12.0), Color32::from_rgb(120, 140, 180));
+    painter.text(rect.center_bottom() + Vec2::new(0.0, -12.0), Align2::CENTER_BOTTOM,
+        format!("Parameter: {:.2} .. {:.2}", min_x, max_x),
+        FontId::proportional(10.0), Color32::from_rgb(100, 120, 160));
 }
 
 fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {

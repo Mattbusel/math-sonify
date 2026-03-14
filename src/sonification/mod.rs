@@ -2,16 +2,19 @@ pub mod direct;
 pub mod orbital;
 pub mod granular;
 pub mod spectral;
+pub mod fm;
 
 pub use direct::DirectMapping;
 pub use orbital::OrbitalResonance;
 pub use granular::GranularMapping;
 pub use spectral::SpectralMapping;
+pub use fm::FmMapping;
 
 use crate::config::SonificationConfig;
+use crate::synth::OscShape;
 
 /// Parameters computed from the dynamical system state, consumed by the audio thread.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AudioParams {
     /// Oscillator frequencies for voices (Hz).
     pub freqs: [f32; 4],
@@ -52,6 +55,49 @@ pub struct AudioParams {
     pub delay_ms: f32,
     /// Delay feedback (0..1).
     pub delay_feedback: f32,
+    /// FM synthesis parameters
+    pub fm_carrier_freq: f32,
+    pub fm_mod_ratio: f32,
+    pub fm_mod_index: f32,
+    /// Per-voice waveform shapes
+    pub voice_shapes: [OscShape; 4],
+    /// Bitcrusher parameters
+    pub bit_depth: f32,
+    pub rate_crush: f32,
+}
+
+impl Default for AudioParams {
+    fn default() -> Self {
+        Self {
+            freqs: [0.0; 4],
+            amps: [0.0; 4],
+            filter_cutoff: 0.0,
+            filter_q: 0.0,
+            pans: [0.0; 4],
+            grain_spawn_rate: 0.0,
+            grain_base_freq: 0.0,
+            grain_freq_spread: 0.0,
+            partials: [0.0; 32],
+            partials_base_freq: 0.0,
+            mode: SonifMode::Direct,
+            gain: 0.0,
+            transpose_semitones: 0.0,
+            chord_intervals: [0.0; 3],
+            voice_levels: [1.0, 0.8, 0.6, 0.4],
+            portamento_ms: 80.0,
+            chaos_level: 0.0,
+            master_volume: 0.7,
+            reverb_wet: 0.4,
+            delay_ms: 300.0,
+            delay_feedback: 0.3,
+            fm_carrier_freq: 220.0,
+            fm_mod_ratio: 2.0,
+            fm_mod_index: 1.0,
+            voice_shapes: [OscShape::Sine; 4],
+            bit_depth: 16.0,
+            rate_crush: 0.0,
+        }
+    }
 }
 
 pub fn chord_intervals_for(mode: &str) -> [f32; 3] {
@@ -67,7 +113,7 @@ pub fn chord_intervals_for(mode: &str) -> [f32; 3] {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum SonifMode { #[default] Direct, Orbital, Granular, Spectral }
+pub enum SonifMode { #[default] Direct, Orbital, Granular, Spectral, FM }
 
 impl std::fmt::Display for SonifMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -76,6 +122,7 @@ impl std::fmt::Display for SonifMode {
             Self::Orbital => write!(f, "Orbital"),
             Self::Granular => write!(f, "Granular"),
             Self::Spectral => write!(f, "Spectral"),
+            Self::FM => write!(f, "FM"),
         }
     }
 }

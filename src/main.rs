@@ -4,7 +4,7 @@ mod synth;
 mod audio;
 mod config;
 mod ui;
-mod presets;
+mod patches;
 
 use std::sync::Arc;
 use std::thread;
@@ -17,10 +17,11 @@ use crate::config::{Config, load_config};
 use crate::systems::*;
 use crate::sonification::{
     AudioParams, Sonification,
-    DirectMapping, OrbitalResonance, GranularMapping, SpectralMapping,
+    DirectMapping, OrbitalResonance, GranularMapping, SpectralMapping, FmMapping,
     chord_intervals_for,
 };
-use crate::audio::{AudioEngine, WavRecorder};
+use crate::audio::{AudioEngine, WavRecorder, LoopExportPending};
+use crate::synth::OscShape;
 use midir;
 use crate::ui::{AppState, SharedState, draw_ui};
 
@@ -37,7 +38,6 @@ fn main() -> anyhow::Result<()> {
     let shared = Arc::new(Mutex::new(AppState::new(config.clone())));
 
     // Visualization history (shared between sim and UI)
-    // Tuple: (x, y, z, speed_norm, is_crossing)
     let viz_history: Arc<Mutex<Vec<(f32, f32, f32, f32, bool)>>> =
         Arc::new(Mutex::new(Vec::with_capacity(2000)));
 
@@ -47,6 +47,12 @@ fn main() -> anyhow::Result<()> {
 
     // WAV recording shared state
     let recording: WavRecorder = Arc::new(parking_lot::Mutex::new(None));
+
+    // Loop export pending
+    let loop_export: LoopExportPending = Arc::new(parking_lot::Mutex::new(None));
+
+    // Bifurcation data
+    let bifurc_data: Arc<Mutex<Vec<(f32, f32)>>> = Arc::new(Mutex::new(Vec::new()));
 
     // Channel: sim thread -> audio thread
     let (tx, rx) = bounded::<AudioParams>(CHANNEL_CAP);
@@ -61,6 +67,7 @@ fn main() -> anyhow::Result<()> {
         config.audio.master_volume,
         waveform_buf.clone(),
         recording.clone(),
+        loop_export.clone(),
     )?;
 
     // Store actual sample rate in AppState
@@ -93,6 +100,8 @@ fn main() -> anyhow::Result<()> {
                 viz_history: viz_history.clone(),
                 waveform_buf: waveform_buf.clone(),
                 recording: recording.clone(),
+                loop_export: loop_export.clone(),
+                bifurc_data: bifurc_data.clone(),
             })
         }),
     ).map_err(|e| anyhow::anyhow!("eframe error: {e}"))?;
@@ -105,12 +114,15 @@ struct SonifyApp {
     viz_history: Arc<Mutex<Vec<(f32, f32, f32, f32, bool)>>>,
     waveform_buf: Arc<parking_lot::Mutex<Vec<f32>>>,
     recording: WavRecorder,
+    loop_export: LoopExportPending,
+    bifurc_data: Arc<Mutex<Vec<(f32, f32)>>>,
 }
 
 impl eframe::App for SonifyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let points = self.viz_history.lock().clone();
-        draw_ui(ctx, &self.shared, &points, &self.waveform_buf, &self.recording);
+        draw_ui(ctx, &self.shared, &points, &self.waveform_buf, &self.recording,
+                &self.loop_export, &self.bifurc_data);
         ctx.request_repaint_after(Duration::from_millis(33)); // ~30 fps UI
     }
 }
@@ -132,6 +144,10 @@ fn sim_thread(
     let control_period = Duration::from_secs_f64(1.0 / control_rate_hz);
     let mut next_tick = Instant::now();
 
+    // Automation state
+    let mut auto_snapshot_timer = 0u64;
+    let auto_snapshot_interval = 12u64; // every ~100ms at 120Hz
+
     loop {
         let now = Instant::now();
         if now < next_tick {
@@ -139,7 +155,7 @@ fn sim_thread(
         }
         next_tick += control_period;
 
-        let (paused, mut config, sys_changed, mode_changed) = {
+        let (paused, mut config, sys_changed, mode_changed, bpm_sync, bpm, auto_recording, auto_playing) = {
             let mut st = shared.lock();
             let p = st.paused;
             let c = st.config.clone();
@@ -147,12 +163,22 @@ fn sim_thread(
             let mc = st.mode_changed;
             st.system_changed = false;
             st.mode_changed = false;
-            (p, c, sc, mc)
+            let bs = st.bpm_sync;
+            let bm = st.bpm;
+            let ar = st.auto_recording;
+            let ap = st.auto_playing;
+            (p, c, sc, mc, bs, bm, ar, ap)
         };
 
         if paused { continue; }
         if sys_changed  { system = build_system(&config); }
         if mode_changed { mapper = build_mapper(&config.sonification.mode); }
+
+        // Apply BPM sync to delay and LFO rate
+        if bpm_sync {
+            config.audio.delay_ms = 60000.0 / bpm;
+            // BPM LFO sync handled in LFO block below
+        }
 
         // Apply LFO modulation
         let (lfo_enabled, lfo_rate, lfo_depth, lfo_target, lfo_phase) = {
@@ -160,8 +186,14 @@ fn sim_thread(
             (st.lfo_enabled, st.lfo_rate, st.lfo_depth, st.lfo_target.clone(), st.lfo_phase)
         };
 
+        let effective_lfo_rate = if bpm_sync {
+            bpm / 60.0 * 0.25
+        } else {
+            lfo_rate
+        };
+
         if lfo_enabled {
-            let new_phase = lfo_phase + lfo_rate as f64 * (1.0 / control_rate_hz);
+            let new_phase = lfo_phase + effective_lfo_rate as f64 * (1.0 / control_rate_hz);
             shared.lock().lfo_phase = new_phase;
             let lfo_val = new_phase.sin() * lfo_depth as f64;
             match lfo_target.as_str() {
@@ -173,6 +205,66 @@ fn sim_thread(
                 "coupling" => config.kuramoto.coupling = (config.kuramoto.coupling * (1.0 + lfo_val)).max(0.0),
                 "speed" => config.system.speed = (config.system.speed * (1.0 + lfo_val)).clamp(0.05, 20.0),
                 _ => {}
+            }
+        }
+
+        // Automation recording
+        if auto_recording {
+            auto_snapshot_timer += 1;
+            if auto_snapshot_timer >= auto_snapshot_interval {
+                auto_snapshot_timer = 0;
+                let elapsed = {
+                    let st = shared.lock();
+                    st.auto_start_time.elapsed().as_secs_f64()
+                };
+                let events = vec![
+                    (elapsed, "master_volume".to_string(), config.audio.master_volume as f64),
+                    (elapsed, "reverb_wet".to_string(), config.audio.reverb_wet as f64),
+                    (elapsed, "delay_ms".to_string(), config.audio.delay_ms as f64),
+                    (elapsed, "speed".to_string(), config.system.speed),
+                    (elapsed, "sigma".to_string(), config.lorenz.sigma),
+                    (elapsed, "rho".to_string(), config.lorenz.rho),
+                    (elapsed, "coupling".to_string(), config.kuramoto.coupling),
+                ];
+                let mut st = shared.lock();
+                st.auto_events.extend(events);
+            }
+        }
+
+        // Automation playback
+        if auto_playing {
+            let (pos, total, start_time) = {
+                let st = shared.lock();
+                (st.auto_play_pos, st.auto_events.len(), st.auto_start_time)
+            };
+            if total > 0 {
+                let elapsed = start_time.elapsed().as_secs_f64();
+                // Apply events up to current elapsed time
+                let events_clone = shared.lock().auto_events.clone();
+                let mut new_pos = pos;
+                for (i, (t, ref param, val)) in events_clone.iter().enumerate() {
+                    if i < pos { continue; }
+                    if *t <= elapsed {
+                        match param.as_str() {
+                            "master_volume" => shared.lock().config.audio.master_volume = *val as f32,
+                            "reverb_wet" => shared.lock().config.audio.reverb_wet = *val as f32,
+                            "delay_ms" => shared.lock().config.audio.delay_ms = *val as f32,
+                            "speed" => shared.lock().config.system.speed = *val,
+                            "sigma" => shared.lock().config.lorenz.sigma = *val,
+                            "rho" => shared.lock().config.lorenz.rho = *val,
+                            "coupling" => shared.lock().config.kuramoto.coupling = *val,
+                            _ => {}
+                        }
+                        new_pos = i + 1;
+                    }
+                }
+                // Loop: if we've reached the end, reset
+                if new_pos >= total {
+                    shared.lock().auto_play_pos = 0;
+                    shared.lock().auto_start_time = Instant::now();
+                } else {
+                    shared.lock().auto_play_pos = new_pos;
+                }
             }
         }
 
@@ -195,7 +287,6 @@ fn sim_thread(
                 }
                 let speed_norm = (system.speed() as f32 / 100.0).clamp(0.0, 1.0);
                 let z = if state.len() >= 3 { state[2] as f32 } else { 0.0 };
-                // Detect upward z-crossing (Poincaré section)
                 let prev_z = vh.last().map(|p| p.2).unwrap_or(0.0);
                 let mean_z_approx = 25.0f32;
                 let is_crossing = prev_z < mean_z_approx && z >= mean_z_approx;
@@ -212,11 +303,21 @@ fn sim_thread(
         params.voice_levels = config.sonification.voice_levels;
         params.portamento_ms = config.sonification.portamento_ms;
 
-        // Fill audio effect fields from config (so audio thread reads them dynamically)
+        // Fill audio effect fields from config
         params.master_volume = config.audio.master_volume;
         params.reverb_wet = config.audio.reverb_wet;
         params.delay_ms = config.audio.delay_ms;
         params.delay_feedback = config.audio.delay_feedback;
+        params.bit_depth = config.audio.bit_depth;
+        params.rate_crush = config.audio.rate_crush;
+
+        // Voice shapes from config
+        params.voice_shapes = [
+            osc_shape_from_str(&config.sonification.voice_shapes[0]),
+            osc_shape_from_str(&config.sonification.voice_shapes[1]),
+            osc_shape_from_str(&config.sonification.voice_shapes[2]),
+            osc_shape_from_str(&config.sonification.voice_shapes[3]),
+        ];
 
         // Update shared state from simulation
         {
@@ -224,7 +325,6 @@ fn sim_thread(
             st.chaos_level = params.chaos_level;
             st.current_state = system.state().to_vec();
             st.current_deriv = system.current_deriv();
-            // For Kuramoto: store phases and order param
             if config.system.name == "kuramoto" {
                 st.kuramoto_phases = system.state().to_vec();
                 st.order_param = {
@@ -242,6 +342,14 @@ fn sim_thread(
         }
 
         let _ = tx.try_send(params);
+    }
+}
+
+fn osc_shape_from_str(s: &str) -> OscShape {
+    match s {
+        "triangle" => OscShape::Triangle,
+        "saw" => OscShape::Saw,
+        _ => OscShape::Sine,
     }
 }
 
@@ -264,6 +372,7 @@ fn build_mapper(mode: &str) -> Box<dyn Sonification> {
         "orbital"  => Box::new(OrbitalResonance::new()),
         "granular" => Box::new(GranularMapping::new()),
         "spectral" => Box::new(SpectralMapping::new()),
+        "fm"       => Box::new(FmMapping::new()),
         _          => Box::new(DirectMapping::new()),
     }
 }
@@ -332,7 +441,6 @@ fn start_midi_thread(shared: SharedState) {
                 }
             }
 
-            // Chaos as CC#1 (mod wheel) on channel 0
             let new_chaos_val = (chaos * 127.0) as u8;
             if (chaos - last_chaos).abs() > 0.01 {
                 let _ = conn.send(&[0xB0, 1, new_chaos_val]);

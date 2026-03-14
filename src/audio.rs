@@ -10,10 +10,12 @@ use crossbeam_channel::Receiver;
 
 use crate::sonification::{AudioParams, SonifMode};
 use crate::synth::{
-    Oscillator, OscShape, BiquadFilter, Freeverb, DelayLine, Limiter, GrainEngine,
+    Oscillator, OscShape, BiquadFilter, Freeverb, DelayLine, Limiter, GrainEngine, Bitcrusher,
 };
 
 pub type WavRecorder = Arc<parking_lot::Mutex<Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>>>;
+/// When Some(n), audio thread records n more samples then finalizes.
+pub type LoopExportPending = Arc<parking_lot::Mutex<Option<u64>>>;
 
 pub struct AudioEngine {
     _stream: Stream,
@@ -29,6 +31,7 @@ impl AudioEngine {
         master_volume: f32,
         waveform: Arc<Mutex<Vec<f32>>>,
         recording: WavRecorder,
+        loop_export: LoopExportPending,
     ) -> anyhow::Result<(Self, u32)> {
         let host = cpal::default_host();
         let device = host.default_output_device()
@@ -41,9 +44,7 @@ impl AudioEngine {
         log::info!("Audio: {} Hz, {:?}", actual_sr, fmt);
 
         let sr = actual_sr as f32;
-        // Initialize with config values; thereafter updated dynamically via AudioParams
-        let synth_state = Arc::new(Mutex::new(SynthState::new(sr, reverb_wet, delay_ms, delay_feedback, waveform, recording)));
-        // Store master_volume in the SynthState initial value
+        let synth_state = Arc::new(Mutex::new(SynthState::new(sr, reverb_wet, delay_ms, delay_feedback, waveform, recording, loop_export)));
         synth_state.lock().master_volume = master_volume;
         let synth_state_clone = synth_state.clone();
         let stream_config = default_config.config();
@@ -119,6 +120,7 @@ struct SynthState {
     delay: DelayLine,
     limiter: Limiter,
     grains: GrainEngine,
+    bitcrusher: Bitcrusher,
     partial_phases: [f32; 32],
     amp_smooth: [f32; 4],
     freq_smooth: [f32; 4],
@@ -126,12 +128,17 @@ struct SynthState {
     chord_freq_smooth: [f32; 3],
     freq_smooth_rate: f32,
     chord_intervals: [f32; 3],
+    fm_phase: f32,
+    fm_mod_phase: f32,
     pub waveform: Arc<Mutex<Vec<f32>>>,
     pub recording: WavRecorder,
+    pub loop_export: LoopExportPending,
+    loop_recorder: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>,
 }
 
 impl SynthState {
-    fn new(sample_rate: f32, reverb_wet: f32, delay_ms: f32, delay_feedback: f32, waveform: Arc<Mutex<Vec<f32>>>, recording: WavRecorder) -> Self {
+    fn new(sample_rate: f32, reverb_wet: f32, delay_ms: f32, delay_feedback: f32,
+           waveform: Arc<Mutex<Vec<f32>>>, recording: WavRecorder, loop_export: LoopExportPending) -> Self {
         let mut reverb = Freeverb::new(sample_rate);
         reverb.wet = reverb_wet;
         let mut delay = DelayLine::new(2000.0, sample_rate);
@@ -156,6 +163,7 @@ impl SynthState {
             delay,
             limiter: Limiter::new(-1.0, 5.0, sample_rate),
             grains: GrainEngine::new(sample_rate),
+            bitcrusher: Bitcrusher::new(),
             partial_phases: [0.0; 32],
             amp_smooth: [0.0; 4],
             freq_smooth: [220.0, 440.0, 660.0, 880.0],
@@ -163,8 +171,12 @@ impl SynthState {
             chord_freq_smooth: [330.0, 440.0, 550.0],
             freq_smooth_rate: 0.01,
             chord_intervals: [0.0; 3],
+            fm_phase: 0.0,
+            fm_mod_phase: 0.0,
             waveform,
             recording,
+            loop_export,
+            loop_recorder: None,
         }
     }
 
@@ -175,11 +187,17 @@ impl SynthState {
         self.grains.freq_spread = params.grain_freq_spread;
         self.freq_smooth_rate = (1.0 / (params.portamento_ms.max(1.0) * 0.001 * self.sample_rate)).clamp(0.001, 1.0);
         self.chord_intervals = params.chord_intervals;
-        // Route dynamic audio parameters from config through AudioParams
         self.master_volume = params.master_volume;
         self.reverb.wet = params.reverb_wet;
         self.delay.feedback = params.delay_feedback;
         self.delay.set_delay_ms(params.delay_ms, self.sample_rate);
+        // Bitcrusher
+        self.bitcrusher.bit_depth = params.bit_depth;
+        self.bitcrusher.rate_crush = params.rate_crush;
+        // Voice shapes
+        for i in 0..4 {
+            self.oscs[i].shape = params.voice_shapes[i];
+        }
         self.params = params;
     }
 
@@ -198,10 +216,15 @@ impl SynthState {
             SonifMode::Direct | SonifMode::Orbital => self.synth_additive_voices(),
             SonifMode::Granular => self.grains.next_sample(),
             SonifMode::Spectral => self.synth_spectral(),
+            SonifMode::FM => self.synth_fm(),
         };
 
         let lf = self.filter.process(l);
         let rf = self.filter.process(r);
+
+        // Bitcrusher
+        let lf = self.bitcrusher.process(lf);
+        let rf = self.bitcrusher.process(rf);
 
         let (ld, rd) = self.delay.process(lf, rf);
         let (lrev, rrev) = self.reverb.process(ld, rd);
@@ -222,10 +245,54 @@ impl SynthState {
             }
         }
 
+        // Loop export countdown (non-blocking check)
+        self.handle_loop_export(lo, ro);
+
         (lo, ro)
     }
 
-    /// Simple polyphonic sine voices (Direct / Orbital modes).
+    fn handle_loop_export(&mut self, lo: f32, ro: f32) {
+        // Check if a loop export has been requested
+        if let Some(mut pending) = self.loop_export.try_lock() {
+            match *pending {
+                Some(n) if n > 0 => {
+                    // We're actively loop-recording
+                    if self.loop_recorder.is_none() {
+                        // Start loop recorder
+                        let secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        let filename = format!("loop_{}.wav", secs);
+                        let spec = hound::WavSpec {
+                            channels: 2,
+                            sample_rate: self.sample_rate as u32,
+                            bits_per_sample: 32,
+                            sample_format: hound::SampleFormat::Float,
+                        };
+                        if let Ok(writer) = hound::WavWriter::create(&filename, spec) {
+                            self.loop_recorder = Some(writer);
+                        }
+                    }
+                    if let Some(ref mut writer) = self.loop_recorder {
+                        let _ = writer.write_sample(lo);
+                        let _ = writer.write_sample(ro);
+                    }
+                    *pending = Some(n - 1);
+                }
+                Some(0) => {
+                    // Done, finalize
+                    if let Some(writer) = self.loop_recorder.take() {
+                        let _ = writer.finalize();
+                    }
+                    *pending = None;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Simple polyphonic voices (Direct / Orbital modes).
     fn synth_additive_voices(&mut self) -> (f32, f32) {
         let gain = self.params.gain;
         let transpose_ratio = 2.0f32.powf(self.params.transpose_semitones / 12.0);
@@ -261,7 +328,6 @@ impl SynthState {
                 l += sig * (1.0 - pan.max(0.0));
                 r += sig * (1.0 + pan.min(0.0));
             } else {
-                // Drive oscillator even when silent to keep phase consistent
                 self.chord_amp_smooth[k] += 0.005 * (0.0 - self.chord_amp_smooth[k]);
             }
         }
@@ -284,5 +350,22 @@ impl SynthState {
         }
         let mono = out * gain;
         (mono, mono)
+    }
+
+    /// 2-operator FM synthesis.
+    fn synth_fm(&mut self) -> (f32, f32) {
+        use std::f32::consts::TAU;
+        let carrier_freq = self.params.fm_carrier_freq;
+        let mod_freq = carrier_freq * self.params.fm_mod_ratio;
+        let mod_index = self.params.fm_mod_index;
+        let gain = self.params.gain;
+
+        // Advance modulator phase
+        self.fm_mod_phase = (self.fm_mod_phase + TAU * mod_freq / self.sample_rate) % TAU;
+        // Advance carrier phase with FM
+        self.fm_phase = (self.fm_phase + TAU * carrier_freq / self.sample_rate + mod_index * self.fm_mod_phase.sin()) % TAU;
+
+        let out = self.fm_phase.sin() * gain;
+        (out, out)
     }
 }

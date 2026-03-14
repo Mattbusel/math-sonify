@@ -1,7 +1,7 @@
 use std::f32::consts::TAU;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum OscShape { Sine, Triangle, Saw }
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum OscShape { #[default] Sine, Triangle, Saw }
 
 pub struct Oscillator {
     phase: f32,

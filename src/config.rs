@@ -71,6 +71,7 @@ pub struct SonificationConfig {
     pub chord_mode: String,
     pub voice_levels: [f32; 4],
     pub portamento_ms: f32,
+    pub voice_shapes: [String; 4],
 }
 
 impl Default for SonificationConfig {
@@ -84,6 +85,7 @@ impl Default for SonificationConfig {
             chord_mode: "none".into(),
             voice_levels: [1.0, 0.8, 0.6, 0.4],
             portamento_ms: 80.0,
+            voice_shapes: ["sine".into(), "sine".into(), "sine".into(), "sine".into()],
         }
     }
 }
@@ -97,6 +99,8 @@ pub struct AudioConfig {
     pub delay_ms: f32,
     pub delay_feedback: f32,
     pub master_volume: f32,
+    pub bit_depth: f32,
+    pub rate_crush: f32,
 }
 
 impl Default for AudioConfig {
@@ -108,6 +112,8 @@ impl Default for AudioConfig {
             delay_ms: 300.0,
             delay_feedback: 0.3,
             master_volume: 0.7,
+            bit_depth: 16.0,
+            rate_crush: 0.0,
         }
     }
 }
@@ -170,7 +176,7 @@ impl Default for KuramotoConfig {
 impl From<&str> for SonifMode {
     fn from(s: &str) -> Self {
         match s { "orbital" => Self::Orbital, "granular" => Self::Granular,
-                  "spectral" => Self::Spectral, _ => Self::Direct }
+                  "spectral" => Self::Spectral, "fm" => Self::FM, _ => Self::Direct }
     }
 }
 
