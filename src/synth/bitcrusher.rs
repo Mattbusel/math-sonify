@@ -11,13 +11,22 @@ impl Bitcrusher {
     }
 
     pub fn process(&mut self, x: f32) -> f32 {
-        // Rate crusher: hold sample
-        self.sample_counter += self.rate_crush + 0.01;
-        if self.sample_counter >= 1.0 {
-            self.sample_counter = 0.0;
-            // Bit crusher: quantize
+        // Bit crush (bypass at 16 bits)
+        let crushed = if self.bit_depth < 15.9 {
             let levels = 2.0f32.powf(self.bit_depth.clamp(1.0, 16.0));
-            self.sample_hold = (x * levels).round() / levels;
+            (x * levels).round() / levels
+        } else {
+            x
+        };
+
+        // Rate crush (bypass at 0)
+        if self.rate_crush < 0.001 {
+            return crushed;
+        }
+        self.sample_counter += self.rate_crush;
+        if self.sample_counter >= 1.0 {
+            self.sample_counter -= 1.0;
+            self.sample_hold = crushed;
         }
         self.sample_hold
     }

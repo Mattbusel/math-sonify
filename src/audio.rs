@@ -361,11 +361,11 @@ impl SynthState {
         let gain = self.params.gain;
 
         // Advance modulator phase
-        self.fm_mod_phase = (self.fm_mod_phase + TAU * mod_freq / self.sample_rate) % TAU;
-        // Advance carrier phase with FM
-        self.fm_phase = (self.fm_phase + TAU * carrier_freq / self.sample_rate + mod_index * self.fm_mod_phase.sin()) % TAU;
+        self.fm_mod_phase = (self.fm_mod_phase + TAU * mod_freq / self.sample_rate).rem_euclid(TAU);
+        // PM-style FM: output = sin(carrier_phase + mod_index * sin(mod_phase))
+        self.fm_phase = (self.fm_phase + TAU * carrier_freq / self.sample_rate).rem_euclid(TAU);
 
-        let out = self.fm_phase.sin() * gain;
+        let out = (self.fm_phase + mod_index * self.fm_mod_phase.sin()).sin() * gain;
         (out, out)
     }
 }

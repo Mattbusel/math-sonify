@@ -27,7 +27,7 @@ impl Oscillator {
                 2.0 * (t - (t + 0.5).floor())
             }
         };
-        self.phase = (self.phase + TAU * self.freq / self.sample_rate) % TAU;
+        self.phase = (self.phase + TAU * self.freq / self.sample_rate).rem_euclid(TAU);
         out
     }
 }
