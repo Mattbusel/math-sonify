@@ -196,6 +196,12 @@ pub struct AppState {
     pub last_volume_for_creep: f32,
     /// True while we're recording a single-pass render of the generated arrangement
     pub save_gen_pending: bool,
+    // Invisible behavioral fields (new batch)
+    pub scars: Vec<(f32, f32)>,       // SCARRING: near-divergence marks
+    pub shutdown_fading: bool,         // DYING GRACEFULLY: audio fade on close
+    pub startup_ramp_t: f32,           // DYING GRACEFULLY: startup volume ramp
+    pub time_of_day_f: f32,            // PHOTOTROPISM: 0=midnight 1=noon
+    pub wounded: bool,                 // WOUND HEALING: crashed last session
 }
 
 #[derive(Clone)]
@@ -357,6 +363,11 @@ impl AppState {
             lunar_phase: 0.0,
             last_volume_for_creep: 0.7,
             save_gen_pending: false,
+            scars: Vec::new(),
+            shutdown_fading: false,
+            startup_ramp_t: 0.0,
+            time_of_day_f: 0.5,
+            wounded: false,
         }
     }
 }
@@ -568,8 +579,9 @@ pub fn draw_ui(
             let (ag, ag_sep) = { let st = state.lock(); (st.anaglyph_3d, st.anaglyph_separation) };
             let (pg, pi) = { let st = state.lock(); (st.portrait_ghosts.clone(), st.portrait_ink.clone()) };
             let lunar = { state.lock().lunar_phase };
+            let (scars_perf, tod_perf) = { let st = state.lock(); (st.scars.clone(), st.time_of_day_f) };
             draw_phase_portrait(ui, viz_points, &system_name, &mode_name,
-                &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, ag, ag_sep, &pg, &pi, lunar);
+                &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, ag, ag_sep, &pg, &pi, lunar, &scars_perf, tod_perf);
             // Dim hint in corner
             let rect = ui.min_rect();
             ui.painter().text(
@@ -859,9 +871,13 @@ pub fn draw_ui(
             let st = state.lock();
             (st.portrait_ghosts.clone(), st.portrait_ink.clone(), st.lunar_phase)
         };
+        let (scars_main, tod_main) = {
+            let st = state.lock();
+            (st.scars.clone(), st.time_of_day_f)
+        };
 
         match viz_tab {
-            0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, anaglyph_3d, anaglyph_separation, &ghosts, &ink, lunar_phase2),
+            0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, anaglyph_3d, anaglyph_separation, &ghosts, &ink, lunar_phase2, &scars_main, tod_main),
             1 => draw_mixer_tab(ui, state, viz_points),
             2 => draw_arrange_tab(ui, state, recording),
             3 => draw_waveform(ui, waveform),
@@ -2534,6 +2550,8 @@ fn draw_phase_portrait(
     ghosts: &[(Vec<(f32, f32)>, std::time::Instant)],
     ink: &[(f32, f32)],
     lunar_phase: f32,
+    scars: &[(f32, f32)],
+    time_of_day_f: f32,
 ) {
     let avail = ui.available_size();
     let (response, painter) = ui.allocate_painter(avail, Sense::hover());
@@ -2628,6 +2646,43 @@ fn draw_phase_portrait(
             painter.add(egui::Shape::mesh(mesh));
         }
     }
+
+    // SCARRING: faint magenta × marks at near-divergence points
+    if !scars.is_empty() {
+        let scar_col = Color32::from_rgba_premultiplied(150, 0, 80, 20);
+        let mut scar_mesh = egui::Mesh::default();
+        for &(sx, sy) in scars {
+            let sp = to_screen(sx, sy);
+            if rect.contains(sp) {
+                let arm = 3.0f32;
+                let half_w = 0.6f32;
+                // Horizontal bar
+                let base = scar_mesh.vertices.len() as u32;
+                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-arm, -half_w), uv: egui::epaint::WHITE_UV, color: scar_col });
+                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( arm, -half_w), uv: egui::epaint::WHITE_UV, color: scar_col });
+                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( arm,  half_w), uv: egui::epaint::WHITE_UV, color: scar_col });
+                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-arm,  half_w), uv: egui::epaint::WHITE_UV, color: scar_col });
+                scar_mesh.indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+                // Vertical bar
+                let base = scar_mesh.vertices.len() as u32;
+                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-half_w, -arm), uv: egui::epaint::WHITE_UV, color: scar_col });
+                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( half_w, -arm), uv: egui::epaint::WHITE_UV, color: scar_col });
+                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( half_w,  arm), uv: egui::epaint::WHITE_UV, color: scar_col });
+                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-half_w,  arm), uv: egui::epaint::WHITE_UV, color: scar_col });
+                scar_mesh.indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+            }
+        }
+        if !scar_mesh.vertices.is_empty() {
+            painter.add(egui::Shape::mesh(scar_mesh));
+        }
+    }
+
+    // PHOTOTROPISM: blend trail color toward warm amber at night, cool blue at noon
+    let warmth = 1.0 - time_of_day_f; // 1.0 at night, 0.0 at noon
+    let warm_tint = Color32::from_rgb(255, 160, 80);
+    let cool_tint = Color32::from_rgb(160, 200, 255);
+    let photo_color = lerp_color(cool_tint, warm_tint, warmth);
+    let trail_color = lerp_color(trail_color, photo_color, 0.10); // 10% blend
 
     // ── Ghost trails: faint afterimages of trajectories from earlier in the session ──
     // Every 10-15 minutes, a snapshot appears for ~8 seconds then fades.
@@ -2811,9 +2866,20 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
                 let sr = state.lock().sample_rate;
                 let cb = state.lock().clip_buffer.clone();
                 let trail = viz_points.to_vec();
+                // LEGACY: compute state hash for .sig companion file
+                let state_hash: u64 = {
+                    let st = state.lock();
+                    st.current_state.iter().fold(0u64, |acc, &v| acc.wrapping_add(v.to_bits()))
+                };
                 std::thread::spawn(move || {
                     let wav_result = save_clip(&cb, sr);
                     let png_result = save_portrait_png(&trail);
+                    // Write .sig companion file with state hash
+                    if let Ok(ref wav_path) = wav_result {
+                        let sig_path = wav_path.replace(".wav", ".sig");
+                        let hex = format!("{:016x}", state_hash);
+                        let _ = std::fs::write(&sig_path, hex.as_bytes());
+                    }
                     match (wav_result, png_result) {
                         (Ok(wav), Ok(png)) => log::info!("Clip saved: {} + {}", wav, png),
                         (Err(e), _) => log::error!("Clip save failed: {e}"),

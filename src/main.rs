@@ -125,6 +125,7 @@ fn main() -> anyhow::Result<()> {
                 recording: recording.clone(),
                 loop_export: loop_export.clone(),
                 bifurc_data: bifurc_data.clone(),
+                shutdown_timer: None,
             })
         }),
     ).map_err(|e| anyhow::anyhow!("eframe error: {e}"))?;
@@ -139,10 +140,28 @@ struct SonifyApp {
     recording: WavRecorder,
     loop_export: LoopExportPending,
     bifurc_data: Arc<Mutex<Vec<(f32, f32)>>>,
+    // DYING GRACEFULLY: fade on close
+    shutdown_timer: Option<std::time::Instant>,
 }
 
 impl eframe::App for SonifyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // DYING GRACEFULLY — intercept close request, fade over 3 seconds
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.shutdown_timer.is_none() {
+                self.shutdown_timer = Some(std::time::Instant::now());
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.shared.lock().shutdown_fading = true;
+            }
+        }
+        if let Some(t) = self.shutdown_timer {
+            let fade_secs = t.elapsed().as_secs_f32();
+            if fade_secs >= 3.0 {
+                let _ = std::fs::remove_file("running.flag");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+
         let points = self.viz_history.lock().clone();
         draw_ui(ctx, &self.shared, &points, &self.waveform_buf, &self.recording,
                 &self.loop_export, &self.bifurc_data);
@@ -207,7 +226,27 @@ fn sim_thread(
         1.0 + angle.sin() * 0.015 // ±1.5% range
     };
 
-    // ── Attractor state persistence ────────────────────────────────────────────
+    // ── WOUND HEALING: detect crash from previous session ─────────────────────
+    let wounded = std::path::Path::new("running.flag").exists();
+    let mut wound_t: f32 = if wounded { 0.0 } else { 1.0 };
+    std::fs::write("running.flag", b"1").ok();
+    { shared.lock().wounded = wounded; }
+
+    // ── STARTUP RAMP: ramp from silence over 2 seconds ────────────────────────
+    let mut startup_ramp_t: f32 = 0.0;
+    { shared.lock().startup_ramp_t = startup_ramp_t; }
+
+    // ── HOUR OF DAY for circadian sleep ───────────────────────────────────────
+    let hour_of_day: u32 = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        ((secs % 86400) / 3600) as u32
+    };
+
+    // Push time_of_day to shared state for PHOTOTROPISM
+    { shared.lock().time_of_day_f = time_of_day; }
+
+    // ── ATTRACTOR state persistence ────────────────────────────────────────────
     // Load the last saved state so the attractor resumes from where it was
     {
         let state_path = std::path::PathBuf::from("attractor_state.bin");
@@ -437,6 +476,68 @@ fn sim_thread(
     let mut coupled_min = -30.0f64;
     let mut coupled_max = 30.0f64;
 
+    // ── METABOLISM: resting drift speed ───────────────────────────────────────
+    // When paused, step at 1.5% of normal — keeps attractor alive like breathing
+
+    // ── WARMUP: sluggish response for 5s after large speed changes ────────────
+    let mut smoothed_speed: f64 = initial_config.system.speed;
+    let mut warmup_ticks_remaining: i32 = 0;
+    let mut prev_speed_for_warmup: f64 = initial_config.system.speed;
+
+    // ── FLINCHING: 80-125ms delay on violent slider changes ───────────────────
+    let mut flinch_remaining: i32 = 0;
+    let mut flinch_held_speed: f64 = initial_config.system.speed;
+    let mut prev_speed_for_flinch: f64 = initial_config.system.speed;
+
+    // ── COOLDOWN: elevated wander after intense sessions ──────────────────────
+    let mut activity_energy: f32 = 0.0;
+    let activity_decay_rate: f32 = 1.0 / (180.0 * 120.0); // 3-min half-life
+
+    // ── NESTING: long-period oscillations after 2+ hours uptime ──────────────
+    let mut uptime_ticks: u64 = 0;
+    let mut nesting_phase: f64 = 0.0;
+
+    // ── APPETITE: hunger toward spectral complexity after long idle ────────────
+    // (uses existing silence_expanded)
+
+    // ── EMPATHY WITH TEMPO: interaction rate adjusts Evolve speed ─────────────
+    let mut interaction_ticks_since_change: u64 = 0;
+    let mut prev_config_hash: u64 = 0;
+
+    // ── SCARRING: near-divergence marks ────────────────────────────────────────
+    let mut scars: Vec<(f32, f32)> = Vec::with_capacity(500);
+    // Load existing scars
+    {
+        let scar_path = std::path::PathBuf::from("scars.bin");
+        if scar_path.exists() {
+            if let Ok(bytes) = std::fs::read(&scar_path) {
+                for chunk in bytes.chunks_exact(8) {
+                    let x = f32::from_le_bytes(chunk[0..4].try_into().unwrap_or([0;4]));
+                    let y = f32::from_le_bytes(chunk[4..8].try_into().unwrap_or([0;4]));
+                    if x.is_finite() && y.is_finite() {
+                        scars.push((x, y));
+                    }
+                }
+            }
+        }
+    }
+    { shared.lock().scars = scars.clone(); }
+
+    // ── PAIR BONDING: favorite presets become richer ───────────────────────────
+    let mut preset_affinity: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
+    {
+        let aff_path = std::path::PathBuf::from("preset_affinity.bin");
+        if aff_path.exists() {
+            if let Ok(bytes) = std::fs::read(&aff_path) {
+                for chunk in bytes.chunks_exact(12) {
+                    let key = u64::from_le_bytes(chunk[0..8].try_into().unwrap_or([0;8]));
+                    let val = u32::from_le_bytes(chunk[8..12].try_into().unwrap_or([0;4]));
+                    preset_affinity.insert(key, val);
+                }
+            }
+        }
+    }
+
     loop {
         let now = Instant::now();
         if now < next_tick {
@@ -470,7 +571,24 @@ fn sim_thread(
             (p, c, sc, mc, bs, bm, ar, ap, pd, se, sl, st_target, sa, ce, cs, cstr, ct)
         };
 
-        if paused { continue; }
+        // METABOLISM: resting drift when paused — keeps attractor alive like breathing
+        if paused {
+            // Step at 1.5% of normal speed, no audio sent
+            let metabolic_steps = ((config.system.speed * 0.015 / control_rate_hz) / config.system.dt)
+                .round() as usize;
+            for _ in 0..metabolic_steps.clamp(1, 100) {
+                system.step(config.system.dt);
+            }
+            continue;
+        }
+
+        // UPTIME and WOUND HEALING increment
+        uptime_ticks += 1;
+        wound_t = (wound_t + 1.0 / (20.0 * 60.0 * 120.0)).min(1.0);
+
+        // STARTUP RAMP: ramp from 0 to 1 over 2 seconds (240 ticks)
+        startup_ramp_t = (startup_ramp_t + 1.0 / (2.0 * 120.0)).min(1.0);
+        { shared.lock().startup_ramp_t = startup_ramp_t; }
 
         let silence_secs = { shared.lock().last_interaction_time.elapsed().as_secs_f32() };
         let silence_expanded = silence_secs > 300.0;
@@ -495,6 +613,76 @@ fn sim_thread(
             last_arr_sys = config.system.name.clone();
         }
         if mode_changed { mapper = build_mapper(&config.sonification.mode); last_arr_mode = config.sonification.mode.clone(); }
+
+        // PAIR BONDING: track sys_hash and increment affinity when system changes
+        let sys_hash: u64 = config.system.name.bytes().fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x100000001b3)
+        });
+        if sys_changed {
+            let count = preset_affinity.entry(sys_hash).or_insert(0);
+            *count = count.saturating_add(1);
+        }
+
+        // ACTIVITY ENERGY: increment on large parameter changes (sys_changed is our proxy)
+        if sys_changed {
+            activity_energy = (activity_energy + 0.1).min(1.0);
+        }
+        // Decay activity energy (3-min half-life)
+        activity_energy = (activity_energy - activity_decay_rate).max(0.0);
+
+        // INTERACTION TEMPO: track config hash changes
+        let current_config_hash: u64 = {
+            let s = config.system.speed.to_bits();
+            let r = config.lorenz.rho.to_bits();
+            let sg = config.lorenz.sigma.to_bits();
+            s ^ r.wrapping_mul(0x9e3779b9) ^ sg.wrapping_mul(0x6c62272e)
+        };
+        if current_config_hash != prev_config_hash {
+            prev_config_hash = current_config_hash;
+            interaction_ticks_since_change = 0;
+        } else {
+            interaction_ticks_since_change += 1;
+        }
+
+        // FLINCHING: 80-125ms delay on violent slider changes
+        let raw_speed = config.system.speed;
+        let flinch_delta = (raw_speed - prev_speed_for_flinch).abs();
+        if flinch_delta > 3.0 && flinch_remaining <= 0 {
+            // lcg for rand 0..5
+            walk_seed_ex = walk_seed_ex.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let rand_extra = (walk_seed_ex >> 33) as i32 % 5;
+            flinch_remaining = 10 + rand_extra;
+            flinch_held_speed = prev_speed_for_flinch;
+        }
+        if flinch_remaining > 0 {
+            config.system.speed = flinch_held_speed;
+            flinch_remaining -= 1;
+        } else {
+            prev_speed_for_flinch = config.system.speed;
+        }
+
+        // WARMUP: sluggish response for 5s after large speed changes
+        {
+            let speed_delta = (config.system.speed - prev_speed_for_warmup).abs();
+            if speed_delta > 2.5 {
+                warmup_ticks_remaining = 600;
+                smoothed_speed = prev_speed_for_warmup;
+            }
+            prev_speed_for_warmup = config.system.speed;
+            if warmup_ticks_remaining > 0 {
+                let t = 1.0 / warmup_ticks_remaining as f64;
+                smoothed_speed = smoothed_speed + (config.system.speed - smoothed_speed) * t;
+                config.system.speed = smoothed_speed;
+                warmup_ticks_remaining -= 1;
+            }
+        }
+
+        // CIRCADIAN SLEEP: 3am-5am — slower, dreamier, wider steps
+        let circadian_sleep_active = hour_of_day >= 3 && hour_of_day < 5;
+        if circadian_sleep_active {
+            config.system.speed *= 0.85;
+            config.audio.reverb_wet = (config.audio.reverb_wet + 0.08).min(0.95);
+        }
 
         // Apply BPM sync to delay and LFO rate
         if bpm_sync {
@@ -714,7 +902,29 @@ fn sim_thread(
                 let tod_rate_mult = 0.6 + time_of_day * 0.8; // 0.6x at midnight, 1.4x at noon
 
                 let silence_mult = if silence_expanded { 1.8 } else { 1.0 };
-                let step = macro_walk_rate * dt * tidal_scale * tod_rate_mult * silence_mult * entropy_walk_scale * typing_walk_scale;
+
+                // EMPATHY WITH TEMPO: interaction rate adjusts Evolve walk speed
+                let tempo_walk_mult = if interaction_ticks_since_change < 240 {
+                    1.4 // user exploring
+                } else if interaction_ticks_since_change > 7200 {
+                    0.4 // user sculpting
+                } else {
+                    let t = (interaction_ticks_since_change as f32 - 240.0) / (7200.0 - 240.0);
+                    1.4 - t * 1.0
+                };
+
+                // COOLDOWN: elevated wander after intense sessions
+                let cooldown_mult = 1.0 + activity_energy * 0.5;
+
+                // WOUND HEALING: conservative step size
+                let wound_step_mult = 0.5 + wound_t * 0.5;
+
+                // CIRCADIAN SLEEP: boost step size 1.3x in 3am-5am window
+                let sleep_step_mult = if circadian_sleep_active { 1.3 } else { 1.0 };
+
+                let step = macro_walk_rate * dt * tidal_scale * tod_rate_mult * silence_mult
+                    * entropy_walk_scale * typing_walk_scale * tempo_walk_mult
+                    * cooldown_mult * wound_step_mult * sleep_step_mult;
 
                 // Gravitational memory: find gradient in histogram, apply tiny nudge toward
                 // frequently-visited regions — the instrument learns your taste over sessions
@@ -784,8 +994,34 @@ fn sim_thread(
                         st.macro_chaos = st.macro_chaos + (excursion_return_chaos - st.macro_chaos) * ease * 0.04;
                     }
                 }
+                // NESTING: long-period oscillations after 2+ hours uptime
+                let nesting_threshold: u64 = 2 * 3600 * 120;
+                if uptime_ticks > nesting_threshold {
+                    nesting_phase += 1.0 / (12.5 * 60.0 * 120.0);
+                    let nesting_osc = (nesting_phase * std::f64::consts::TAU).sin() as f32 * 0.08;
+                    let mut st = shared.lock();
+                    st.macro_chaos = (st.macro_chaos + nesting_osc * step).clamp(0.05, 0.95);
+                    drop(st);
+                }
+
+                // APPETITE: hunger toward spectral complexity after 5+ min idle
+                if silence_expanded {
+                    let hunger = 0.0002f32;
+                    let mut st = shared.lock();
+                    st.macro_chaos = st.macro_chaos + (0.6 - st.macro_chaos) * hunger;
+                    st.macro_space = st.macro_space + (0.55 - st.macro_space) * hunger;
+                    drop(st);
+                }
+
             } else {
                 idle_ticks = 0; // reset idle counter when walk is off
+            }
+
+            // PAIR BONDING: enrich params for frequently-visited presets
+            let affinity_count = preset_affinity.get(&sys_hash).copied().unwrap_or(0);
+            if affinity_count > 20 {
+                let bond_strength = (affinity_count as f32 / 100.0).min(0.3);
+                config.audio.reverb_wet = (config.audio.reverb_wet + bond_strength * 0.08).min(0.82);
             }
 
             // Chaos → speed, sigma, rho
@@ -960,6 +1196,19 @@ fn sim_thread(
             .round() as usize;
         for _ in 0..steps.clamp(1, 10_000) {
             system.step(config.system.dt);
+        }
+
+        // SCARRING: detect near-divergence and record scar position
+        {
+            let st = system.state();
+            let near_diverge = system.speed() > 800.0
+                || st.iter().any(|&v| v.abs() > 300.0);
+            if near_diverge && scars.len() < 500 {
+                let sx = st.first().copied().unwrap_or(0.0) as f32;
+                let sy = if st.len() >= 2 { st[1] as f32 } else { 0.0 };
+                scars.push((sx, sy));
+                shared.lock().scars = scars.clone();
+            }
         }
 
         // Update visualization
@@ -1405,6 +1654,47 @@ fn sim_thread(
         for f in &mut params.freqs { *f *= sf; }
         params.grain_base_freq *= sf;
 
+        // CIRCADIAN AUDIO: odd/even harmonic bias — night boosts odd voices, day even
+        {
+            let night_factor = 1.0 - time_of_day;
+            let circ_bias = (night_factor - 0.5) * 0.20; // -0.10 to +0.10
+            params.amps[0] = (params.amps[0] * (1.0 + circ_bias)).clamp(0.0, 1.0);
+            params.amps[1] = (params.amps[1] * (1.0 - circ_bias)).clamp(0.0, 1.0);
+            params.amps[2] = (params.amps[2] * (1.0 + circ_bias)).clamp(0.0, 1.0);
+            params.amps[3] = (params.amps[3] * (1.0 - circ_bias)).clamp(0.0, 1.0);
+        }
+
+        // WOUND HEALING: conservative audio params while recovering from crash
+        if wound_t < 1.0 {
+            let wound_mult = 0.5 + wound_t * 0.5;
+            params.reverb_wet = (params.reverb_wet * wound_mult).clamp(0.0, 1.0);
+            params.delay_feedback = (params.delay_feedback * wound_mult).clamp(0.0, 1.0);
+            // Note: walk step multiplier was applied above in wound_step_mult
+        }
+
+        // STARTUP RAMP: multiply speed by ramp factor for first 2 seconds
+        if startup_ramp_t < 1.0 {
+            params.master_volume *= startup_ramp_t;
+        }
+
+        // SHUTDOWN FADING: ramp master_volume and speed toward 0 over 3 seconds
+        {
+            let (shutdown_fading, sd_ramp_t) = {
+                let st = shared.lock();
+                (st.shutdown_fading, st.startup_ramp_t) // reuse startup_ramp_t for shutdown progress
+            };
+            if shutdown_fading {
+                // Use elapsed time since shutdown triggered (stored in startup_ramp_t as a countdown)
+                // Actually we'll derive progress from master_volume fade independently
+                // Simple approach: read shutdown_fading flag and apply 3s ramp
+                // We track this with a local counter: use startup_ramp_t field inversely
+                // Simpler: use the shutdown_timer elapsed via shared state — but it's in the UI thread
+                // Best approach: just decay master_volume quickly
+                params.master_volume *= 0.992; // decay ~3s to silence at 120Hz
+                if params.master_volume < 0.01 { params.master_volume = 0.0; }
+            }
+        }
+
         // ── State + gravity map persistence (every ~2 minutes) ────────────────────
         state_save_timer += 1;
         if state_save_timer >= STATE_SAVE_INTERVAL {
@@ -1424,6 +1714,16 @@ fn sim_thread(
             let ep = shared.lock().entropy_pool.max(entropy_pool);
             entropy_pool = ep;
             let _ = std::fs::write("entropy.bin", &entropy_pool.to_le_bytes());
+            // SCARRING: save scars every 2 min
+            let scar_bytes: Vec<u8> = scars.iter()
+                .flat_map(|(x, y)| x.to_le_bytes().iter().chain(y.to_le_bytes().iter()).copied().collect::<Vec<u8>>())
+                .collect();
+            let _ = std::fs::write("scars.bin", &scar_bytes);
+            // PAIR BONDING: save preset affinity
+            let aff_bytes: Vec<u8> = preset_affinity.iter()
+                .flat_map(|(k, v)| k.to_le_bytes().iter().chain(v.to_le_bytes().iter()).copied().collect::<Vec<u8>>())
+                .collect();
+            let _ = std::fs::write("preset_affinity.bin", &aff_bytes);
         }
 
         let batch: [Option<AudioParams>; 3] = [Some(params), layer1_params, layer2_params];
