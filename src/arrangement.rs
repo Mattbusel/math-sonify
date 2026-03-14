@@ -1,4 +1,5 @@
 use crate::config::*;
+use crate::patches::load_preset;
 
 #[derive(Clone)]
 pub struct Scene {
@@ -106,4 +107,122 @@ pub fn scene_at(scenes: &[Scene], elapsed: f32) -> Option<(usize, bool, f32)> {
         t -= scene.hold_secs;
     }
     None // past end
+}
+
+// ---------------------------------------------------------------------------
+// Song Generator
+// ---------------------------------------------------------------------------
+// Philosophy: the MORPH is the music. Short holds (15-20s) establish each
+// scene, then long morphs (25-35s) are the actual musical events — two
+// attractors simultaneously deforming into each other. The generated
+// arrangements are shaped so you spend most of the time in transition.
+
+fn lcg(seed: &mut u64) -> f64 {
+    *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    (*seed >> 33) as f64 / u32::MAX as f64
+}
+
+fn make_scene(name: &str, preset: &str, hold: f32, morph: f32, tweaks: impl FnOnce(&mut Config)) -> Scene {
+    let mut cfg = load_preset(preset);
+    tweaks(&mut cfg);
+    Scene { name: name.to_string(), config: cfg, hold_secs: hold, morph_secs: morph, active: true }
+}
+
+/// Generate a full arrangement for a given mood.
+/// Morphs are the feature — hold times are short (15-22s to establish),
+/// morph times are long (22-35s — that's where the music lives).
+pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
+    let mut rng = seed ^ 0xdeadbeef_cafebabe;
+    let jitter = |base: f32, rng: &mut u64| -> f32 { base + (lcg(rng) as f32 - 0.5) * base * 0.2 };
+
+    let scenes: Vec<Scene> = match mood {
+
+        "rhythmic" => vec![
+            make_scene("Pulse", "Duffing Rhythm", jitter(18.0, &mut rng), 0.0, |c| {
+                c.system.speed = 1.4;
+                c.audio.reverb_wet = 0.25;
+            }),
+            make_scene("Build", "Pendulum Rhythm", jitter(18.0, &mut rng), jitter(28.0, &mut rng), |c| {
+                c.system.speed = 2.0;
+                c.audio.chorus_mix = 0.3;
+                c.audio.delay_ms = 250.0;
+            }),
+            make_scene("Lock", "Kuramoto Sync", jitter(20.0, &mut rng), jitter(32.0, &mut rng), |c| {
+                c.kuramoto.coupling = 1.5;
+                c.system.speed = 1.2;
+                c.audio.reverb_wet = 0.4;
+            }),
+            make_scene("Scatter", "FM Chaos", jitter(16.0, &mut rng), jitter(30.0, &mut rng), |c| {
+                c.system.speed = 1.8;
+                c.audio.waveshaper_mix = 0.4;
+                c.audio.waveshaper_drive = 3.0;
+            }),
+            make_scene("Ground", "Torus Drone", jitter(22.0, &mut rng), jitter(28.0, &mut rng), |c| {
+                c.audio.reverb_wet = 0.65;
+                c.audio.chorus_mix = 0.5;
+                c.system.speed = 0.6;
+            }),
+        ],
+
+        "experimental" => vec![
+            make_scene("Strange", "Chua Grit", jitter(16.0, &mut rng), 0.0, |c| {
+                c.audio.bit_depth = 10.0;
+                c.system.speed = 1.5;
+            }),
+            make_scene("Scatter", "Halvorsen Spiral", jitter(18.0, &mut rng), jitter(35.0, &mut rng), |c| {
+                c.sonification.mode = "spectral".into();
+                c.audio.reverb_wet = 0.5;
+            }),
+            make_scene("Warp", "FM Chaos", jitter(16.0, &mut rng), jitter(30.0, &mut rng), |c| {
+                c.audio.waveshaper_mix = 0.6;
+                c.audio.waveshaper_drive = 5.0;
+                c.audio.rate_crush = 0.3;
+            }),
+            make_scene("Dissolve", "Rössler Drift", jitter(20.0, &mut rng), jitter(35.0, &mut rng), |c| {
+                c.sonification.mode = "granular".into();
+                c.audio.reverb_wet = 0.7;
+                c.system.speed = 0.5;
+            }),
+            make_scene("Void", "Torus Drone", jitter(20.0, &mut rng), jitter(30.0, &mut rng), |c| {
+                c.audio.reverb_wet = 0.8;
+                c.audio.delay_feedback = 0.6;
+                c.system.speed = 0.4;
+            }),
+        ],
+
+        // "ambient" — default
+        _ => vec![
+            make_scene("Intro", "Torus Drone", jitter(20.0, &mut rng), 0.0, |c| {
+                c.system.speed = 0.5;
+                c.audio.master_volume = 0.55;
+                c.audio.reverb_wet = 0.75;
+            }),
+            make_scene("Emerge", "Lorenz Ambience", jitter(18.0, &mut rng), jitter(30.0, &mut rng), |c| {
+                c.audio.chorus_mix = 0.35;
+                c.sonification.portamento_ms = 350.0;
+            }),
+            make_scene("Drift", "Pendulum Meditation", jitter(20.0, &mut rng), jitter(32.0, &mut rng), |c| {
+                c.audio.reverb_wet = 0.7;
+                c.audio.delay_ms = 600.0;
+            }),
+            make_scene("Rise", "Halvorsen Spiral", jitter(18.0, &mut rng), jitter(28.0, &mut rng), |c| {
+                c.system.speed = 1.1;
+                c.audio.chorus_mix = 0.4;
+                c.audio.reverb_wet = 0.6;
+            }),
+            make_scene("Return", "Torus Drone", jitter(22.0, &mut rng), jitter(30.0, &mut rng), |c| {
+                c.system.speed = 0.45;
+                c.audio.reverb_wet = 0.85;
+                c.audio.master_volume = 0.5;
+                c.sonification.portamento_ms = 500.0;
+            }),
+        ],
+    };
+
+    // Pad unused slots with empty scenes
+    let mut result = scenes;
+    while result.len() < 8 {
+        result.push(Scene::empty(result.len()));
+    }
+    result
 }

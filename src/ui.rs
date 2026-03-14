@@ -8,7 +8,7 @@ use crate::sonification::chord_intervals_for;
 use crate::patches::{PRESETS, load_preset, save_patch, list_patches, load_patch_file};
 use crate::audio::{WavRecorder, LoopExportPending};
 use crate::systems::*;
-use crate::arrangement::{Scene, total_duration};
+use crate::arrangement::{Scene, total_duration, generate_song};
 use hound;
 
 /// Shared mutable UI state — written by the UI thread, read by the sim thread.
@@ -67,6 +67,7 @@ pub struct AppState {
     pub arr_loop: bool,
     pub arr_scene_edit: usize,
     pub arr_was_playing: bool,
+    pub arr_mood: String,
     // Arpeggiator
     pub arp_enabled: bool,
     pub arp_steps: usize,
@@ -123,6 +124,7 @@ impl AppState {
             arr_loop: false,
             arr_scene_edit: 0,
             arr_was_playing: false,
+            arr_mood: "ambient".into(),
             arp_enabled: false,
             arp_steps: 8,
             arp_bpm: 120.0,
@@ -1115,6 +1117,43 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
     };
 
     let total = total_duration(&scenes_snapshot);
+
+    // Generate Song section
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("✨ Generate Song").color(CYAN).strong());
+        ui.add_space(8.0);
+        let (cur_mood, seed_base) = {
+            let st = state.lock();
+            (st.arr_mood.clone(), st.arr_elapsed.to_bits() as u64 ^ 0x1234567890abcdef)
+        };
+        for mood in &["ambient", "rhythmic", "experimental"] {
+            let selected = cur_mood == *mood;
+            let col = if selected { Color32::from_rgb(0, 140, 200) } else { Color32::from_rgb(40, 40, 60) };
+            let label = match *mood { "ambient" => "🌙 Ambient", "rhythmic" => "⚡ Rhythmic", _ => "🔬 Experimental" };
+            if ui.add(Button::new(RichText::new(label).color(Color32::WHITE))
+                .fill(col).min_size(Vec2::new(90.0, 26.0))).clicked() {
+                state.lock().arr_mood = mood.to_string();
+            }
+        }
+        ui.add_space(8.0);
+        if ui.add(Button::new(RichText::new("🎲 Generate").color(Color32::BLACK))
+            .fill(Color32::from_rgb(220, 180, 40)).min_size(Vec2::new(90.0, 26.0))).clicked() {
+            let seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(seed_base);
+            let mood = state.lock().arr_mood.clone();
+            let new_scenes = generate_song(&mood, seed);
+            let mut st = state.lock();
+            st.scenes = new_scenes;
+            st.arr_playing = false;
+            st.arr_elapsed = 0.0;
+        }
+    });
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(4.0);
 
     // Top controls bar
     ui.horizontal(|ui| {
