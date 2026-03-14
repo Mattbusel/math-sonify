@@ -55,7 +55,8 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             reverb_wet:       lf32(a.audio.reverb_wet,      b.audio.reverb_wet),
             delay_ms:         lf32(a.audio.delay_ms,        b.audio.delay_ms),
             delay_feedback:   lf32(a.audio.delay_feedback,  b.audio.delay_feedback),
-            master_volume:    lf32(a.audio.master_volume,   b.audio.master_volume),
+            // Clamp lerped volume so morph valleys never drop below audible threshold
+            master_volume:    lf32(a.audio.master_volume,   b.audio.master_volume).max(0.45),
             bit_depth:        lf32(a.audio.bit_depth,       b.audio.bit_depth),
             rate_crush:       lf32(a.audio.rate_crush,      b.audio.rate_crush),
             chorus_mix:       lf32(a.audio.chorus_mix,      b.audio.chorus_mix),
@@ -266,11 +267,17 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
             c.sonification.mode  = mode;
             c.sonification.scale = scale;
             c.system.speed      *= speed_mult as f64;
-            c.audio.reverb_wet   = reverb;
+            // Clamp speed to audible range
+            c.system.speed       = c.system.speed.clamp(0.5, 6.0);
+            c.audio.reverb_wet   = reverb.min(0.82); // cap reverb to avoid washout
             c.audio.chorus_mix   = chorus;
             c.audio.delay_feedback = delay_fb;
             c.audio.delay_ms     = delay_ms;
             c.sonification.portamento_ms = porta;
+            // Ensure base_frequency is audible
+            c.sonification.base_frequency = c.sonification.base_frequency.clamp(60.0, 600.0);
+            // Guarantee audible master_volume — never let arrangement scenes go silent
+            c.audio.master_volume = c.audio.master_volume.max(0.62);
         })
     }).collect();
 
