@@ -97,6 +97,18 @@ pub struct AppState {
     pub clip_buffer: ClipBuffer,
     // Status message for clip save
     pub clip_status: String,
+    // Macro knobs (Simple mode)
+    pub macro_chaos: f32,
+    pub macro_space: f32,
+    pub macro_rhythm: f32,
+    pub macro_warmth: f32,
+    // Macro random walk (Evolve mode)
+    pub macro_walk_enabled: bool,
+    pub macro_walk_rate: f32,
+    // Simple / Advanced mode toggle
+    pub simple_mode: bool,
+    // AUTO mode (auto-generate + auto-play arrangement)
+    pub auto_mode: bool,
 }
 
 #[derive(Clone)]
@@ -199,6 +211,14 @@ impl AppState {
             sidechain_level_shared: Arc::new(Mutex::new(0.0)),
             clip_buffer: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             clip_status: String::new(),
+            macro_chaos: 0.5,
+            macro_space: 0.4,
+            macro_rhythm: 0.0,
+            macro_warmth: 0.5,
+            macro_walk_enabled: false,
+            macro_walk_rate: 0.05,
+            simple_mode: true,
+            auto_mode: false,
         }
     }
 }
@@ -341,625 +361,64 @@ pub fn draw_ui(
     let theme = state.lock().theme.clone();
     apply_theme(ctx, &theme);
 
-    let mut st = state.lock();
-
-    // Keyboard shortcuts
-    ctx.input(|i| {
-        if i.key_pressed(Key::Space) {
-            st.paused = !st.paused;
-        }
-        if i.key_pressed(Key::ArrowUp) {
-            st.config.audio.master_volume = (st.config.audio.master_volume + 0.05).min(1.0);
-        }
-        if i.key_pressed(Key::ArrowDown) {
-            st.config.audio.master_volume = (st.config.audio.master_volume - 0.05).max(0.0);
-        }
-        if i.key_pressed(Key::ArrowRight) {
-            st.config.system.speed = (st.config.system.speed * 1.2).min(10.0);
-        }
-        if i.key_pressed(Key::ArrowLeft) {
-            st.config.system.speed = (st.config.system.speed / 1.2).max(0.1);
-        }
-        if i.key_pressed(Key::Num1) { st.viz_tab = 0; }
-        if i.key_pressed(Key::Num2) { st.viz_tab = 1; }
-        if i.key_pressed(Key::Num3) { st.viz_tab = 2; }
-        if i.key_pressed(Key::Num4) { st.viz_tab = 3; }
-        if i.key_pressed(Key::Num5) { st.viz_tab = 4; }
-        if i.key_pressed(Key::Num6) { st.viz_tab = 5; }
-    });
+    // Keyboard shortcuts (brief lock, then release)
+    {
+        let mut st = state.lock();
+        ctx.input(|i| {
+            if i.key_pressed(Key::Space) {
+                st.paused = !st.paused;
+            }
+            if i.key_pressed(Key::ArrowUp) {
+                st.config.audio.master_volume = (st.config.audio.master_volume + 0.05).min(1.0);
+            }
+            if i.key_pressed(Key::ArrowDown) {
+                st.config.audio.master_volume = (st.config.audio.master_volume - 0.05).max(0.0);
+            }
+            if i.key_pressed(Key::ArrowRight) {
+                st.config.system.speed = (st.config.system.speed * 1.2).min(10.0);
+            }
+            if i.key_pressed(Key::ArrowLeft) {
+                st.config.system.speed = (st.config.system.speed / 1.2).max(0.1);
+            }
+            if i.key_pressed(Key::Num1) { st.viz_tab = 0; }
+            if i.key_pressed(Key::Num2) { st.viz_tab = 1; }
+            if i.key_pressed(Key::Num3) { st.viz_tab = 2; }
+            if i.key_pressed(Key::Num4) { st.viz_tab = 3; }
+            if i.key_pressed(Key::Num5) { st.viz_tab = 4; }
+            if i.key_pressed(Key::Num6) { st.viz_tab = 5; }
+        });
+    } // lock released here
 
     SidePanel::left("controls").min_width(300.0).max_width(340.0).show(ctx, |ui| {
         ScrollArea::vertical().show(ui, |ui| {
-
             ui.add_space(6.0);
 
-            // ---- ALWAYS VISIBLE: Volume ----
-            ui.label(RichText::new("VOLUME").color(Color32::WHITE).strong());
-            ui.add(
-                Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0)
-                    .text("Volume")
-            );
-            ui.add_space(6.0);
+            // ---- Simple / Advanced toggle ----
+            let is_simple = {
+                let mut st = state.lock();
+                ui.horizontal(|ui| {
+                    let simple_label = if st.simple_mode { "◉ Simple" } else { "○ Simple" };
+                    let adv_label    = if st.simple_mode { "○ Advanced" } else { "◉ Advanced" };
+                    let simple_color = if st.simple_mode { Color32::from_rgb(0, 160, 80) } else { Color32::from_rgb(40, 40, 70) };
+                    let adv_color    = if st.simple_mode { Color32::from_rgb(40, 40, 70) } else { Color32::from_rgb(0, 100, 200) };
+                    if ui.add(Button::new(RichText::new(simple_label).color(Color32::WHITE).size(12.0))
+                        .fill(simple_color).min_size(Vec2::new(100.0, 26.0))).clicked() {
+                        st.simple_mode = true;
+                    }
+                    if ui.add(Button::new(RichText::new(adv_label).color(Color32::WHITE).size(12.0))
+                        .fill(adv_color).min_size(Vec2::new(110.0, 26.0))).clicked() {
+                        st.simple_mode = false;
+                    }
+                });
+                ui.add_space(6.0);
+                st.simple_mode
+            }; // lock released here
 
-            // ---- Pause button ----
-            let pause_label = if st.paused { "▶  RESUME" } else { "⏸  PAUSE" };
-            let pause_color = if st.paused {
-                Color32::from_rgb(0, 140, 50)
+            if is_simple {
+                draw_simple_panel(ui, state);
             } else {
-                Color32::from_rgb(0, 90, 160)
-            };
-            let btn = Button::new(RichText::new(pause_label).color(Color32::WHITE).strong())
-                .fill(pause_color)
-                .min_size(Vec2::new(ui.available_width(), 36.0));
-            if ui.add(btn).clicked() {
-                st.paused = !st.paused;
+                draw_advanced_panel(ui, state, recording, loop_export);
             }
-            ui.add_space(6.0);
-
-            // ---- Chaos meter ----
-            let chaos = st.chaos_level;
-            let chaos_color = lerp_color(
-                Color32::from_rgb(0, 80, 180),
-                Color32::from_rgb(220, 40, 40),
-                chaos,
-            );
-            ui.add(
-                ProgressBar::new(chaos)
-                    .text(format!("Chaos  {:.0}%", chaos * 100.0))
-                    .fill(chaos_color)
-            );
-
-            ui.add_space(6.0);
-            ui.separator();
-            ui.add_space(2.0);
-
-            // ---- PRESETS ----
-            collapsing_section(ui, "PRESETS", true, |ui| {
-                ui.colored_label(AMBER, "Click a preset to start");
-                ui.add_space(6.0);
-
-                let selected = st.selected_preset.clone();
-                for preset in PRESETS.iter() {
-                    let is_selected = selected == preset.name;
-                    let pc = preset.color;
-                    let (stroke_color, bg_color) = if is_selected {
-                        (pc, Color32::from_rgba_premultiplied(pc.r()/4, pc.g()/4, pc.b()/4, 255))
-                    } else {
-                        (Color32::from_rgb(50, 50, 80), Color32::from_rgb(20, 20, 35))
-                    };
-                    let card = egui::Frame::none()
-                        .fill(bg_color)
-                        .stroke(Stroke::new(if is_selected { 2.0 } else { 1.0 }, stroke_color))
-                        .inner_margin(egui::Margin::same(8.0))
-                        .rounding(egui::Rounding::same(4.0));
-                    let response = card.show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        ui.set_min_height(36.0);
-                        ui.label(RichText::new(preset.name).strong().color(Color32::WHITE).size(13.0));
-                        ui.label(RichText::new(preset.description).italics().color(GRAY_HINT).size(11.0));
-                    }).response;
-                    if response.interact(Sense::click()).clicked() {
-                        st.selected_preset = preset.name.to_string();
-                        st.config = load_preset(preset.name);
-                        st.system_changed = true;
-                        st.mode_changed = true;
-                    }
-                    ui.add_space(3.0);
-                }
-            });
-
-            // ---- SOUND ----
-            collapsing_section(ui, "SOUND", false, |ui| {
-                // Mode buttons
-                ui.label(RichText::new("Mode").color(GRAY_HINT).size(11.0));
-                let modes = ["direct", "orbital", "granular", "spectral", "fm"];
-                let current_mode = st.config.sonification.mode.clone();
-                ui.horizontal_wrapped(|ui| {
-                    for m in &modes {
-                        let selected = current_mode == *m;
-                        let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
-                        let resp = ui.add(
-                            Button::new(RichText::new(*m).color(Color32::WHITE))
-                                .fill(color)
-                                .min_size(Vec2::new(55.0, 26.0))
-                        );
-                        if resp.clicked() {
-                            st.config.sonification.mode = m.to_string();
-                            st.mode_changed = true;
-                        }
-                        resp.on_hover_text(mode_tooltip(m));
-                    }
-                });
-                ui.add_space(6.0);
-
-                // Scale
-                let scales = ["pentatonic", "chromatic", "just_intonation", "microtonal"];
-                let current_scale = st.config.sonification.scale.clone();
-                ComboBox::from_label("Scale")
-                    .selected_text(&current_scale)
-                    .show_ui(ui, |ui| {
-                        for s in &scales {
-                            if ui.selectable_label(current_scale == *s, *s).clicked() {
-                                st.config.sonification.scale = s.to_string();
-                            }
-                        }
-                    });
-                let desc = scale_description(&current_scale);
-                if !desc.is_empty() {
-                    ui.label(RichText::new(desc).italics().size(11.0).color(GRAY_HINT));
-                }
-                ui.add_space(4.0);
-
-                ui.add(Slider::new(&mut st.config.sonification.base_frequency, 55.0..=880.0)
-                    .text("Root Hz").logarithmic(true));
-                ui.add(Slider::new(&mut st.config.sonification.octave_range, 1.0..=6.0)
-                    .text("Octave Range"));
-
-                ui.add_space(6.0);
-
-                // LFO sub-section
-                CollapsingHeader::new(
-                    RichText::new("LFO").size(12.0).color(GRAY_HINT)
-                ).default_open(false).show(ui, |ui| {
-                    ui.checkbox(&mut st.lfo_enabled, RichText::new("Enable LFO").color(Color32::WHITE));
-                    ui.add(Slider::new(&mut st.lfo_rate, 0.01..=2.0).text("Rate Hz").logarithmic(true));
-                    ui.add(Slider::new(&mut st.lfo_depth, 0.0..=1.0).text("Depth"));
-                    let lfo_targets = ["speed", "sigma", "rho", "beta", "a", "b", "c", "coupling"];
-                    let current_target = st.lfo_target.clone();
-                    ComboBox::from_label("Target")
-                        .selected_text(&current_target)
-                        .show_ui(ui, |ui| {
-                            for t in &lfo_targets {
-                                if ui.selectable_label(current_target == *t, *t).clicked() {
-                                    st.lfo_target = t.to_string();
-                                }
-                            }
-                        });
-                });
-            });
-
-            // ---- MELODY & CHORDS ----
-            collapsing_section(ui, "MELODY & CHORDS", false, |ui| {
-                let chord_modes = ["none", "major", "minor", "power", "sus2", "octave", "dom7"];
-                let current_chord = st.config.sonification.chord_mode.clone();
-                ComboBox::from_label("Chord Mode")
-                    .selected_text(&current_chord)
-                    .show_ui(ui, |ui| {
-                        for cm in &chord_modes {
-                            if ui.selectable_label(current_chord == *cm, *cm).clicked() {
-                                st.config.sonification.chord_mode = cm.to_string();
-                            }
-                        }
-                    });
-
-                let mut ts = st.config.sonification.transpose_semitones as f64;
-                if ui.add(Slider::new(&mut ts, -24.0..=24.0).text("Transpose").step_by(1.0)).changed() {
-                    st.config.sonification.transpose_semitones = ts as f32;
-                }
-
-                ui.add(Slider::new(&mut st.config.sonification.portamento_ms, 1.0..=1000.0)
-                    .text("Portamento ms").logarithmic(true));
-
-                ui.add_space(4.0);
-                ui.label(RichText::new("Voice Levels").color(Color32::WHITE));
-                for i in 0..4 {
-                    ui.add(Slider::new(&mut st.config.sonification.voice_levels[i], 0.0..=1.0)
-                        .text(format!("Voice {}", i + 1)));
-                }
-
-                ui.add_space(4.0);
-                ui.label(RichText::new("Voice Waveforms").color(Color32::WHITE));
-                let shapes = ["sine", "triangle", "saw"];
-                for i in 0..4 {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("V{}:", i + 1)).color(Color32::WHITE));
-                        let current_shape = st.config.sonification.voice_shapes[i].clone();
-                        for s in &shapes {
-                            let selected = current_shape == *s;
-                            let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
-                            if ui.add(
-                                Button::new(RichText::new(*s).color(Color32::WHITE))
-                                    .fill(color)
-                                    .min_size(Vec2::new(50.0, 24.0))
-                            ).clicked() {
-                                st.config.sonification.voice_shapes[i] = s.to_string();
-                            }
-                        }
-                    });
-                }
-            });
-
-            // ---- PHYSICS ENGINE ----
-            collapsing_section(ui, "PHYSICS ENGINE", false, |ui| {
-                let systems_internal = ["lorenz", "rossler", "double_pendulum", "geodesic_torus", "kuramoto", "three_body", "duffing", "van_der_pol", "halvorsen", "aizawa", "chua"];
-                let systems_display: Vec<&str> = systems_internal.iter().map(|s| system_display_name(s)).collect();
-                let current_sys = st.config.system.name.clone();
-                let current_display = system_display_name(&current_sys);
-                ComboBox::from_label("System")
-                    .selected_text(current_display)
-                    .show_ui(ui, |ui| {
-                        for disp in &systems_display {
-                            let internal = system_internal_name(disp);
-                            if ui.selectable_label(current_sys == internal, *disp).clicked() {
-                                st.config.system.name = internal.to_string();
-                                st.system_changed = true;
-                            }
-                        }
-                    });
-
-                ui.add(Slider::new(&mut st.config.system.speed, 0.1..=10.0).text("Speed"));
-
-                CollapsingHeader::new(
-                    RichText::new("Parameters").size(12.0).color(GRAY_HINT)
-                ).default_open(false).show(ui, |ui| {
-                    match st.config.system.name.as_str() {
-                        "lorenz" => {
-                            let r = ui.add(Slider::new(&mut st.config.lorenz.sigma, 1.0..=20.0).text("sigma"));
-                            r.on_hover_text("Turbulence — higher = more chaotic");
-                            let r = ui.add(Slider::new(&mut st.config.lorenz.rho, 10.0..=50.0).text("rho"));
-                            r.on_hover_text("Chaos threshold — above ~24 = butterfly attractor");
-                            let r = ui.add(Slider::new(&mut st.config.lorenz.beta, 0.5..=5.0).text("beta"));
-                            r.on_hover_text("Damping — lower = wilder oscillations");
-                        }
-                        "rossler" => {
-                            let r = ui.add(Slider::new(&mut st.config.rossler.a, 0.01..=0.5).text("a"));
-                            r.on_hover_text("Spiral tightness");
-                            ui.add(Slider::new(&mut st.config.rossler.b, 0.01..=0.5).text("b"));
-                            let r = ui.add(Slider::new(&mut st.config.rossler.c, 1.0..=15.0).text("c"));
-                            r.on_hover_text("Chaos onset — above ~5.7 = chaotic");
-                        }
-                        "double_pendulum" => {
-                            ui.add(Slider::new(&mut st.config.double_pendulum.m1, 0.1..=5.0).text("m1"));
-                            ui.add(Slider::new(&mut st.config.double_pendulum.m2, 0.1..=5.0).text("m2"));
-                            ui.add(Slider::new(&mut st.config.double_pendulum.l1, 0.1..=3.0).text("l1"));
-                            ui.add(Slider::new(&mut st.config.double_pendulum.l2, 0.1..=3.0).text("l2"));
-                        }
-                        "geodesic_torus" => {
-                            let r = ui.add(Slider::new(&mut st.config.geodesic_torus.big_r, 1.0..=8.0).text("R"));
-                            r.on_hover_text("Torus major radius");
-                            let r = ui.add(Slider::new(&mut st.config.geodesic_torus.r, 0.1..=3.0).text("r"));
-                            r.on_hover_text("Torus tube radius");
-                        }
-                        "kuramoto" => {
-                            let r = ui.add(Slider::new(&mut st.config.kuramoto.coupling, 0.0..=5.0).text("Coupling K"));
-                            r.on_hover_text("Coupling — drag up from 0 to hear synchronization happen");
-                        }
-                        "duffing" => {
-                            ui.add(Slider::new(&mut st.config.duffing.delta, 0.1..=1.0).text("delta"));
-                            ui.add(Slider::new(&mut st.config.duffing.gamma, 0.0..=1.5).text("Forcing"));
-                            ui.add(Slider::new(&mut st.config.duffing.omega, 0.5..=3.0).text("Drive freq"));
-                        }
-                        "van_der_pol" => {
-                            ui.add(Slider::new(&mut st.config.van_der_pol.mu, 0.1..=5.0).text("Nonlinearity"));
-                        }
-                        "halvorsen" => {
-                            ui.add(Slider::new(&mut st.config.halvorsen.a, 1.0..=3.0).text("a"));
-                        }
-                        "aizawa" => {
-                            ui.add(Slider::new(&mut st.config.aizawa.a, 0.5..=1.5).text("a"));
-                            ui.add(Slider::new(&mut st.config.aizawa.c, 0.3..=1.0).text("c"));
-                            ui.add(Slider::new(&mut st.config.aizawa.d, 2.0..=5.0).text("d"));
-                        }
-                        "chua" => {
-                            ui.add(Slider::new(&mut st.config.chua.alpha, 10.0..=20.0).text("alpha"));
-                            ui.add(Slider::new(&mut st.config.chua.beta, 20.0..=35.0).text("beta"));
-                        }
-                        _ => {}
-                    }
-                });
-
-                ui.add_space(4.0);
-                if ui.add(
-                    Button::new(RichText::new("Randomize Parameters").color(Color32::WHITE))
-                        .fill(Color32::from_rgb(60, 40, 80))
-                        .min_size(Vec2::new(ui.available_width(), 28.0))
-                ).clicked() {
-                    let mut seed = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .subsec_nanos() as u64;
-                    let vary = |v: f64, s: &mut u64| v * (0.8 + lcg_rand(s) * 0.4);
-                    match st.config.system.name.as_str() {
-                        "lorenz" => {
-                            st.config.lorenz.sigma = vary(st.config.lorenz.sigma, &mut seed).clamp(1.0, 20.0);
-                            st.config.lorenz.rho   = vary(st.config.lorenz.rho,   &mut seed).clamp(10.0, 50.0);
-                            st.config.lorenz.beta  = vary(st.config.lorenz.beta,  &mut seed).clamp(0.5, 5.0);
-                        }
-                        "rossler" => {
-                            st.config.rossler.a = vary(st.config.rossler.a, &mut seed).clamp(0.01, 0.5);
-                            st.config.rossler.b = vary(st.config.rossler.b, &mut seed).clamp(0.01, 0.5);
-                            st.config.rossler.c = vary(st.config.rossler.c, &mut seed).clamp(1.0, 15.0);
-                        }
-                        "kuramoto" => {
-                            st.config.kuramoto.coupling = vary(st.config.kuramoto.coupling, &mut seed).clamp(0.0, 5.0);
-                        }
-                        _ => {}
-                    }
-                    st.system_changed = true;
-                }
-            });
-
-            // ---- EFFECTS ----
-            collapsing_section(ui, "EFFECTS", false, |ui| {
-                ui.add(Slider::new(&mut st.config.audio.reverb_wet, 0.0..=1.0).text("Reverb"));
-                ui.add(Slider::new(&mut st.config.audio.delay_ms, 0.0..=1000.0).text("Delay Time ms"));
-                ui.add(Slider::new(&mut st.config.audio.delay_feedback, 0.0..=0.95).text("Feedback (max 90%)"));
-
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.add(Slider::new(&mut st.bpm, 60.0..=200.0).text("BPM"));
-                    let sync_color = if st.bpm_sync {
-                        Color32::from_rgb(0, 160, 0)
-                    } else {
-                        Color32::from_rgb(50, 50, 70)
-                    };
-                    if ui.add(
-                        Button::new(RichText::new("Sync").color(Color32::WHITE))
-                            .fill(sync_color)
-                            .min_size(Vec2::new(44.0, 26.0))
-                    ).clicked() {
-                        st.bpm_sync = !st.bpm_sync;
-                    }
-                });
-                if st.bpm_sync {
-                    ui.label(RichText::new(format!("Delay: {:.0}ms  LFO: {:.2}Hz", 60000.0 / st.bpm, st.bpm / 60.0 * 0.25))
-                        .size(11.0).color(Color32::from_rgb(100, 200, 100)));
-                }
-
-                ui.add_space(4.0);
-                ui.label(RichText::new("Bitcrusher").color(Color32::WHITE));
-                ui.add(Slider::new(&mut st.config.audio.bit_depth, 1.0..=16.0).text("Bit Depth"));
-                ui.add(Slider::new(&mut st.config.audio.rate_crush, 0.0..=1.0).text("Rate Crush"));
-
-                ui.add_space(4.0);
-                ui.label(RichText::new("Chorus").color(Color32::WHITE));
-                ui.add(Slider::new(&mut st.config.audio.chorus_mix, 0.0..=1.0).text("Chorus"));
-                ui.add(Slider::new(&mut st.config.audio.chorus_rate, 0.1..=5.0).text("Chorus Rate"));
-                ui.add(Slider::new(&mut st.config.audio.chorus_depth, 0.5..=10.0).text("Depth ms"));
-
-                ui.add_space(4.0);
-                ui.label(RichText::new("Saturation").color(Color32::WHITE));
-                ui.add(Slider::new(&mut st.config.audio.waveshaper_mix, 0.0..=1.0).text("Saturation"));
-                if st.config.audio.waveshaper_mix > 0.0 {
-                    ui.add(Slider::new(&mut st.config.audio.waveshaper_drive, 1.0..=10.0).text("Drive"));
-                }
-
-            });
-
-            // ---- OUTPUT ----
-            collapsing_section(ui, "OUTPUT", false, |ui| {
-                // Record WAV button
-                let st_sample_rate = st.sample_rate;
-                let is_recording = recording.try_lock().map(|r| r.is_some()).unwrap_or(false);
-                let rec_label = if is_recording { "⏹  Stop & Save" } else { "⏺  Start Recording" };
-                let rec_color = if is_recording { Color32::from_rgb(180, 30, 30) } else { Color32::from_rgb(30, 120, 30) };
-                if ui.add(
-                    Button::new(RichText::new(rec_label).color(Color32::WHITE))
-                        .fill(rec_color)
-                        .min_size(Vec2::new(ui.available_width(), 36.0))
-                ).clicked() {
-                    if is_recording {
-                        if let Some(mut lock) = recording.try_lock() { *lock = None; }
-                    } else {
-                        let secs = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs();
-                        let filename = format!("recording_{}.wav", secs);
-                        let spec = hound::WavSpec {
-                            channels: 2,
-                            sample_rate: st_sample_rate,
-                            bits_per_sample: 32,
-                            sample_format: hound::SampleFormat::Float,
-                        };
-                        if let Ok(writer) = hound::WavWriter::create(&filename, spec) {
-                            if let Some(mut lock) = recording.try_lock() {
-                                *lock = Some(writer);
-                            }
-                        }
-                    }
-                }
-
-                ui.add_space(6.0);
-
-                // Loop Export
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Bars:").color(Color32::WHITE));
-                    let bars_options = [1u32, 2, 4, 8, 16];
-                    let current_bars = st.loop_bars;
-                    ComboBox::from_id_source("loop_bars")
-                        .selected_text(format!("{}", current_bars))
-                        .width(60.0)
-                        .show_ui(ui, |ui| {
-                            for &b in &bars_options {
-                                if ui.selectable_label(current_bars == b, format!("{}", b)).clicked() {
-                                    st.loop_bars = b;
-                                }
-                            }
-                        });
-
-                    let is_exporting = loop_export.try_lock().map(|p| p.is_some()).unwrap_or(false);
-                    let export_label = if is_exporting {
-                        "Exporting...".to_string()
-                    } else {
-                        format!("Export {}-Bar Loop", st.loop_bars)
-                    };
-                    let export_color = if is_exporting { Color32::from_rgb(180, 120, 0) } else { Color32::from_rgb(0, 90, 110) };
-                    if !is_exporting && ui.add(
-                        Button::new(RichText::new(export_label).color(Color32::WHITE))
-                            .fill(export_color)
-                    ).clicked() {
-                        let bars = st.loop_bars;
-                        let bpm = st.bpm;
-                        let sr = st.sample_rate;
-                        let total_samples = ((bars as f64 * 4.0 * 60.0 / bpm as f64) * sr as f64) as u64;
-                        if let Some(mut lock) = loop_export.try_lock() {
-                            *lock = Some(total_samples);
-                        }
-                    }
-                });
-
-                ui.add_space(4.0);
-
-                if ui.add(
-                    Button::new(RichText::new("Save as Default").color(Color32::WHITE))
-                        .fill(Color32::from_rgb(30, 55, 30))
-                        .min_size(Vec2::new(ui.available_width(), 28.0))
-                ).clicked() {
-                    let toml_str = toml::to_string_pretty(&st.config).unwrap_or_default();
-                    let _ = std::fs::write("config.toml", toml_str);
-                }
-
-                ui.add_space(6.0);
-
-                // MY PATCHES sub-collapsing
-                CollapsingHeader::new(
-                    RichText::new("MY PATCHES").size(12.0).color(GRAY_HINT)
-                ).default_open(false).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add(TextEdit::singleline(&mut st.patch_name_input)
-                            .desired_width(140.0)
-                            .hint_text("Patch name..."));
-                        if ui.add(
-                            Button::new(RichText::new("Save").color(Color32::WHITE))
-                                .fill(Color32::from_rgb(0, 80, 120))
-                        ).clicked() {
-                            let name = st.patch_name_input.clone();
-                            if !name.is_empty() {
-                                save_patch(&name, &st.config);
-                                st.patch_list = list_patches();
-                            }
-                        }
-                    });
-                    ui.add_space(4.0);
-                    let patches = st.patch_list.clone();
-                    if patches.is_empty() {
-                        ui.label(RichText::new("No patches saved yet").color(GRAY_HINT).size(11.0));
-                    } else {
-                        for patch_name in &patches {
-                            if ui.button(patch_name).clicked() {
-                                if let Some(cfg) = load_patch_file(patch_name) {
-                                    st.config = cfg;
-                                    st.system_changed = true;
-                                    st.mode_changed = true;
-                                }
-                            }
-                        }
-                    }
-                });
-
-                ui.add_space(6.0);
-
-                // PERFORMANCE sub-collapsing
-                CollapsingHeader::new(
-                    RichText::new("PERFORMANCE").size(12.0).color(GRAY_HINT)
-                ).default_open(false).show(ui, |ui| {
-                    CollapsingHeader::new(
-                        RichText::new("Automation").size(11.0).color(GRAY_HINT)
-                    ).default_open(false).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let rec_color = if st.auto_recording { Color32::from_rgb(180, 30, 30) } else { Color32::from_rgb(60, 40, 40) };
-                            if ui.add(
-                                Button::new(RichText::new("Rec").color(Color32::WHITE))
-                                    .fill(rec_color)
-                                    .min_size(Vec2::new(50.0, 26.0))
-                            ).clicked() {
-                                st.auto_recording = !st.auto_recording;
-                                if st.auto_recording {
-                                    st.auto_playing = false;
-                                    st.auto_events.clear();
-                                    st.auto_start_time = Instant::now();
-                                }
-                            }
-                            let play_color = if st.auto_playing { Color32::from_rgb(0, 140, 0) } else { Color32::from_rgb(40, 60, 40) };
-                            if ui.add(
-                                Button::new(RichText::new("Play").color(Color32::WHITE))
-                                    .fill(play_color)
-                                    .min_size(Vec2::new(50.0, 26.0))
-                            ).clicked() {
-                                st.auto_playing = !st.auto_playing;
-                                if st.auto_playing {
-                                    st.auto_recording = false;
-                                    st.auto_play_pos = 0;
-                                    st.auto_start_time = Instant::now();
-                                }
-                            }
-                            if ui.add(
-                                Button::new(RichText::new("Stop").color(Color32::WHITE))
-                                    .fill(Color32::from_rgb(50, 50, 50))
-                                    .min_size(Vec2::new(50.0, 26.0))
-                            ).clicked() {
-                                st.auto_recording = false;
-                                st.auto_playing = false;
-                            }
-                        });
-                        ui.checkbox(&mut st.auto_loop, RichText::new("Loop playback").color(Color32::WHITE));
-                        ui.label(RichText::new(format!("{} events recorded", st.auto_events.len()))
-                            .size(11.0).color(GRAY_HINT));
-                        if st.auto_recording {
-                            ui.label(RichText::new("Recording...").color(Color32::from_rgb(255, 80, 80)));
-                        }
-                        if st.auto_playing {
-                            ui.label(RichText::new("Playing back").color(Color32::from_rgb(80, 255, 80)));
-                        }
-                    });
-
-                    ui.add_space(4.0);
-                    ui.checkbox(&mut st.midi_enabled, RichText::new("MIDI Output").color(Color32::WHITE));
-                    if st.midi_enabled {
-                        ui.label(RichText::new("Sending to first MIDI port").size(11.0).color(Color32::from_rgb(100, 200, 100)));
-                    }
-                });
-            });
-
-            // ---- RHYTHM & ARP ----
-            collapsing_section(ui, "RHYTHM & ARP", false, |ui| {
-                ui.checkbox(&mut st.arp_enabled, RichText::new("Enable Arpeggiator").color(Color32::WHITE));
-                if st.arp_enabled {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Steps:").color(Color32::WHITE));
-                        for &s in &[4usize, 8, 16] {
-                            let sel = st.arp_steps == s;
-                            let col = if sel { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
-                            if ui.add(Button::new(RichText::new(format!("{}", s)).color(Color32::WHITE))
-                                .fill(col).min_size(Vec2::new(36.0, 24.0))).clicked() {
-                                st.arp_steps = s;
-                            }
-                        }
-                        ui.separator();
-                        ui.label(RichText::new("Oct:").color(Color32::WHITE));
-                        for &o in &[1usize, 2] {
-                            let sel = st.arp_octaves == o;
-                            let col = if sel { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
-                            if ui.add(Button::new(RichText::new(format!("{}", o)).color(Color32::WHITE))
-                                .fill(col).min_size(Vec2::new(30.0, 24.0))).clicked() {
-                                st.arp_octaves = o;
-                            }
-                        }
-                    });
-                    ui.add(Slider::new(&mut st.arp_bpm, 40.0..=240.0).text("ARP BPM"));
-                    let step_pct = if st.arp_steps > 0 {
-                        (st.arp_position as f32 + 1.0) / st.arp_steps as f32
-                    } else { 0.0 };
-                    ui.add(ProgressBar::new(step_pct)
-                        .text(format!("Step {}/{}", st.arp_position + 1, st.arp_steps)));
-                }
-                ui.add_space(4.0);
-                ui.separator();
-                ui.label(RichText::new("Plucked Strings").color(Color32::WHITE));
-                ui.checkbox(&mut st.ks_enabled, RichText::new("Enable KS (Poincaré rhythm)").color(Color32::WHITE));
-                if st.ks_enabled {
-                    ui.add(Slider::new(&mut st.ks_volume, 0.0..=1.0).text("Volume"));
-                }
-            });
-
-            // Keyboard shortcuts hint at very bottom
-            ui.add_space(10.0);
-            ui.separator();
-            ui.label(RichText::new("Space: pause  ↑↓: vol  ←→: speed  1-6: tabs")
-                .size(10.0)
-                .color(GRAY_HINT));
-            ui.add_space(4.0);
         });
     });
 
@@ -968,7 +427,7 @@ pub fn draw_ui(
         // Tab bar row with theme switcher on the right
         ui.horizontal(|ui| {
             let tabs = ["Phase Portrait", "Waveform", "Note Map", "ARRANGE", "MIXER", "Math View", "Bifurcation"];
-            let mut viz_tab = st.viz_tab;
+            let mut viz_tab = state.lock().viz_tab;
             for (i, name) in tabs.iter().enumerate() {
                 let selected = viz_tab == i;
                 let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(60, 60, 90) };
@@ -979,7 +438,7 @@ pub fn draw_ui(
                     viz_tab = i;
                 }
             }
-            st.viz_tab = viz_tab;
+            state.lock().viz_tab = viz_tab;
 
             // Theme switcher right-aligned
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -989,57 +448,70 @@ pub fn draw_ui(
                     ("vapor", Color32::from_rgb(160, 30, 120)),
                     ("neon",  Color32::from_rgb(0, 120, 200)),
                 ];
-                // render right to left so visual order is neon|vapor|crt|solar
                 for (label, color) in themes.iter() {
                     let theme_key = if *label == "vapor" { "vaporwave" } else { *label };
-                    let is_active = st.theme == theme_key;
+                    let is_active = state.lock().theme == theme_key;
                     let btn_color = if is_active { *color } else { Color32::from_rgb(35, 35, 50) };
                     if ui.add(
                         Button::new(RichText::new(*label).color(Color32::WHITE).size(11.0))
                             .fill(btn_color)
                             .min_size(Vec2::new(44.0, 22.0))
                     ).clicked() {
-                        st.theme = theme_key.to_string();
+                        state.lock().theme = theme_key.to_string();
                     }
                 }
             });
         });
 
+        let viz_tab = state.lock().viz_tab;
+
         // Trail length slider + projection buttons for Phase Portrait tab
-        let viz_tab = st.viz_tab;
         if viz_tab == 0 {
-            // Auto-rotate increment
-            if st.auto_rotate {
-                st.rotation_angle = (st.rotation_angle + 0.005) % std::f32::consts::TAU;
+            {
+                let mut st = state.lock();
+                if st.auto_rotate {
+                    st.rotation_angle = (st.rotation_angle + 0.005) % std::f32::consts::TAU;
+                }
             }
             ui.horizontal(|ui| {
+                let mut st = state.lock();
                 ui.label(RichText::new("Trail:").color(Color32::WHITE));
                 ui.add(Slider::new(&mut st.config.viz.trail_length, 100..=2000).text("pts"));
                 ui.separator();
                 ui.label(RichText::new("Projection:").color(Color32::WHITE));
+                let proj = st.viz_projection;
+                let auto_rot = st.auto_rotate;
+                let mut rot_angle = st.rotation_angle;
+                drop(st);
+                let mut new_proj = proj;
                 for (i, label) in ["XY", "XZ", "YZ"].iter().enumerate() {
-                    let selected = st.viz_projection == i;
+                    let selected = proj == i;
                     let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
                     if ui.add(
                         Button::new(RichText::new(*label).color(Color32::WHITE))
                             .fill(color)
                             .min_size(Vec2::new(36.0, 22.0))
                     ).clicked() {
-                        st.viz_projection = i;
+                        new_proj = i;
                     }
                 }
                 ui.separator();
-                let rot_color = if st.auto_rotate { Color32::from_rgb(0, 160, 100) } else { Color32::from_rgb(40, 40, 70) };
+                let rot_color = if auto_rot { Color32::from_rgb(0, 160, 100) } else { Color32::from_rgb(40, 40, 70) };
+                let mut new_auto_rot = auto_rot;
                 if ui.add(
                     Button::new(RichText::new("3D Rotate").color(Color32::WHITE))
                         .fill(rot_color)
                         .min_size(Vec2::new(72.0, 22.0))
                 ).clicked() {
-                    st.auto_rotate = !st.auto_rotate;
+                    new_auto_rot = !auto_rot;
                 }
-                if !st.auto_rotate {
-                    ui.add(Slider::new(&mut st.rotation_angle, 0.0..=std::f32::consts::TAU).text("Angle"));
+                if !auto_rot {
+                    ui.add(Slider::new(&mut rot_angle, 0.0..=std::f32::consts::TAU).text("Angle"));
                 }
+                let mut st = state.lock();
+                st.viz_projection = new_proj;
+                st.auto_rotate = new_auto_rot;
+                st.rotation_angle = rot_angle;
             });
         }
 
@@ -1047,28 +519,32 @@ pub fn draw_ui(
         if viz_tab == 6 {
             ui.horizontal(|ui| {
                 let params = ["rho", "sigma", "coupling", "c"];
-                let current_bp = st.bifurc_param.clone();
+                let (current_bp, computing) = {
+                    let st = state.lock();
+                    (st.bifurc_param.clone(), st.bifurc_computing)
+                };
+                let mut new_bp = current_bp.clone();
                 ComboBox::from_id_source("bifurc_param")
                     .selected_text(&current_bp)
                     .width(100.0)
                     .show_ui(ui, |ui| {
                         for p in &params {
                             if ui.selectable_label(current_bp == *p, *p).clicked() {
-                                st.bifurc_param = p.to_string();
+                                new_bp = p.to_string();
                             }
                         }
                     });
-                let computing = st.bifurc_computing;
+                state.lock().bifurc_param = new_bp;
                 let compute_color = if computing { Color32::from_rgb(100, 60, 0) } else { Color32::from_rgb(0, 80, 120) };
                 if !computing && ui.add(
                     Button::new(RichText::new("Compute").color(Color32::WHITE)).fill(compute_color)
                 ).clicked() {
-                    st.bifurc_computing = true;
-                    let param = st.bifurc_param.clone();
-                    let sys_name = st.config.system.name.clone();
-                    let lorenz_cfg = st.config.lorenz.clone();
-                    let rossler_cfg = st.config.rossler.clone();
-                    let kuramoto_cfg = st.config.kuramoto.clone();
+                    let (param, sys_name, lorenz_cfg, rossler_cfg, kuramoto_cfg) = {
+                        let st = state.lock();
+                        (st.bifurc_param.clone(), st.config.system.name.clone(),
+                         st.config.lorenz.clone(), st.config.rossler.clone(), st.config.kuramoto.clone())
+                    };
+                    state.lock().bifurc_computing = true;
                     let bifurc_data_clone = bifurc_data.clone();
                     let state_clone = state.clone();
                     std::thread::spawn(move || {
@@ -1099,25 +575,30 @@ pub fn draw_ui(
 
         ui.separator();
 
-        let projection = st.viz_projection;
-        let rotation_angle = st.rotation_angle;
-        let auto_rotate = st.auto_rotate;
-        let system_name = st.config.system.name.clone();
-        let mode_name = st.config.sonification.mode.clone();
-        let freqs = [
-            st.config.sonification.base_frequency as f32,
-            st.config.sonification.base_frequency as f32 * 2.0,
-            st.config.sonification.base_frequency as f32 * 3.0,
-            st.config.sonification.base_frequency as f32 * 4.0,
-        ];
-        let voice_levels = st.config.sonification.voice_levels;
-        let chord_intervals = chord_intervals_for(&st.config.sonification.chord_mode);
-        let current_state = st.current_state.clone();
-        let current_deriv = st.current_deriv.clone();
-        let chaos_level = st.chaos_level;
-        let order_param = st.order_param;
-        let kuramoto_phases = st.kuramoto_phases.clone();
-        drop(st); // release lock before painting
+        let (projection, rotation_angle, auto_rotate, system_name, mode_name,
+             freqs, voice_levels, chord_intervals, current_state, current_deriv,
+             chaos_level, order_param, kuramoto_phases) = {
+            let st = state.lock();
+            let proj = st.viz_projection;
+            let rot = st.rotation_angle;
+            let ar = st.auto_rotate;
+            let sn = st.config.system.name.clone();
+            let mn = st.config.sonification.mode.clone();
+            let fr = [
+                st.config.sonification.base_frequency as f32,
+                st.config.sonification.base_frequency as f32 * 2.0,
+                st.config.sonification.base_frequency as f32 * 3.0,
+                st.config.sonification.base_frequency as f32 * 4.0,
+            ];
+            let vl = st.config.sonification.voice_levels;
+            let ci = chord_intervals_for(&st.config.sonification.chord_mode);
+            let cs = st.current_state.clone();
+            let cd = st.current_deriv.clone();
+            let cl = st.chaos_level;
+            let op = st.order_param;
+            let kp = st.kuramoto_phases.clone();
+            (proj, rot, ar, sn, mn, fr, vl, ci, cs, cd, cl, op, kp)
+        };
 
         match viz_tab {
             0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate),
@@ -1130,6 +611,744 @@ pub fn draw_ui(
             _ => {}
         }
     });
+}
+
+// ---------------------------------------------------------------------------
+// Advanced panel — all the old controls
+// ---------------------------------------------------------------------------
+
+fn draw_advanced_panel(
+    ui: &mut Ui,
+    state: &SharedState,
+    recording: &WavRecorder,
+    loop_export: &LoopExportPending,
+) {
+    let mut st = state.lock();
+
+    ui.label(RichText::new("VOLUME").color(Color32::WHITE).strong());
+    ui.add(
+        Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0)
+            .text("Volume")
+    );
+    ui.add_space(6.0);
+
+    // ---- Pause button ----
+    let pause_label = if st.paused { "▶  RESUME" } else { "⏸  PAUSE" };
+    let pause_color = if st.paused {
+        Color32::from_rgb(0, 140, 50)
+    } else {
+        Color32::from_rgb(0, 90, 160)
+    };
+    let btn = Button::new(RichText::new(pause_label).color(Color32::WHITE).strong())
+        .fill(pause_color)
+        .min_size(Vec2::new(ui.available_width(), 36.0));
+    if ui.add(btn).clicked() {
+        st.paused = !st.paused;
+    }
+    ui.add_space(6.0);
+
+    // ---- Chaos meter ----
+    let chaos = st.chaos_level;
+    let chaos_color = lerp_color(
+        Color32::from_rgb(0, 80, 180),
+        Color32::from_rgb(220, 40, 40),
+        chaos,
+    );
+    ui.add(
+        ProgressBar::new(chaos)
+            .text(format!("Chaos  {:.0}%", chaos * 100.0))
+            .fill(chaos_color)
+    );
+
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(2.0);
+
+    // ---- PRESETS ----
+    collapsing_section(ui, "PRESETS", true, |ui| {
+        ui.colored_label(AMBER, "Click a preset to start");
+        ui.add_space(6.0);
+
+        let selected = st.selected_preset.clone();
+        for preset in PRESETS.iter() {
+            let is_selected = selected == preset.name;
+            let pc = preset.color;
+            let (stroke_color, bg_color) = if is_selected {
+                (pc, Color32::from_rgba_premultiplied(pc.r()/4, pc.g()/4, pc.b()/4, 255))
+            } else {
+                (Color32::from_rgb(50, 50, 80), Color32::from_rgb(20, 20, 35))
+            };
+            let card = egui::Frame::none()
+                .fill(bg_color)
+                .stroke(Stroke::new(if is_selected { 2.0 } else { 1.0 }, stroke_color))
+                .inner_margin(egui::Margin::same(8.0))
+                .rounding(egui::Rounding::same(4.0));
+            let response = card.show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.set_min_height(36.0);
+                ui.label(RichText::new(preset.name).strong().color(Color32::WHITE).size(13.0));
+                ui.label(RichText::new(preset.description).italics().color(GRAY_HINT).size(11.0));
+            }).response;
+            if response.interact(Sense::click()).clicked() {
+                st.selected_preset = preset.name.to_string();
+                st.config = load_preset(preset.name);
+                st.system_changed = true;
+                st.mode_changed = true;
+            }
+            ui.add_space(3.0);
+        }
+    });
+
+    // ---- SOUND ----
+    collapsing_section(ui, "SOUND", false, |ui| {
+        ui.label(RichText::new("Mode").color(GRAY_HINT).size(11.0));
+        let modes = ["direct", "orbital", "granular", "spectral", "fm"];
+        let current_mode = st.config.sonification.mode.clone();
+        ui.horizontal_wrapped(|ui| {
+            for m in &modes {
+                let selected = current_mode == *m;
+                let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
+                let resp = ui.add(
+                    Button::new(RichText::new(*m).color(Color32::WHITE))
+                        .fill(color)
+                        .min_size(Vec2::new(55.0, 26.0))
+                );
+                if resp.clicked() {
+                    st.config.sonification.mode = m.to_string();
+                    st.mode_changed = true;
+                }
+                resp.on_hover_text(mode_tooltip(m));
+            }
+        });
+        ui.add_space(6.0);
+
+        let scales = ["pentatonic", "chromatic", "just_intonation", "microtonal"];
+        let current_scale = st.config.sonification.scale.clone();
+        ComboBox::from_label("Scale")
+            .selected_text(&current_scale)
+            .show_ui(ui, |ui| {
+                for s in &scales {
+                    if ui.selectable_label(current_scale == *s, *s).clicked() {
+                        st.config.sonification.scale = s.to_string();
+                    }
+                }
+            });
+        let desc = scale_description(&current_scale);
+        if !desc.is_empty() {
+            ui.label(RichText::new(desc).italics().size(11.0).color(GRAY_HINT));
+        }
+        ui.add_space(4.0);
+
+        ui.add(Slider::new(&mut st.config.sonification.base_frequency, 55.0..=880.0)
+            .text("Root Hz").logarithmic(true));
+        ui.add(Slider::new(&mut st.config.sonification.octave_range, 1.0..=6.0)
+            .text("Octave Range"));
+
+        ui.add_space(6.0);
+
+        CollapsingHeader::new(
+            RichText::new("LFO").size(12.0).color(GRAY_HINT)
+        ).default_open(false).show(ui, |ui| {
+            ui.checkbox(&mut st.lfo_enabled, RichText::new("Enable LFO").color(Color32::WHITE));
+            ui.add(Slider::new(&mut st.lfo_rate, 0.01..=2.0).text("Rate Hz").logarithmic(true));
+            ui.add(Slider::new(&mut st.lfo_depth, 0.0..=1.0).text("Depth"));
+            let lfo_targets = ["speed", "sigma", "rho", "beta", "a", "b", "c", "coupling"];
+            let current_target = st.lfo_target.clone();
+            ComboBox::from_label("Target")
+                .selected_text(&current_target)
+                .show_ui(ui, |ui| {
+                    for t in &lfo_targets {
+                        if ui.selectable_label(current_target == *t, *t).clicked() {
+                            st.lfo_target = t.to_string();
+                        }
+                    }
+                });
+        });
+    });
+
+    // ---- MELODY & CHORDS ----
+    collapsing_section(ui, "MELODY & CHORDS", false, |ui| {
+        let chord_modes = ["none", "major", "minor", "power", "sus2", "octave", "dom7"];
+        let current_chord = st.config.sonification.chord_mode.clone();
+        ComboBox::from_label("Chord Mode")
+            .selected_text(&current_chord)
+            .show_ui(ui, |ui| {
+                for cm in &chord_modes {
+                    if ui.selectable_label(current_chord == *cm, *cm).clicked() {
+                        st.config.sonification.chord_mode = cm.to_string();
+                    }
+                }
+            });
+
+        let mut ts = st.config.sonification.transpose_semitones as f64;
+        if ui.add(Slider::new(&mut ts, -24.0..=24.0).text("Transpose").step_by(1.0)).changed() {
+            st.config.sonification.transpose_semitones = ts as f32;
+        }
+
+        ui.add(Slider::new(&mut st.config.sonification.portamento_ms, 1.0..=1000.0)
+            .text("Portamento ms").logarithmic(true));
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("Voice Levels").color(Color32::WHITE));
+        for i in 0..4 {
+            ui.add(Slider::new(&mut st.config.sonification.voice_levels[i], 0.0..=1.0)
+                .text(format!("Voice {}", i + 1)));
+        }
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("Voice Waveforms").color(Color32::WHITE));
+        let shapes = ["sine", "triangle", "saw"];
+        for i in 0..4 {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("V{}:", i + 1)).color(Color32::WHITE));
+                let current_shape = st.config.sonification.voice_shapes[i].clone();
+                for s in &shapes {
+                    let selected = current_shape == *s;
+                    let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
+                    if ui.add(
+                        Button::new(RichText::new(*s).color(Color32::WHITE))
+                            .fill(color)
+                            .min_size(Vec2::new(50.0, 24.0))
+                    ).clicked() {
+                        st.config.sonification.voice_shapes[i] = s.to_string();
+                    }
+                }
+            });
+        }
+    });
+
+    // ---- PHYSICS ENGINE ----
+    collapsing_section(ui, "PHYSICS ENGINE", false, |ui| {
+        let systems_internal = ["lorenz", "rossler", "double_pendulum", "geodesic_torus", "kuramoto", "three_body", "duffing", "van_der_pol", "halvorsen", "aizawa", "chua"];
+        let systems_display: Vec<&str> = systems_internal.iter().map(|s| system_display_name(s)).collect();
+        let current_sys = st.config.system.name.clone();
+        let current_display = system_display_name(&current_sys);
+        ComboBox::from_label("System")
+            .selected_text(current_display)
+            .show_ui(ui, |ui| {
+                for disp in &systems_display {
+                    let internal = system_internal_name(disp);
+                    if ui.selectable_label(current_sys == internal, *disp).clicked() {
+                        st.config.system.name = internal.to_string();
+                        st.system_changed = true;
+                    }
+                }
+            });
+
+        ui.add(Slider::new(&mut st.config.system.speed, 0.1..=10.0).text("Speed"));
+
+        CollapsingHeader::new(
+            RichText::new("Parameters").size(12.0).color(GRAY_HINT)
+        ).default_open(false).show(ui, |ui| {
+            match st.config.system.name.as_str() {
+                "lorenz" => {
+                    ui.add(Slider::new(&mut st.config.lorenz.sigma, 1.0..=20.0).text("sigma"))
+                        .on_hover_text("Turbulence — higher = more chaotic");
+                    ui.add(Slider::new(&mut st.config.lorenz.rho, 10.0..=50.0).text("rho"))
+                        .on_hover_text("Chaos threshold — above ~24 = butterfly attractor");
+                    ui.add(Slider::new(&mut st.config.lorenz.beta, 0.5..=5.0).text("beta"))
+                        .on_hover_text("Damping — lower = wilder oscillations");
+                }
+                "rossler" => {
+                    ui.add(Slider::new(&mut st.config.rossler.a, 0.01..=0.5).text("a"))
+                        .on_hover_text("Spiral tightness");
+                    ui.add(Slider::new(&mut st.config.rossler.b, 0.01..=0.5).text("b"));
+                    ui.add(Slider::new(&mut st.config.rossler.c, 1.0..=15.0).text("c"))
+                        .on_hover_text("Chaos onset — above ~5.7 = chaotic");
+                }
+                "double_pendulum" => {
+                    ui.add(Slider::new(&mut st.config.double_pendulum.m1, 0.1..=5.0).text("m1"));
+                    ui.add(Slider::new(&mut st.config.double_pendulum.m2, 0.1..=5.0).text("m2"));
+                    ui.add(Slider::new(&mut st.config.double_pendulum.l1, 0.1..=3.0).text("l1"));
+                    ui.add(Slider::new(&mut st.config.double_pendulum.l2, 0.1..=3.0).text("l2"));
+                }
+                "geodesic_torus" => {
+                    ui.add(Slider::new(&mut st.config.geodesic_torus.big_r, 1.0..=8.0).text("R"))
+                        .on_hover_text("Torus major radius");
+                    ui.add(Slider::new(&mut st.config.geodesic_torus.r, 0.1..=3.0).text("r"))
+                        .on_hover_text("Torus tube radius");
+                }
+                "kuramoto" => {
+                    ui.add(Slider::new(&mut st.config.kuramoto.coupling, 0.0..=5.0).text("Coupling K"))
+                        .on_hover_text("Coupling — drag up from 0 to hear synchronization happen");
+                }
+                "duffing" => {
+                    ui.add(Slider::new(&mut st.config.duffing.delta, 0.1..=1.0).text("delta"));
+                    ui.add(Slider::new(&mut st.config.duffing.gamma, 0.0..=1.5).text("Forcing"));
+                    ui.add(Slider::new(&mut st.config.duffing.omega, 0.5..=3.0).text("Drive freq"));
+                }
+                "van_der_pol" => {
+                    ui.add(Slider::new(&mut st.config.van_der_pol.mu, 0.1..=5.0).text("Nonlinearity"));
+                }
+                "halvorsen" => {
+                    ui.add(Slider::new(&mut st.config.halvorsen.a, 1.0..=3.0).text("a"));
+                }
+                "aizawa" => {
+                    ui.add(Slider::new(&mut st.config.aizawa.a, 0.5..=1.5).text("a"));
+                    ui.add(Slider::new(&mut st.config.aizawa.c, 0.3..=1.0).text("c"));
+                    ui.add(Slider::new(&mut st.config.aizawa.d, 2.0..=5.0).text("d"));
+                }
+                "chua" => {
+                    ui.add(Slider::new(&mut st.config.chua.alpha, 10.0..=20.0).text("alpha"));
+                    ui.add(Slider::new(&mut st.config.chua.beta, 20.0..=35.0).text("beta"));
+                }
+                _ => {}
+            }
+        });
+
+        ui.add_space(4.0);
+        if ui.add(
+            Button::new(RichText::new("Randomize Parameters").color(Color32::WHITE))
+                .fill(Color32::from_rgb(60, 40, 80))
+                .min_size(Vec2::new(ui.available_width(), 28.0))
+        ).clicked() {
+            let mut seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos() as u64;
+            let vary = |v: f64, s: &mut u64| v * (0.8 + lcg_rand(s) * 0.4);
+            match st.config.system.name.as_str() {
+                "lorenz" => {
+                    st.config.lorenz.sigma = vary(st.config.lorenz.sigma, &mut seed).clamp(1.0, 20.0);
+                    st.config.lorenz.rho   = vary(st.config.lorenz.rho,   &mut seed).clamp(10.0, 50.0);
+                    st.config.lorenz.beta  = vary(st.config.lorenz.beta,  &mut seed).clamp(0.5, 5.0);
+                }
+                "rossler" => {
+                    st.config.rossler.a = vary(st.config.rossler.a, &mut seed).clamp(0.01, 0.5);
+                    st.config.rossler.b = vary(st.config.rossler.b, &mut seed).clamp(0.01, 0.5);
+                    st.config.rossler.c = vary(st.config.rossler.c, &mut seed).clamp(1.0, 15.0);
+                }
+                "kuramoto" => {
+                    st.config.kuramoto.coupling = vary(st.config.kuramoto.coupling, &mut seed).clamp(0.0, 5.0);
+                }
+                _ => {}
+            }
+            st.system_changed = true;
+        }
+    });
+
+    // ---- EFFECTS ----
+    collapsing_section(ui, "EFFECTS", false, |ui| {
+        ui.add(Slider::new(&mut st.config.audio.reverb_wet, 0.0..=1.0).text("Reverb"));
+        ui.add(Slider::new(&mut st.config.audio.delay_ms, 0.0..=1000.0).text("Delay Time ms"));
+        ui.add(Slider::new(&mut st.config.audio.delay_feedback, 0.0..=0.95).text("Feedback (max 90%)"));
+
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add(Slider::new(&mut st.bpm, 60.0..=200.0).text("BPM"));
+            let sync_color = if st.bpm_sync { Color32::from_rgb(0, 160, 0) } else { Color32::from_rgb(50, 50, 70) };
+            if ui.add(
+                Button::new(RichText::new("Sync").color(Color32::WHITE))
+                    .fill(sync_color)
+                    .min_size(Vec2::new(44.0, 26.0))
+            ).clicked() {
+                st.bpm_sync = !st.bpm_sync;
+            }
+        });
+        if st.bpm_sync {
+            ui.label(RichText::new(format!("Delay: {:.0}ms  LFO: {:.2}Hz", 60000.0 / st.bpm, st.bpm / 60.0 * 0.25))
+                .size(11.0).color(Color32::from_rgb(100, 200, 100)));
+        }
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("Bitcrusher").color(Color32::WHITE));
+        ui.add(Slider::new(&mut st.config.audio.bit_depth, 1.0..=16.0).text("Bit Depth"));
+        ui.add(Slider::new(&mut st.config.audio.rate_crush, 0.0..=1.0).text("Rate Crush"));
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("Chorus").color(Color32::WHITE));
+        ui.add(Slider::new(&mut st.config.audio.chorus_mix, 0.0..=1.0).text("Chorus"));
+        ui.add(Slider::new(&mut st.config.audio.chorus_rate, 0.1..=5.0).text("Chorus Rate"));
+        ui.add(Slider::new(&mut st.config.audio.chorus_depth, 0.5..=10.0).text("Depth ms"));
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("Saturation").color(Color32::WHITE));
+        ui.add(Slider::new(&mut st.config.audio.waveshaper_mix, 0.0..=1.0).text("Saturation"));
+        if st.config.audio.waveshaper_mix > 0.0 {
+            ui.add(Slider::new(&mut st.config.audio.waveshaper_drive, 1.0..=10.0).text("Drive"));
+        }
+    });
+
+    // ---- OUTPUT ----
+    collapsing_section(ui, "OUTPUT", false, |ui| {
+        let st_sample_rate = st.sample_rate;
+        let is_recording = recording.try_lock().map(|r| r.is_some()).unwrap_or(false);
+        let rec_label = if is_recording { "⏹  Stop & Save" } else { "⏺  Start Recording" };
+        let rec_color = if is_recording { Color32::from_rgb(180, 30, 30) } else { Color32::from_rgb(30, 120, 30) };
+        if ui.add(
+            Button::new(RichText::new(rec_label).color(Color32::WHITE))
+                .fill(rec_color)
+                .min_size(Vec2::new(ui.available_width(), 36.0))
+        ).clicked() {
+            if is_recording {
+                if let Some(mut lock) = recording.try_lock() { *lock = None; }
+            } else {
+                let secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let filename = format!("recording_{}.wav", secs);
+                let spec = hound::WavSpec {
+                    channels: 2,
+                    sample_rate: st_sample_rate,
+                    bits_per_sample: 32,
+                    sample_format: hound::SampleFormat::Float,
+                };
+                if let Ok(writer) = hound::WavWriter::create(&filename, spec) {
+                    if let Some(mut lock) = recording.try_lock() {
+                        *lock = Some(writer);
+                    }
+                }
+            }
+        }
+
+        ui.add_space(6.0);
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Bars:").color(Color32::WHITE));
+            let bars_options = [1u32, 2, 4, 8, 16];
+            let current_bars = st.loop_bars;
+            ComboBox::from_id_source("loop_bars")
+                .selected_text(format!("{}", current_bars))
+                .width(60.0)
+                .show_ui(ui, |ui| {
+                    for &b in &bars_options {
+                        if ui.selectable_label(current_bars == b, format!("{}", b)).clicked() {
+                            st.loop_bars = b;
+                        }
+                    }
+                });
+
+            let is_exporting = loop_export.try_lock().map(|p| p.is_some()).unwrap_or(false);
+            let export_label = if is_exporting {
+                "Exporting...".to_string()
+            } else {
+                format!("Export {}-Bar Loop", st.loop_bars)
+            };
+            let export_color = if is_exporting { Color32::from_rgb(180, 120, 0) } else { Color32::from_rgb(0, 90, 110) };
+            if !is_exporting && ui.add(
+                Button::new(RichText::new(export_label).color(Color32::WHITE))
+                    .fill(export_color)
+            ).clicked() {
+                let bars = st.loop_bars;
+                let bpm = st.bpm;
+                let sr = st.sample_rate;
+                let total_samples = ((bars as f64 * 4.0 * 60.0 / bpm as f64) * sr as f64) as u64;
+                if let Some(mut lock) = loop_export.try_lock() {
+                    *lock = Some(total_samples);
+                }
+            }
+        });
+
+        ui.add_space(4.0);
+
+        if ui.add(
+            Button::new(RichText::new("Save as Default").color(Color32::WHITE))
+                .fill(Color32::from_rgb(30, 55, 30))
+                .min_size(Vec2::new(ui.available_width(), 28.0))
+        ).clicked() {
+            let toml_str = toml::to_string_pretty(&st.config).unwrap_or_default();
+            let _ = std::fs::write("config.toml", toml_str);
+        }
+
+        ui.add_space(6.0);
+
+        CollapsingHeader::new(
+            RichText::new("MY PATCHES").size(12.0).color(GRAY_HINT)
+        ).default_open(false).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add(TextEdit::singleline(&mut st.patch_name_input)
+                    .desired_width(140.0)
+                    .hint_text("Patch name..."));
+                if ui.add(
+                    Button::new(RichText::new("Save").color(Color32::WHITE))
+                        .fill(Color32::from_rgb(0, 80, 120))
+                ).clicked() {
+                    let name = st.patch_name_input.clone();
+                    if !name.is_empty() {
+                        save_patch(&name, &st.config);
+                        st.patch_list = list_patches();
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            let patches = st.patch_list.clone();
+            if patches.is_empty() {
+                ui.label(RichText::new("No patches saved yet").color(GRAY_HINT).size(11.0));
+            } else {
+                for patch_name in &patches {
+                    if ui.button(patch_name).clicked() {
+                        if let Some(cfg) = load_patch_file(patch_name) {
+                            st.config = cfg;
+                            st.system_changed = true;
+                            st.mode_changed = true;
+                        }
+                    }
+                }
+            }
+        });
+
+        ui.add_space(6.0);
+
+        CollapsingHeader::new(
+            RichText::new("PERFORMANCE").size(12.0).color(GRAY_HINT)
+        ).default_open(false).show(ui, |ui| {
+            CollapsingHeader::new(
+                RichText::new("Automation").size(11.0).color(GRAY_HINT)
+            ).default_open(false).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let rec_color = if st.auto_recording { Color32::from_rgb(180, 30, 30) } else { Color32::from_rgb(60, 40, 40) };
+                    if ui.add(
+                        Button::new(RichText::new("Rec").color(Color32::WHITE))
+                            .fill(rec_color)
+                            .min_size(Vec2::new(50.0, 26.0))
+                    ).clicked() {
+                        st.auto_recording = !st.auto_recording;
+                        if st.auto_recording {
+                            st.auto_playing = false;
+                            st.auto_events.clear();
+                            st.auto_start_time = Instant::now();
+                        }
+                    }
+                    let play_color = if st.auto_playing { Color32::from_rgb(0, 140, 0) } else { Color32::from_rgb(40, 60, 40) };
+                    if ui.add(
+                        Button::new(RichText::new("Play").color(Color32::WHITE))
+                            .fill(play_color)
+                            .min_size(Vec2::new(50.0, 26.0))
+                    ).clicked() {
+                        st.auto_playing = !st.auto_playing;
+                        if st.auto_playing {
+                            st.auto_recording = false;
+                            st.auto_play_pos = 0;
+                            st.auto_start_time = Instant::now();
+                        }
+                    }
+                    if ui.add(
+                        Button::new(RichText::new("Stop").color(Color32::WHITE))
+                            .fill(Color32::from_rgb(50, 50, 50))
+                            .min_size(Vec2::new(50.0, 26.0))
+                    ).clicked() {
+                        st.auto_recording = false;
+                        st.auto_playing = false;
+                    }
+                });
+                ui.checkbox(&mut st.auto_loop, RichText::new("Loop playback").color(Color32::WHITE));
+                ui.label(RichText::new(format!("{} events recorded", st.auto_events.len()))
+                    .size(11.0).color(GRAY_HINT));
+                if st.auto_recording {
+                    ui.label(RichText::new("Recording...").color(Color32::from_rgb(255, 80, 80)));
+                }
+                if st.auto_playing {
+                    ui.label(RichText::new("Playing back").color(Color32::from_rgb(80, 255, 80)));
+                }
+            });
+
+            ui.add_space(4.0);
+            ui.checkbox(&mut st.midi_enabled, RichText::new("MIDI Output").color(Color32::WHITE));
+            if st.midi_enabled {
+                ui.label(RichText::new("Sending to first MIDI port").size(11.0).color(Color32::from_rgb(100, 200, 100)));
+            }
+        });
+    });
+
+    // ---- RHYTHM & ARP ----
+    collapsing_section(ui, "RHYTHM & ARP", false, |ui| {
+        ui.checkbox(&mut st.arp_enabled, RichText::new("Enable Arpeggiator").color(Color32::WHITE));
+        if st.arp_enabled {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Steps:").color(Color32::WHITE));
+                for &s in &[4usize, 8, 16] {
+                    let sel = st.arp_steps == s;
+                    let col = if sel { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
+                    if ui.add(Button::new(RichText::new(format!("{}", s)).color(Color32::WHITE))
+                        .fill(col).min_size(Vec2::new(36.0, 24.0))).clicked() {
+                        st.arp_steps = s;
+                    }
+                }
+                ui.separator();
+                ui.label(RichText::new("Oct:").color(Color32::WHITE));
+                for &o in &[1usize, 2] {
+                    let sel = st.arp_octaves == o;
+                    let col = if sel { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
+                    if ui.add(Button::new(RichText::new(format!("{}", o)).color(Color32::WHITE))
+                        .fill(col).min_size(Vec2::new(30.0, 24.0))).clicked() {
+                        st.arp_octaves = o;
+                    }
+                }
+            });
+            ui.add(Slider::new(&mut st.arp_bpm, 40.0..=240.0).text("ARP BPM"));
+            let step_pct = if st.arp_steps > 0 {
+                (st.arp_position as f32 + 1.0) / st.arp_steps as f32
+            } else { 0.0 };
+            ui.add(ProgressBar::new(step_pct)
+                .text(format!("Step {}/{}", st.arp_position + 1, st.arp_steps)));
+        }
+        ui.add_space(4.0);
+        ui.separator();
+        ui.label(RichText::new("Plucked Strings").color(Color32::WHITE));
+        ui.checkbox(&mut st.ks_enabled, RichText::new("Enable KS (Poincaré rhythm)").color(Color32::WHITE));
+        if st.ks_enabled {
+            ui.add(Slider::new(&mut st.ks_volume, 0.0..=1.0).text("Volume"));
+        }
+    });
+
+    // Keyboard shortcuts hint
+    ui.add_space(10.0);
+    ui.separator();
+    ui.label(RichText::new("Space: pause  ↑↓: vol  ←→: speed  1-6: tabs")
+        .size(10.0)
+        .color(GRAY_HINT));
+    ui.add_space(4.0);
+}
+
+// ---------------------------------------------------------------------------
+// Simple panel — beginner-friendly macro controls
+// ---------------------------------------------------------------------------
+
+fn draw_simple_panel(ui: &mut Ui, state: &SharedState) {
+    // ---- BIG AUTO button ----
+    {
+        let (auto_mode, arr_mood) = {
+            let st = state.lock();
+            (st.auto_mode, st.arr_mood.clone())
+        };
+        let (auto_label, auto_color) = if auto_mode {
+            ("⏹ AUTO PLAYING — Click to Stop", Color32::from_rgb(180, 60, 20))
+        } else {
+            ("▶ AUTO — Generate & Play", Color32::from_rgb(0, 140, 60))
+        };
+        if ui.add(
+            Button::new(RichText::new(auto_label).color(Color32::WHITE).size(15.0).strong())
+                .fill(auto_color)
+                .min_size(Vec2::new(ui.available_width(), 48.0))
+        ).clicked() {
+            let mut st = state.lock();
+            if st.auto_mode {
+                st.auto_mode = false;
+                st.arr_playing = false;
+            } else {
+                let mood = st.arr_mood.clone();
+                let seed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos() as u64;
+                st.scenes = generate_song(&mood, seed);
+                st.arr_elapsed = 0.0;
+                st.arr_playing = true;
+                st.arr_loop = true;
+                st.auto_mode = true;
+            }
+        }
+        ui.add_space(8.0);
+
+        // ---- Mood selector ----
+        ui.label(RichText::new("Arrangement Mood").color(CYAN).size(11.0));
+        ui.horizontal(|ui| {
+            for (mood_key, label) in &[("ambient", "🌙 Ambient"), ("rhythmic", "⚡ Rhythmic"), ("experimental", "🔬 Experimental")] {
+                let selected = arr_mood == *mood_key;
+                let col = if selected {
+                    match *mood_key {
+                        "ambient"      => Color32::from_rgb(0, 100, 180),
+                        "rhythmic"     => Color32::from_rgb(160, 120, 0),
+                        _              => Color32::from_rgb(100, 0, 160),
+                    }
+                } else {
+                    Color32::from_rgb(30, 30, 50)
+                };
+                if ui.add(Button::new(RichText::new(*label).color(Color32::WHITE).size(11.0))
+                    .fill(col).min_size(Vec2::new(88.0, 26.0))).clicked() {
+                    state.lock().arr_mood = mood_key.to_string();
+                }
+            }
+        });
+    }
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(4.0);
+
+    // ---- Volume + Pause ----
+    {
+        let mut st = state.lock();
+        ui.label(RichText::new("VOLUME").color(Color32::WHITE).strong());
+        ui.add(Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text("Volume"));
+        ui.add_space(6.0);
+        let pause_label = if st.paused { "▶  RESUME" } else { "⏸  PAUSE" };
+        let pause_color = if st.paused { Color32::from_rgb(0, 140, 50) } else { Color32::from_rgb(0, 90, 160) };
+        if ui.add(Button::new(RichText::new(pause_label).color(Color32::WHITE).strong())
+            .fill(pause_color)
+            .min_size(Vec2::new(ui.available_width(), 36.0))).clicked() {
+            st.paused = !st.paused;
+        }
+    }
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(4.0);
+
+    // ---- MACROS ----
+    ui.label(RichText::new("MACROS").color(CYAN).strong().size(13.0));
+    ui.add_space(4.0);
+    {
+        let mut st = state.lock();
+        ui.add(Slider::new(&mut st.macro_chaos, 0.0..=1.0).text("Chaos"))
+            .on_hover_text("Intensity of chaos — higher = more unpredictable pitch movement");
+        ui.add(Slider::new(&mut st.macro_space, 0.0..=1.0).text("Space"))
+            .on_hover_text("Reverb and depth — higher = more spacious and ambient");
+        ui.add(Slider::new(&mut st.macro_rhythm, 0.0..=1.0).text("Rhythm"))
+            .on_hover_text("Rhythmic energy — higher = faster arpeggio and more attack");
+        ui.add(Slider::new(&mut st.macro_warmth, 0.0..=1.0).text("Warmth"))
+            .on_hover_text("Tonal warmth — higher = softer filter and richer harmonics");
+        ui.add_space(6.0);
+        ui.checkbox(&mut st.macro_walk_enabled, RichText::new("Evolve (random walk macros)").color(Color32::WHITE));
+        if st.macro_walk_enabled {
+            ui.add(Slider::new(&mut st.macro_walk_rate, 0.01..=0.5).text("Walk speed"));
+        }
+    }
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(4.0);
+
+    // ---- PRESETS (reused) ----
+    collapsing_section(ui, "PRESETS", false, |ui| {
+        let mut st = state.lock();
+        ui.colored_label(AMBER, "Click a preset to start");
+        ui.add_space(4.0);
+        let selected = st.selected_preset.clone();
+        for preset in PRESETS.iter() {
+            let is_selected = selected == preset.name;
+            let pc = preset.color;
+            let (stroke_color, bg_color) = if is_selected {
+                (pc, Color32::from_rgba_premultiplied(pc.r()/4, pc.g()/4, pc.b()/4, 255))
+            } else {
+                (Color32::from_rgb(50, 50, 80), Color32::from_rgb(20, 20, 35))
+            };
+            let card = egui::Frame::none()
+                .fill(bg_color)
+                .stroke(Stroke::new(if is_selected { 2.0 } else { 1.0 }, stroke_color))
+                .inner_margin(egui::Margin::same(6.0))
+                .rounding(egui::Rounding::same(4.0));
+            let response = card.show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.label(RichText::new(preset.name).strong().color(Color32::WHITE).size(12.0));
+                ui.label(RichText::new(preset.description).italics().color(GRAY_HINT).size(10.0));
+            }).response;
+            if response.interact(Sense::click()).clicked() {
+                st.selected_preset = preset.name.to_string();
+                st.config = load_preset(preset.name);
+                st.system_changed = true;
+                st.mode_changed = true;
+            }
+            ui.add_space(2.0);
+        }
+    });
+
+    // ---- Status ----
+    {
+        let status = state.lock().clip_status.clone();
+        if !status.is_empty() {
+            ui.add_space(4.0);
+            ui.label(RichText::new(&status).color(GRAY_HINT).size(11.0));
+        }
+    }
 }
 
 fn param_range(param: &str) -> (f64, f64) {

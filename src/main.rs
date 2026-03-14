@@ -172,6 +172,9 @@ fn sim_thread(
     let control_period = Duration::from_secs_f64(1.0 / control_rate_hz);
     let mut next_tick = Instant::now();
 
+    // Macro random walk seed
+    let mut walk_seed: u64 = 12345;
+
     // Automation state
     let mut auto_snapshot_timer = 0u64;
     let auto_snapshot_interval = 12u64; // every ~100ms at 120Hz
@@ -357,6 +360,61 @@ fn sim_thread(
             }
         }
 
+        // Auto mode: if auto_mode is on and arrangement not playing, generate and start
+        let (simple_mode, auto_mode) = {
+            let st = shared.lock();
+            (st.simple_mode, st.auto_mode)
+        };
+        if auto_mode && simple_mode {
+            let arr_playing = { shared.lock().arr_playing };
+            if !arr_playing {
+                let mood = { shared.lock().arr_mood.clone() };
+                let seed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos() as u64;
+                let mut st = shared.lock();
+                st.scenes = crate::arrangement::generate_song(&mood, seed);
+                st.arr_elapsed = 0.0;
+                st.arr_playing = true;
+                st.arr_loop = true;
+            }
+        }
+
+        // Apply macro knobs (simple mode only)
+        if simple_mode {
+            let (macro_chaos, macro_space, macro_rhythm, macro_warmth,
+                 macro_walk_enabled, macro_walk_rate) = {
+                let st = shared.lock();
+                (st.macro_chaos, st.macro_space, st.macro_rhythm, st.macro_warmth,
+                 st.macro_walk_enabled, st.macro_walk_rate)
+            };
+
+            // Macro random walk (Brownian motion)
+            if macro_walk_enabled {
+                let dt = 1.0 / control_rate_hz as f32;
+                let step = macro_walk_rate * dt;
+                let r = |seed: &mut u64| -> f32 {
+                    *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    (*seed >> 33) as f32 / u32::MAX as f32 * 2.0 - 1.0
+                };
+                let mut st = shared.lock();
+                st.macro_chaos  = (st.macro_chaos  + r(&mut walk_seed) * step).clamp(0.05, 0.95);
+                st.macro_space  = (st.macro_space  + r(&mut walk_seed) * step).clamp(0.05, 0.95);
+                st.macro_rhythm = (st.macro_rhythm + r(&mut walk_seed) * step).clamp(0.05, 0.95);
+                st.macro_warmth = (st.macro_warmth + r(&mut walk_seed) * step).clamp(0.05, 0.95);
+            }
+
+            // Chaos → speed, sigma, rho
+            config.system.speed = 0.5 + macro_chaos as f64 * 9.5;
+            config.lorenz.sigma = 5.0 + macro_chaos as f64 * 20.0;
+            config.lorenz.rho   = 20.0 + macro_chaos as f64 * 25.0;
+
+            // Space → reverb_wet, chorus_mix, portamento_ms, delay_feedback
+            // (these will be overwritten into params below after mapping)
+            config.sonification.portamento_ms = 10.0 + macro_space * 790.0;
+        }
+
         // Integrate enough steps to cover one control period at the configured speed
         let steps = ((config.system.speed / control_rate_hz) / config.system.dt)
             .round() as usize;
@@ -406,6 +464,25 @@ fn sim_thread(
         params.chorus_depth = config.audio.chorus_depth;
         params.waveshaper_drive = config.audio.waveshaper_drive;
         params.waveshaper_mix = config.audio.waveshaper_mix;
+
+        // Apply macro params to audio params (simple mode only)
+        if simple_mode {
+            let (macro_chaos, macro_space, macro_rhythm, macro_warmth) = {
+                let st = shared.lock();
+                (st.macro_chaos, st.macro_space, st.macro_rhythm, st.macro_warmth)
+            };
+            // Space → reverb_wet, chorus_mix, delay_feedback
+            params.reverb_wet     = macro_space * 0.9;
+            params.chorus_mix     = macro_space * 0.7;
+            params.delay_feedback = macro_space * 0.7;
+            // Rhythm → adsr_attack_ms (shorter = punchier)
+            params.adsr_attack_ms = 200.0 - macro_rhythm * 195.0;
+            // Warmth → filter_cutoff, waveshaper_drive
+            params.filter_cutoff    = 8000.0 - macro_warmth * 7800.0;
+            params.waveshaper_drive = 1.0 + macro_warmth * 4.0;
+            // suppress unused warning for chaos (already applied to config above)
+            let _ = macro_chaos;
+        }
 
         // Voice shapes from config
         params.voice_shapes = [
