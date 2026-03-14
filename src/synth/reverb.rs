@@ -120,6 +120,8 @@ impl Freeverb {
 
     /// Process one stereo sample pair. Returns (left, right).
     pub fn process(&mut self, input_l: f32, input_r: f32) -> (f32, f32) {
+        let input_l = if input_l.is_finite() { input_l } else { 0.0 };
+        let input_r = if input_r.is_finite() { input_r } else { 0.0 };
         let mono_in = (input_l + input_r) * 0.015; // scale to prevent saturation
         let mut out_l = 0.0f32;
         let mut out_r = 0.0f32;
@@ -127,6 +129,14 @@ impl Freeverb {
         for c in &mut self.combs_r { out_r += c.process(mono_in); }
         for a in &mut self.allpass_l { out_l = a.process(out_l); }
         for a in &mut self.allpass_r { out_r = a.process(out_r); }
+        // Sanitize: if reverb buffers are corrupted, reset them
+        if !out_l.is_finite() || !out_r.is_finite() {
+            for c in &mut self.combs_l { c.buf.iter_mut().for_each(|x| *x = 0.0); c.filter_store = 0.0; }
+            for c in &mut self.combs_r { c.buf.iter_mut().for_each(|x| *x = 0.0); c.filter_store = 0.0; }
+            for a in &mut self.allpass_l { a.buf.iter_mut().for_each(|x| *x = 0.0); }
+            for a in &mut self.allpass_r { a.buf.iter_mut().for_each(|x| *x = 0.0); }
+            return (input_l * (1.0 - self.wet), input_r * (1.0 - self.wet));
+        }
         let dry = 1.0 - self.wet;
         (input_l * dry + out_l * self.wet, input_r * dry + out_r * self.wet)
     }

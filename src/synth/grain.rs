@@ -30,7 +30,7 @@ impl Grain {
         if !self.active { return (0.0, 0.0); }
         let env = self.envelope.next_sample();
         let sig = self.osc_phase.sin() * env;
-        self.osc_phase = (self.osc_phase + TAU * self.freq / 44100.0) % TAU;
+        self.osc_phase = (self.osc_phase + TAU * self.freq / 44100.0).rem_euclid(TAU);
         if self.envelope.is_idle() { self.active = false; }
         let l = sig * (1.0 - self.pan.max(0.0));
         let r = sig * (1.0 + self.pan.min(0.0));

@@ -27,9 +27,11 @@ impl DelayLine {
     }
 
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
-        let read_pos = (self.pos + self.buf_l.len() - self.delay_samples) % self.buf_l.len();
-        let del_l = self.buf_l[read_pos];
-        let del_r = self.buf_r[read_pos];
+        let l = if l.is_finite() { l } else { 0.0 };
+        let r = if r.is_finite() { r } else { 0.0 };
+        let read_pos = (self.pos + self.buf_l.len() - self.delay_samples.max(1)) % self.buf_l.len();
+        let del_l = if self.buf_l[read_pos].is_finite() { self.buf_l[read_pos] } else { 0.0 };
+        let del_r = if self.buf_r[read_pos].is_finite() { self.buf_r[read_pos] } else { 0.0 };
         self.buf_l[self.pos] = l + del_l * self.feedback;
         self.buf_r[self.pos] = r + del_r * self.feedback;
         self.pos = (self.pos + 1) % self.buf_l.len();

@@ -26,7 +26,11 @@ impl Limiter {
     }
 
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
-        // Peak detection
+        let l = if l.is_finite() { l.clamp(-10.0, 10.0) } else { 0.0 };
+        let r = if r.is_finite() { r.clamp(-10.0, 10.0) } else { 0.0 };
+
+        // Peak detection — reset envelope if it has gone NaN/inf
+        if !self.envelope.is_finite() { self.envelope = 0.0; }
         let peak = l.abs().max(r.abs());
         if peak > self.envelope {
             self.envelope += self.attack_coeff * (peak - self.envelope);

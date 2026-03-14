@@ -38,15 +38,29 @@ impl BiquadFilter {
     }
 
     pub fn process(&mut self, x: f32) -> f32 {
+        let x = if x.is_finite() { x } else { 0.0 };
         let y = self.b0 * x + self.z1;
         self.z1 = self.b1 * x - self.a1 * y + self.z2;
         self.z2 = self.b2 * x - self.a2 * y;
-        y
+        if y.is_finite() { y } else { self.z1 = 0.0; self.z2 = 0.0; 0.0 }
     }
 
     pub fn update_lp(&mut self, cutoff_hz: f32, q: f32, sample_rate: f32) {
-        let new = Self::low_pass(cutoff_hz, q, sample_rate);
+        // Clamp to safe ranges — zero or near-Nyquist cutoff produces NaN coefficients
+        let cutoff = cutoff_hz.clamp(20.0, sample_rate * 0.45);
+        let q_safe = q.max(0.1);
+        let new = Self::low_pass(cutoff, q_safe, sample_rate);
         self.b0 = new.b0; self.b1 = new.b1; self.b2 = new.b2;
         self.a1 = new.a1; self.a2 = new.a2;
+        // Reset state if it has gone NaN/inf
+        if !self.z1.is_finite() || !self.z2.is_finite() {
+            self.z1 = 0.0; self.z2 = 0.0;
+        }
+    }
+
+    pub fn reset_if_nan(&mut self) {
+        if !self.z1.is_finite() || !self.z2.is_finite() {
+            self.z1 = 0.0; self.z2 = 0.0;
+        }
     }
 }

@@ -188,9 +188,9 @@ impl SynthState {
         self.freq_smooth_rate = (1.0 / (params.portamento_ms.max(1.0) * 0.001 * self.sample_rate)).clamp(0.001, 1.0);
         self.chord_intervals = params.chord_intervals;
         self.master_volume = params.master_volume;
-        self.reverb.wet = params.reverb_wet;
-        self.delay.feedback = params.delay_feedback;
-        self.delay.set_delay_ms(params.delay_ms, self.sample_rate);
+        self.reverb.wet = params.reverb_wet.clamp(0.0, 1.0);
+        self.delay.feedback = params.delay_feedback.clamp(0.0, 0.9); // cap < 1 to prevent runaway
+        self.delay.set_delay_ms(params.delay_ms.max(1.0), self.sample_rate);
         // Bitcrusher
         self.bitcrusher.bit_depth = params.bit_depth;
         self.bitcrusher.rate_crush = params.rate_crush;
@@ -228,7 +228,12 @@ impl SynthState {
 
         let (ld, rd) = self.delay.process(lf, rf);
         let (lrev, rrev) = self.reverb.process(ld, rd);
-        let (lo, ro) = self.limiter.process(lrev, rrev);
+        let (lo_raw, ro_raw) = self.limiter.process(lrev, rrev);
+        // Final NaN/inf guard — any upstream corruption ends here, never reaches the driver
+        let (lo, ro) = (
+            if lo_raw.is_finite() { lo_raw } else { 0.0 },
+            if ro_raw.is_finite() { ro_raw } else { 0.0 },
+        );
 
         // Capture waveform non-blocking
         if let Some(mut wf) = self.waveform.try_lock() {
