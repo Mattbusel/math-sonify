@@ -5,6 +5,7 @@ mod audio;
 mod config;
 mod ui;
 mod patches;
+mod arrangement;
 
 use std::sync::Arc;
 use std::thread;
@@ -14,6 +15,7 @@ use crossbeam_channel::bounded;
 use parking_lot::Mutex;
 
 use crate::config::{Config, load_config};
+use crate::arrangement::{lerp_config, total_duration, scene_at};
 use crate::systems::*;
 use crate::sonification::{
     AudioParams, Sonification,
@@ -268,6 +270,61 @@ fn sim_thread(
             }
         }
 
+        // Arrangement playback
+        let arr_tick = {
+            let mut st = shared.lock();
+            if st.arr_playing {
+                let dt_secs = 1.0 / control_rate_hz as f32;
+                st.arr_elapsed += dt_secs;
+                let elapsed = st.arr_elapsed;
+                let total = total_duration(&st.scenes);
+                if elapsed >= total {
+                    if st.arr_loop {
+                        st.arr_elapsed = elapsed % total.max(0.001);
+                        Some(st.arr_elapsed)
+                    } else {
+                        st.arr_playing = false;
+                        None
+                    }
+                } else {
+                    Some(elapsed)
+                }
+            } else {
+                None
+            }
+        };
+
+        // If arrangement is playing, override config with interpolated value
+        if let Some(elapsed) = arr_tick {
+            let scenes = shared.lock().scenes.clone();
+            if let Some((idx, is_morphing, t)) = scene_at(&scenes, elapsed) {
+                let active_indices: Vec<usize> = (0..scenes.len()).filter(|&i| scenes[i].active).collect();
+                let new_config = if is_morphing {
+                    let ord = active_indices.iter().position(|&i| i == idx).unwrap_or(0);
+                    if ord > 0 {
+                        let prev_idx = active_indices[ord - 1];
+                        lerp_config(&scenes[prev_idx].config, &scenes[idx].config, t)
+                    } else {
+                        scenes[idx].config.clone()
+                    }
+                } else {
+                    scenes[idx].config.clone()
+                };
+                // Check if system or mode changed vs current config before overriding
+                let (cur_sys, cur_mode) = {
+                    let st = shared.lock();
+                    (st.config.system.name.clone(), st.config.sonification.mode.clone())
+                };
+                if new_config.system.name != cur_sys {
+                    shared.lock().system_changed = true;
+                }
+                if new_config.sonification.mode != cur_mode {
+                    shared.lock().mode_changed = true;
+                }
+                config = new_config;
+            }
+        }
+
         // Integrate enough steps to cover one control period at the configured speed
         let steps = ((config.system.speed / control_rate_hz) / config.system.dt)
             .round() as usize;
@@ -335,6 +392,48 @@ fn sim_thread(
             if ks_enabled && is_poincare_crossing {
                 params.ks_trigger = true;
                 params.ks_freq = params.freqs[0].max(50.0);
+            }
+        }
+
+        // Arpeggiator
+        {
+            let (arp_enabled, arp_steps, arp_bpm, arp_octaves) = {
+                let st = shared.lock();
+                (st.arp_enabled, st.arp_steps, st.arp_bpm, st.arp_octaves)
+            };
+
+            if arp_enabled {
+                let step_rate_hz = arp_bpm as f64 / 60.0 * 4.0; // 16th notes
+                let (old_phase, new_phase, arp_pos) = {
+                    let mut st = shared.lock();
+                    let old = st.arp_phase;
+                    st.arp_phase += step_rate_hz / control_rate_hz;
+                    if st.arp_phase >= 1.0 {
+                        st.arp_phase -= 1.0;
+                        let new_pos = (st.arp_position + 1) % arp_steps;
+                        st.arp_position = new_pos;
+                    }
+                    (old, st.arp_phase, st.arp_position)
+                };
+
+                let scale = crate::sonification::Scale::from(config.sonification.scale.as_str());
+                let base = config.sonification.base_frequency as f32;
+                let oct = arp_octaves as f32;
+
+                let t_step = arp_pos as f32 / arp_steps as f32;
+                let state = system.state();
+                let modulation = if !state.is_empty() { (state[0] as f32).tanh() * 0.05 } else { 0.0 };
+                let t = (t_step + modulation).clamp(0.0, 1.0);
+
+                let arp_freq = crate::sonification::quantize_to_scale(t, base, oct, scale);
+
+                let step_triggered = new_phase < old_phase || (old_phase == 0.0 && new_phase > 0.0);
+                if step_triggered {
+                    params.ks_trigger = true;
+                    params.ks_freq = arp_freq;
+                    params.freqs[0] = arp_freq;
+                    params.amps[0] = params.amps[0].max(0.5);
+                }
             }
         }
 

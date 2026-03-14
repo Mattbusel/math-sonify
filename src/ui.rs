@@ -8,6 +8,7 @@ use crate::sonification::chord_intervals_for;
 use crate::patches::{PRESETS, load_preset, save_patch, list_patches, load_patch_file};
 use crate::audio::{WavRecorder, LoopExportPending};
 use crate::systems::*;
+use crate::arrangement::{Scene, total_duration};
 use hound;
 
 /// Shared mutable UI state — written by the UI thread, read by the sim thread.
@@ -58,6 +59,21 @@ pub struct AppState {
     // 3D rotation
     pub rotation_angle: f32,
     pub auto_rotate: bool,
+    // Scene Arranger
+    pub scenes: Vec<Scene>,
+    pub arr_playing: bool,
+    pub arr_elapsed: f32,
+    pub arr_auto_record: bool,
+    pub arr_loop: bool,
+    pub arr_scene_edit: usize,
+    pub arr_was_playing: bool,
+    // Arpeggiator
+    pub arp_enabled: bool,
+    pub arp_steps: usize,
+    pub arp_bpm: f32,
+    pub arp_octaves: usize,
+    pub arp_position: usize,
+    pub arp_phase: f64,
 }
 
 impl AppState {
@@ -100,6 +116,19 @@ impl AppState {
             ks_volume: 0.5,
             rotation_angle: 0.0,
             auto_rotate: false,
+            scenes: (0..8).map(|i| Scene::empty(i)).collect(),
+            arr_playing: false,
+            arr_elapsed: 0.0,
+            arr_auto_record: true,
+            arr_loop: false,
+            arr_scene_edit: 0,
+            arr_was_playing: false,
+            arp_enabled: false,
+            arp_steps: 8,
+            arp_bpm: 120.0,
+            arp_octaves: 1,
+            arp_position: 0,
+            arp_phase: 0.0,
         }
     }
 }
@@ -266,6 +295,7 @@ pub fn draw_ui(
         if i.key_pressed(Key::Num3) { st.viz_tab = 2; }
         if i.key_pressed(Key::Num4) { st.viz_tab = 3; }
         if i.key_pressed(Key::Num5) { st.viz_tab = 4; }
+        if i.key_pressed(Key::Num6) { st.viz_tab = 5; }
     });
 
     SidePanel::left("controls").min_width(300.0).max_width(340.0).show(ctx, |ui| {
@@ -624,13 +654,6 @@ pub fn draw_ui(
                     ui.add(Slider::new(&mut st.config.audio.waveshaper_drive, 1.0..=10.0).text("Drive"));
                 }
 
-                ui.add_space(4.0);
-                ui.label(RichText::new("Plucked Strings").color(Color32::WHITE));
-                ui.checkbox(&mut st.ks_enabled, RichText::new("Enable Plucked Strings (rhythm)").color(Color32::WHITE));
-                if st.ks_enabled {
-                    ui.add(Slider::new(&mut st.ks_volume, 0.0..=1.0).text("Volume"));
-                    ui.label(RichText::new("Triggers on attractor crossings").size(10.0).color(GRAY_HINT));
-                }
             });
 
             // ---- OUTPUT ----
@@ -819,10 +842,51 @@ pub fn draw_ui(
                 });
             });
 
+            // ---- RHYTHM & ARP ----
+            collapsing_section(ui, "RHYTHM & ARP", false, |ui| {
+                ui.checkbox(&mut st.arp_enabled, RichText::new("Enable Arpeggiator").color(Color32::WHITE));
+                if st.arp_enabled {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Steps:").color(Color32::WHITE));
+                        for &s in &[4usize, 8, 16] {
+                            let sel = st.arp_steps == s;
+                            let col = if sel { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
+                            if ui.add(Button::new(RichText::new(format!("{}", s)).color(Color32::WHITE))
+                                .fill(col).min_size(Vec2::new(36.0, 24.0))).clicked() {
+                                st.arp_steps = s;
+                            }
+                        }
+                        ui.separator();
+                        ui.label(RichText::new("Oct:").color(Color32::WHITE));
+                        for &o in &[1usize, 2] {
+                            let sel = st.arp_octaves == o;
+                            let col = if sel { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
+                            if ui.add(Button::new(RichText::new(format!("{}", o)).color(Color32::WHITE))
+                                .fill(col).min_size(Vec2::new(30.0, 24.0))).clicked() {
+                                st.arp_octaves = o;
+                            }
+                        }
+                    });
+                    ui.add(Slider::new(&mut st.arp_bpm, 40.0..=240.0).text("ARP BPM"));
+                    let step_pct = if st.arp_steps > 0 {
+                        (st.arp_position as f32 + 1.0) / st.arp_steps as f32
+                    } else { 0.0 };
+                    ui.add(ProgressBar::new(step_pct)
+                        .text(format!("Step {}/{}", st.arp_position + 1, st.arp_steps)));
+                }
+                ui.add_space(4.0);
+                ui.separator();
+                ui.label(RichText::new("Plucked Strings").color(Color32::WHITE));
+                ui.checkbox(&mut st.ks_enabled, RichText::new("Enable KS (Poincaré rhythm)").color(Color32::WHITE));
+                if st.ks_enabled {
+                    ui.add(Slider::new(&mut st.ks_volume, 0.0..=1.0).text("Volume"));
+                }
+            });
+
             // Keyboard shortcuts hint at very bottom
             ui.add_space(10.0);
             ui.separator();
-            ui.label(RichText::new("Space: pause  ↑↓: vol  ←→: speed  1-5: tabs")
+            ui.label(RichText::new("Space: pause  ↑↓: vol  ←→: speed  1-6: tabs")
                 .size(10.0)
                 .color(GRAY_HINT));
             ui.add_space(4.0);
@@ -833,7 +897,7 @@ pub fn draw_ui(
     CentralPanel::default().show(ctx, |ui| {
         // Tab bar row with theme switcher on the right
         ui.horizontal(|ui| {
-            let tabs = ["Phase Portrait", "Waveform", "Note Map", "Math View", "Bifurcation"];
+            let tabs = ["Phase Portrait", "Waveform", "Note Map", "ARRANGE", "Math View", "Bifurcation"];
             let mut viz_tab = st.viz_tab;
             for (i, name) in tabs.iter().enumerate() {
                 let selected = viz_tab == i;
@@ -910,7 +974,7 @@ pub fn draw_ui(
         }
 
         // Bifurcation controls
-        if viz_tab == 4 {
+        if viz_tab == 5 {
             ui.horizontal(|ui| {
                 let params = ["rho", "sigma", "coupling", "c"];
                 let current_bp = st.bifurc_param.clone();
@@ -989,8 +1053,9 @@ pub fn draw_ui(
             0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate),
             1 => draw_waveform(ui, waveform),
             2 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
-            3 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases),
-            4 => draw_bifurc_diagram(ui, bifurc_data),
+            3 => draw_arrange_tab(ui, state, recording),
+            4 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases),
+            5 => draw_bifurc_diagram(ui, bifurc_data),
             _ => {}
         }
     });
@@ -1004,6 +1069,241 @@ fn param_range(param: &str) -> (f64, f64) {
         "c" => (3.0, 10.0),
         _ => (0.0, 1.0),
     }
+}
+
+fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
+    // Auto-record detection: detect arr_playing transitions
+    {
+        let mut st = state.lock();
+        let now_playing = st.arr_playing;
+        if st.arr_auto_record {
+            if now_playing && !st.arr_was_playing {
+                // Start recording
+                let sr = st.sample_rate;
+                drop(st);
+                let secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let filename = format!("arrangement_{}.wav", secs);
+                let spec = hound::WavSpec {
+                    channels: 2,
+                    sample_rate: sr,
+                    bits_per_sample: 32,
+                    sample_format: hound::SampleFormat::Float,
+                };
+                if let Ok(writer) = hound::WavWriter::create(&filename, spec) {
+                    if let Some(mut lock) = recording.try_lock() {
+                        *lock = Some(writer);
+                    }
+                }
+            } else if !now_playing && st.arr_was_playing {
+                drop(st);
+                if let Some(mut lock) = recording.try_lock() { *lock = None; }
+            } else {
+                drop(st);
+            }
+        } else {
+            drop(st);
+        }
+        state.lock().arr_was_playing = now_playing;
+    }
+
+    let (arr_playing, arr_elapsed, arr_auto_record, arr_loop, scenes_snapshot) = {
+        let st = state.lock();
+        (st.arr_playing, st.arr_elapsed, st.arr_auto_record, st.arr_loop, st.scenes.clone())
+    };
+
+    let total = total_duration(&scenes_snapshot);
+
+    // Top controls bar
+    ui.horizontal(|ui| {
+        let play_col = if arr_playing { Color32::from_rgb(0, 140, 0) } else { Color32::from_rgb(0, 80, 120) };
+        if ui.add(Button::new(RichText::new(if arr_playing { "⏸ Pause" } else { "▶ Play" }).color(Color32::WHITE))
+            .fill(play_col).min_size(Vec2::new(80.0, 28.0))).clicked() {
+            let mut st = state.lock();
+            st.arr_playing = !st.arr_playing;
+            if st.arr_playing && st.arr_elapsed == 0.0 {
+                // reset
+            }
+        }
+        if ui.add(Button::new(RichText::new("■ Stop").color(Color32::WHITE))
+            .fill(Color32::from_rgb(80, 30, 30)).min_size(Vec2::new(60.0, 28.0))).clicked() {
+            let mut st = state.lock();
+            st.arr_playing = false;
+            st.arr_elapsed = 0.0;
+        }
+
+        let loop_col = if arr_loop { Color32::from_rgb(0, 120, 0) } else { Color32::from_rgb(40, 40, 60) };
+        if ui.add(Button::new(RichText::new("⟳ Loop").color(Color32::WHITE))
+            .fill(loop_col).min_size(Vec2::new(60.0, 28.0))).clicked() {
+            state.lock().arr_loop = !arr_loop;
+        }
+
+        let rec_col = if arr_auto_record { Color32::from_rgb(140, 30, 30) } else { Color32::from_rgb(40, 40, 60) };
+        if ui.add(Button::new(RichText::new("⏺ Auto-Rec").color(Color32::WHITE))
+            .fill(rec_col).min_size(Vec2::new(80.0, 28.0))).clicked() {
+            state.lock().arr_auto_record = !arr_auto_record;
+        }
+
+        // Duration label
+        let total_mins = (total / 60.0) as u32;
+        let total_secs = (total % 60.0) as u32;
+        ui.label(RichText::new(format!("  Duration: {}:{:02}", total_mins, total_secs)).color(CYAN));
+    });
+
+    // Progress bar
+    if arr_playing || arr_elapsed > 0.0 {
+        let progress = if total > 0.001 { (arr_elapsed / total).clamp(0.0, 1.0) } else { 0.0 };
+        let elapsed_m = (arr_elapsed / 60.0) as u32;
+        let elapsed_s = (arr_elapsed % 60.0) as u32;
+        ui.add(ProgressBar::new(progress)
+            .text(format!("{:02}:{:02} / {:02}:{:02}", elapsed_m, elapsed_s,
+                (total / 60.0) as u32, (total % 60.0) as u32)));
+    }
+
+    ui.add_space(4.0);
+    ui.separator();
+
+    // Scene list header
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("  ").strong());
+        ui.add_space(18.0);
+        ui.label(RichText::new("Name").color(CYAN).strong().size(11.0));
+        ui.add_space(60.0);
+        ui.label(RichText::new("Hold(s)").color(CYAN).strong().size(11.0));
+        ui.add_space(20.0);
+        ui.label(RichText::new("Morph(s)").color(CYAN).strong().size(11.0));
+        ui.add_space(20.0);
+        ui.label(RichText::new("Actions").color(CYAN).strong().size(11.0));
+    });
+    ui.separator();
+
+    // Scene rows
+    let n_scenes = scenes_snapshot.len();
+    for i in 0..n_scenes {
+        let (mut active, name, hold, morph) = {
+            let st = state.lock();
+            (st.scenes[i].active, st.scenes[i].name.clone(), st.scenes[i].hold_secs, st.scenes[i].morph_secs)
+        };
+
+        ui.horizontal(|ui| {
+            // Active checkbox
+            if ui.checkbox(&mut active, "").changed() {
+                state.lock().scenes[i].active = active;
+            }
+
+            // Scene number
+            ui.label(RichText::new(format!("{}", i + 1)).color(GRAY_HINT).size(11.0));
+
+            // Name text edit
+            let mut name_edit = name.clone();
+            let te = ui.add(TextEdit::singleline(&mut name_edit).desired_width(80.0));
+            if te.changed() {
+                state.lock().scenes[i].name = name_edit;
+            }
+
+            // Hold duration
+            let mut hold_v = hold;
+            if ui.add(DragValue::new(&mut hold_v).clamp_range(5.0..=300.0f32).suffix("s").speed(0.5)).changed() {
+                state.lock().scenes[i].hold_secs = hold_v;
+            }
+
+            // Morph duration
+            let mut morph_v = morph;
+            if ui.add(DragValue::new(&mut morph_v).clamp_range(0.0..=60.0f32).suffix("s").speed(0.1)).changed() {
+                state.lock().scenes[i].morph_secs = morph_v;
+            }
+
+            // Capture button
+            if ui.add(Button::new(RichText::new("Capture").color(Color32::WHITE))
+                .fill(Color32::from_rgb(0, 80, 120))
+                .min_size(Vec2::new(58.0, 22.0))).clicked() {
+                let cfg = state.lock().config.clone();
+                let mut st = state.lock();
+                st.scenes[i].config = cfg;
+                st.scenes[i].active = true;
+            }
+
+            // Load button
+            if ui.add(Button::new(RichText::new("Load").color(Color32::WHITE))
+                .fill(Color32::from_rgb(60, 40, 80))
+                .min_size(Vec2::new(42.0, 22.0))).clicked() {
+                let scene_cfg = state.lock().scenes[i].config.clone();
+                let mut st = state.lock();
+                st.config = scene_cfg;
+                st.system_changed = true;
+                st.mode_changed = true;
+            }
+        });
+    }
+
+    ui.add_space(6.0);
+    ui.colored_label(GRAY_HINT, "Capture your current sound into a scene, set durations, then Play.");
+    ui.add_space(6.0);
+
+    // Visual timeline
+    let scenes_for_tl = state.lock().scenes.clone();
+    draw_arrangement_timeline(ui, &scenes_for_tl, arr_elapsed);
+}
+
+fn draw_arrangement_timeline(ui: &mut Ui, scenes: &[Scene], elapsed: f32) {
+    let total = total_duration(scenes);
+    if total < 0.001 { return; }
+
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::hover());
+    let painter = ui.painter();
+
+    painter.rect_filled(rect, 4.0, Color32::from_rgb(15, 15, 25));
+
+    let colors = [
+        Color32::from_rgb(0, 100, 180),
+        Color32::from_rgb(0, 140, 80),
+        Color32::from_rgb(140, 80, 0),
+        Color32::from_rgb(120, 0, 140),
+        Color32::from_rgb(0, 120, 120),
+        Color32::from_rgb(140, 30, 30),
+        Color32::from_rgb(80, 80, 0),
+        Color32::from_rgb(40, 80, 140),
+    ];
+
+    let mut x = rect.left();
+    let active: Vec<usize> = (0..scenes.len()).filter(|&i| scenes[i].active).collect();
+    for (ord, &idx) in active.iter().enumerate() {
+        let scene = &scenes[idx];
+        let col = colors[idx % colors.len()];
+
+        // Morph segment (darker), skip for first scene
+        if ord > 0 {
+            let w = rect.width() * scene.morph_secs / total;
+            let r = egui::Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(w, rect.height()));
+            painter.rect_filled(r, 0.0, Color32::from_rgba_premultiplied(col.r()/3, col.g()/3, col.b()/3, 200));
+            x += w;
+        }
+
+        // Hold segment
+        let w = rect.width() * scene.hold_secs / total;
+        let r = egui::Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(w, rect.height()));
+        painter.rect_filled(r, 0.0, Color32::from_rgba_premultiplied(col.r(), col.g(), col.b(), 200));
+
+        // Scene name label
+        painter.text(Pos2::new(x + 4.0, rect.center().y), Align2::LEFT_CENTER,
+            &scene.name, FontId::proportional(10.0), Color32::WHITE);
+
+        x += w;
+    }
+
+    // Playhead
+    if elapsed > 0.0 {
+        let px = rect.left() + rect.width() * (elapsed / total).min(1.0);
+        painter.line_segment(
+            [Pos2::new(px, rect.top()), Pos2::new(px, rect.bottom())],
+            Stroke::new(2.0, Color32::from_rgb(255, 220, 0)),
+        );
+    }
+
+    // Border
+    painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(50, 50, 80)));
 }
 
 fn build_bifurc_system(
