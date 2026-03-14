@@ -83,7 +83,6 @@ impl LayerSynth {
             ],
             grains: GrainEngine::new(sr),
             ks: KarplusStrong::new(50.0, sr),
-            voice_adsr: std::array::from_fn(|_| Adsr::new(10.0, 200.0, 0.7, 400.0, sr)),
             partial_phases: [0.0; 32],
             amp_smooth: [0.0; 4],
             freq_smooth: [110.0, 220.0, 330.0, 440.0],
@@ -100,6 +99,13 @@ impl LayerSynth {
             peak: 0.0,
             waveguide: WaveguideString::new(sr),
             freeze_oscs: (0..16).map(|i| Oscillator::new(220.0 * (i + 1) as f32, OscShape::Sine, sr)).collect(),
+            // Immediately trigger ADSRs so continuous synthesis is never gated on launch.
+            // Voices settle into Sustain within ~210ms; KS/arp retrigger for articulation.
+            voice_adsr: {
+                let mut adsr: [Adsr; 4] = std::array::from_fn(|_| Adsr::new(10.0, 200.0, 0.85, 400.0, sr));
+                for a in &mut adsr { a.trigger(); }
+                adsr
+            },
             vocoder_filters: {
                 // 16 bandpass filters geometrically spaced 80 Hz to 8000 Hz
                 (0..16).map(|i| {
@@ -128,6 +134,9 @@ impl LayerSynth {
         // Update ADSR params (without resetting stage so legato works)
         for adsr in &mut self.voice_adsr {
             adsr.set_params(p.adsr_attack_ms, p.adsr_decay_ms, p.adsr_sustain, p.adsr_release_ms);
+            // Auto-trigger idle ADSRs — continuous synthesis must never be gated at zero.
+            // KS/arp retrigger from Attack for articulation; all other cases sustain.
+            if adsr.is_idle() { adsr.trigger(); }
         }
 
         if p.ks_trigger && p.ks_freq > 20.0 {
