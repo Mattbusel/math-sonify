@@ -130,6 +130,9 @@ fn main() -> anyhow::Result<()> {
         }),
     ).map_err(|e| anyhow::anyhow!("eframe error: {e}"))?;
 
+    // WOUND HEALING: clean exit — remove flag so next launch isn't "wounded"
+    let _ = std::fs::remove_file("running.flag");
+
     Ok(())
 }
 
@@ -661,18 +664,19 @@ fn sim_thread(
             prev_speed_for_flinch = config.system.speed;
         }
 
-        // WARMUP: sluggish response for 5s after large speed changes
+        // WARMUP: slight drag on speed for 5s after large jumps (≤15% reduction, never kills audio)
         {
             let speed_delta = (config.system.speed - prev_speed_for_warmup).abs();
             if speed_delta > 2.5 {
                 warmup_ticks_remaining = 600;
-                smoothed_speed = prev_speed_for_warmup;
+                smoothed_speed = config.system.speed;
             }
             prev_speed_for_warmup = config.system.speed;
             if warmup_ticks_remaining > 0 {
-                let t = 1.0 / warmup_ticks_remaining as f64;
-                smoothed_speed = smoothed_speed + (config.system.speed - smoothed_speed) * t;
-                config.system.speed = smoothed_speed;
+                // Fixed lerp rate toward target — only damps, never drives speed to zero
+                smoothed_speed += (config.system.speed - smoothed_speed) * 0.04;
+                let drag = warmup_ticks_remaining as f64 / 600.0; // 1.0 → 0.0 over 5s
+                config.system.speed = config.system.speed * (1.0 - drag * 0.15) + smoothed_speed * (drag * 0.15);
                 warmup_ticks_remaining -= 1;
             }
         }
@@ -1672,10 +1676,7 @@ fn sim_thread(
             // Note: walk step multiplier was applied above in wound_step_mult
         }
 
-        // STARTUP RAMP: multiply speed by ramp factor for first 2 seconds
-        if startup_ramp_t < 1.0 {
-            params.master_volume *= startup_ramp_t;
-        }
+        // STARTUP RAMP: tracked for shutdown fade — volume ramp removed (caused 2s silence on boot)
 
         // SHUTDOWN FADING: ramp master_volume and speed toward 0 over 3 seconds
         {

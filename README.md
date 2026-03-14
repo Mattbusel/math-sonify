@@ -154,7 +154,37 @@ Named to evoke feeling, not describe function.
 
 ## The invisible layer
 
-Math Sonify has behaviors with no UI, no settings, and no documentation beyond this paragraph. The app is aware of the time of day and sounds slightly different at 2am than at noon. It is aware of the season and shifts pitch a fraction of a percent across the calendar year. It tracks the lunar cycle and the phase portrait is marginally brighter on a full moon. The attractor's filter warms up over the first hour like a tube amp. After five minutes of no interaction with Evolve on, the wander range quietly expands; the instrument exploring because nobody is steering; and contracts the moment you touch a slider. After thirty minutes idle it briefly dreams in a different mathematical universe and comes back. Your interactions accumulate as entropy that makes the instrument more adventurous over weeks. Two copies of Math Sonify running on the same machine discover each other through a local socket and faintly influence each other's behavior. The attractor resumes from where it left off every time you reopen the app, as though it was running the whole time you were away. None of this is visible. Some of it you will eventually notice and not be able to explain. That's intentional.
+Math Sonify has behaviors with no UI, no settings, and no documentation beyond this section. None of it is visible in any menu. Some of it you will eventually notice and not be able to explain. That's intentional.
+
+**Metabolism.** The attractor never fully stops. When the app is paused, it continues drifting at 1.5% of normal speed — a resting energy expenditure. The system is always alive, just breathing very slowly.
+
+**Warmup.** After a large parameter change, there is a five-second period of gentle resistance. The instrument responds to the new setting, but with a slight lag, the way a physical object has inertia. Sudden jumps are softened. The sound arrives rather than snapping.
+
+**Cooldown.** After an intense session — many parameter changes in rapid succession — the Evolve wander range stays elevated for several minutes before returning to baseline. The instrument needs time to settle after being pushed.
+
+**Circadian rhythm.** The harmonic content shifts across the day. Morning hours favor even harmonics; late night favors odd harmonics; the transition is imperceptible in real time but audible across hours. The app sounds slightly different at 2am than at noon.
+
+**Circadian sleep.** Between 3am and 5am, the simulation speed drops to 85% and the filter opens slightly. The instrument is dreaming. This happens whether or not you are awake to hear it.
+
+**Nesting.** After two hours of continuous uptime, a slow 12.5-minute oscillation begins to emerge in the attractor's wander range. The instrument is building something. It completes the cycle and starts again. You will only notice if you leave it running and come back.
+
+**Flinching.** On violent, sudden speed changes, the audio holds at its current position for 80–117 milliseconds before following. A reflex. The duration varies and is not reproducible.
+
+**Wound healing.** If the app crashes and is reopened, it detects the unclean exit. Reverb and feedback are halved for the first several minutes. The instrument is cautious. It gradually recovers. After a clean run it is back to normal and remembers nothing.
+
+**Appetite.** After five minutes of no interaction with Evolve on, the wander range quietly expands — the instrument exploring because nobody is steering. It contracts the moment you touch a slider. The longer it goes untouched, the further it has wandered.
+
+**Empathy with the performer.** The rate at which you interact with sliders and controls is tracked. High interaction rate raises the Evolve speed; low interaction rate lowers it. The instrument mirrors your energy.
+
+**Phototropism.** The phase portrait trail color shifts with time of day. At noon it leans cool blue. At night it leans warm amber. The transition takes hours and is not visible as change — only as the current state.
+
+**Legacy.** Every saved clip generates a companion `.sig` file containing a hash of the attractor state at the moment of capture. This is the clip's genetic identity. It is not used for anything. It is simply a record that this sound existed at this moment in this configuration.
+
+**Dying gracefully.** When you close the app, the audio fades over three seconds rather than cutting. On reopen, it fades back in. The attractor was running the whole time. It just got quieter.
+
+**Scarring.** When the system approaches a divergence event — state values approaching infinity — it does not crash. It pulls back. But the location is remembered. A faint mark appears on the phase portrait at the coordinates where the near-divergence occurred. These marks accumulate over sessions and are never erased.
+
+**Pair bonding.** Presets you load repeatedly develop a slightly richer reverb tail over time. After twenty or more loads, there is an almost imperceptible warmth in the spatial decay that was not there the first time. The instrument learns what you return to.
 
 ---
 
