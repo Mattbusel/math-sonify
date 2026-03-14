@@ -6,6 +6,9 @@ pub mod envelope;
 pub mod limiter;
 pub mod grain;
 pub mod bitcrusher;
+pub mod karplus;
+pub mod chorus;
+pub mod waveshaper;
 
 pub use oscillator::{Oscillator, OscShape};
 pub use filter::BiquadFilter;
@@ -15,3 +18,6 @@ pub use envelope::Adsr;
 pub use limiter::Limiter;
 pub use grain::GrainEngine;
 pub use bitcrusher::Bitcrusher;
+pub use karplus::KarplusStrong;
+pub use chorus::Chorus;
+pub use waveshaper::Waveshaper;

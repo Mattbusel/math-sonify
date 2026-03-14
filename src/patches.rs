@@ -1,19 +1,24 @@
 use crate::config::*;
+use egui::Color32;
 
 pub struct Preset {
     pub name: &'static str,
     pub description: &'static str,
+    pub color: egui::Color32,
 }
 
 pub const PRESETS: &[Preset] = &[
-    Preset { name: "Lorenz Ambience", description: "Slow drift through the butterfly attractor" },
-    Preset { name: "Pendulum Rhythm", description: "Chaotic pendulum drives granular pulses" },
-    Preset { name: "Torus Drone", description: "Ergodic geodesic flow, major chord, deep reverb" },
-    Preset { name: "Kuramoto Sync", description: "Watch synchronization emerge as you raise coupling" },
-    Preset { name: "Three-Body Jazz", description: "Figure-8 orbit, dom7 chord, spectral mode" },
-    Preset { name: "Rössler Drift", description: "Gentle spiral attractor, microtonal scale" },
-    Preset { name: "FM Chaos", description: "Frequency modulation driven by the butterfly attractor" },
-    Preset { name: "Pendulum Meditation", description: "Slow pendulum drift through pure harmonic ratios" },
+    Preset { name: "Lorenz Ambience", description: "Slow drift through the butterfly attractor", color: Color32::from_rgb(0, 160, 220) },
+    Preset { name: "Pendulum Rhythm", description: "Chaotic pendulum drives granular pulses", color: Color32::from_rgb(220, 120, 0) },
+    Preset { name: "Torus Drone", description: "Ergodic geodesic flow, major chord, deep reverb", color: Color32::from_rgb(140, 80, 220) },
+    Preset { name: "Kuramoto Sync", description: "Watch synchronization emerge as you raise coupling", color: Color32::from_rgb(0, 200, 100) },
+    Preset { name: "Three-Body Jazz", description: "Figure-8 orbit, dom7 chord, spectral mode", color: Color32::from_rgb(200, 170, 0) },
+    Preset { name: "Rössler Drift", description: "Gentle spiral attractor, microtonal scale", color: Color32::from_rgb(220, 80, 140) },
+    Preset { name: "FM Chaos", description: "Frequency modulation driven by the butterfly attractor", color: Color32::from_rgb(220, 40, 40) },
+    Preset { name: "Pendulum Meditation", description: "Slow pendulum drift through pure harmonic ratios", color: Color32::from_rgb(0, 180, 160) },
+    Preset { name: "Duffing Rhythm", description: "Period-doubling chaos — rhythmic clicking and pulsing", color: Color32::from_rgb(200, 100, 50) },
+    Preset { name: "Chua Grit", description: "Electronic double-scroll — raw gritty harmonic buzz", color: Color32::from_rgb(180, 30, 200) },
+    Preset { name: "Halvorsen Spiral", description: "Dense spiral attractor — layered harmonic drifts", color: Color32::from_rgb(50, 150, 220) },
 ];
 
 pub fn load_preset(name: &str) -> Config {
@@ -117,6 +122,45 @@ pub fn load_preset(name: &str) -> Config {
                 voice_shapes: ["sine".into(), "sine".into(), "sine".into(), "sine".into()],
             },
             audio: AudioConfig { reverb_wet: 0.75, delay_ms: 700.0, delay_feedback: 0.3, master_volume: 0.65, ..Default::default() },
+            ..Default::default()
+        },
+        "Duffing Rhythm" => Config {
+            system: SystemConfig { name: "duffing".into(), dt: 0.001, speed: 2.0 },
+            sonification: SonificationConfig {
+                mode: "direct".into(), scale: "pentatonic".into(),
+                base_frequency: 220.0, octave_range: 2.0,
+                chord_mode: "power".into(), transpose_semitones: 0.0,
+                voice_levels: [1.0, 0.8, 0.6, 0.4], portamento_ms: 50.0,
+                voice_shapes: ["sine".into(), "sine".into(), "sine".into(), "sine".into()],
+            },
+            audio: AudioConfig { reverb_wet: 0.0, delay_ms: 200.0, delay_feedback: 0.3, master_volume: 0.75, ..Default::default() },
+            duffing: DuffingConfig { delta: 0.3, alpha: -1.0, beta: 1.0, gamma: 0.5, omega: 1.2 },
+            ..Default::default()
+        },
+        "Chua Grit" => Config {
+            system: SystemConfig { name: "chua".into(), dt: 0.0005, speed: 1.0 },
+            sonification: SonificationConfig {
+                mode: "spectral".into(), scale: "chromatic".into(),
+                base_frequency: 110.0, octave_range: 3.0,
+                chord_mode: "dom7".into(), transpose_semitones: 0.0,
+                voice_levels: [1.0, 0.9, 0.7, 0.5], portamento_ms: 80.0,
+                voice_shapes: ["saw".into(), "saw".into(), "sine".into(), "sine".into()],
+            },
+            audio: AudioConfig { reverb_wet: 0.45, delay_ms: 300.0, delay_feedback: 0.4, master_volume: 0.7, ..Default::default() },
+            chua: ChuaConfig { alpha: 15.6, beta: 28.0, m0: -1.143, m1: -0.714 },
+            ..Default::default()
+        },
+        "Halvorsen Spiral" => Config {
+            system: SystemConfig { name: "halvorsen".into(), dt: 0.001, speed: 0.8 },
+            sonification: SonificationConfig {
+                mode: "orbital".into(), scale: "just_intonation".into(),
+                base_frequency: 110.0, octave_range: 3.5,
+                chord_mode: "major".into(), transpose_semitones: 0.0,
+                voice_levels: [1.0, 0.8, 0.6, 0.4], portamento_ms: 200.0,
+                voice_shapes: ["sine".into(), "sine".into(), "sine".into(), "sine".into()],
+            },
+            audio: AudioConfig { reverb_wet: 0.6, delay_ms: 400.0, delay_feedback: 0.35, master_volume: 0.7, ..Default::default() },
+            halvorsen: HalvorsenConfig { a: 1.89 },
             ..Default::default()
         },
         _ => Config::default(),

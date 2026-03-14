@@ -4,6 +4,11 @@ pub mod double_pendulum;
 pub mod geodesic_torus;
 pub mod kuramoto;
 pub mod three_body;
+pub mod duffing;
+pub mod van_der_pol;
+pub mod halvorsen;
+pub mod aizawa;
+pub mod chua;
 
 pub use lorenz::Lorenz;
 pub use rossler::Rossler;
@@ -11,6 +16,11 @@ pub use double_pendulum::DoublePendulum;
 pub use geodesic_torus::GeodesicTorus;
 pub use kuramoto::Kuramoto;
 pub use three_body::ThreeBody;
+pub use duffing::Duffing;
+pub use van_der_pol::VanDerPol;
+pub use halvorsen::Halvorsen;
+pub use aizawa::Aizawa;
+pub use chua::Chua;
 
 /// A continuous-time dynamical system that can be stepped forward.
 pub trait DynamicalSystem: Send {

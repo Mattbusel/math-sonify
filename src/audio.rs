@@ -11,6 +11,7 @@ use crossbeam_channel::Receiver;
 use crate::sonification::{AudioParams, SonifMode};
 use crate::synth::{
     Oscillator, OscShape, BiquadFilter, Freeverb, DelayLine, Limiter, GrainEngine, Bitcrusher,
+    KarplusStrong, Chorus, Waveshaper,
 };
 
 pub type WavRecorder = Arc<parking_lot::Mutex<Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>>>;
@@ -121,6 +122,9 @@ struct SynthState {
     limiter: Limiter,
     grains: GrainEngine,
     bitcrusher: Bitcrusher,
+    ks: KarplusStrong,
+    chorus: Chorus,
+    waveshaper: Waveshaper,
     partial_phases: [f32; 32],
     amp_smooth: [f32; 4],
     freq_smooth: [f32; 4],
@@ -164,6 +168,9 @@ impl SynthState {
             limiter: Limiter::new(-1.0, 5.0, sample_rate),
             grains: GrainEngine::new(sample_rate),
             bitcrusher: Bitcrusher::new(),
+            ks: KarplusStrong::new(50.0, sample_rate),
+            chorus: Chorus::new(sample_rate),
+            waveshaper: Waveshaper::new(),
             partial_phases: [0.0; 32],
             amp_smooth: [0.0; 4],
             freq_smooth: [220.0, 440.0, 660.0, 880.0],
@@ -194,6 +201,18 @@ impl SynthState {
         // Bitcrusher
         self.bitcrusher.bit_depth = params.bit_depth;
         self.bitcrusher.rate_crush = params.rate_crush;
+        // Karplus-Strong
+        if params.ks_trigger && params.ks_freq > 20.0 {
+            self.ks.trigger(params.ks_freq, self.sample_rate);
+        }
+        self.ks.volume = params.ks_volume;
+        // Chorus
+        self.chorus.mix = params.chorus_mix;
+        self.chorus.rate = params.chorus_rate;
+        self.chorus.depth = params.chorus_depth;
+        // Waveshaper
+        self.waveshaper.drive = params.waveshaper_drive;
+        self.waveshaper.mix = params.waveshaper_mix;
         // Voice shapes
         for i in 0..4 {
             self.oscs[i].shape = params.voice_shapes[i];
@@ -219,15 +238,22 @@ impl SynthState {
             SonifMode::FM => self.synth_fm(),
         };
 
-        let lf = self.filter.process(l);
-        let rf = self.filter.process(r);
+        // Waveshaper (before filter)
+        let l = self.waveshaper.process(l);
+        let r = self.waveshaper.process(r);
+
+        // Karplus-Strong mixed in before filter
+        let ks_sample = self.ks.next_sample();
+        let lf = self.filter.process(l + ks_sample * 0.5);
+        let rf = self.filter.process(r + ks_sample * 0.5);
 
         // Bitcrusher
         let lf = self.bitcrusher.process(lf);
         let rf = self.bitcrusher.process(rf);
 
         let (ld, rd) = self.delay.process(lf, rf);
-        let (lrev, rrev) = self.reverb.process(ld, rd);
+        let (lc, rc) = self.chorus.process(ld, rd);
+        let (lrev, rrev) = self.reverb.process(lc, rc);
         let (lo_raw, ro_raw) = self.limiter.process(lrev, rrev);
         // Final NaN/inf guard — any upstream corruption ends here, never reaches the driver
         let (lo, ro) = (

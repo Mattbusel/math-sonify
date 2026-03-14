@@ -13,6 +13,11 @@ pub struct Config {
     pub geodesic_torus: GeodesicTorusConfig,
     pub kuramoto: KuramotoConfig,
     pub viz: VizConfig,
+    pub duffing: DuffingConfig,
+    pub van_der_pol: VanDerPolConfig,
+    pub halvorsen: HalvorsenConfig,
+    pub aizawa: AizawaConfig,
+    pub chua: ChuaConfig,
 }
 
 impl Default for Config {
@@ -27,6 +32,11 @@ impl Default for Config {
             geodesic_torus: GeodesicTorusConfig::default(),
             kuramoto: KuramotoConfig::default(),
             viz: VizConfig::default(),
+            duffing: DuffingConfig::default(),
+            van_der_pol: VanDerPolConfig::default(),
+            halvorsen: HalvorsenConfig::default(),
+            aizawa: AizawaConfig::default(),
+            chua: ChuaConfig::default(),
         }
     }
 }
@@ -101,6 +111,11 @@ pub struct AudioConfig {
     pub master_volume: f32,
     pub bit_depth: f32,
     pub rate_crush: f32,
+    pub chorus_mix: f32,
+    pub chorus_rate: f32,
+    pub chorus_depth: f32,
+    pub waveshaper_drive: f32,
+    pub waveshaper_mix: f32,
 }
 
 impl Default for AudioConfig {
@@ -114,6 +129,11 @@ impl Default for AudioConfig {
             master_volume: 0.7,
             bit_depth: 16.0,
             rate_crush: 0.0,
+            chorus_mix: 0.0,
+            chorus_rate: 0.5,
+            chorus_depth: 3.0,
+            waveshaper_drive: 1.0,
+            waveshaper_mix: 0.0,
         }
     }
 }
@@ -169,6 +189,63 @@ pub struct KuramotoConfig {
 }
 impl Default for KuramotoConfig {
     fn default() -> Self { Self { n_oscillators: 8, coupling: 1.5 } }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct DuffingConfig {
+    pub delta: f64,
+    pub alpha: f64,
+    pub beta: f64,
+    pub gamma: f64,
+    pub omega: f64,
+}
+impl Default for DuffingConfig {
+    fn default() -> Self { Self { delta: 0.3, alpha: -1.0, beta: 1.0, gamma: 0.5, omega: 1.2 } }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct VanDerPolConfig {
+    pub mu: f64,
+}
+impl Default for VanDerPolConfig {
+    fn default() -> Self { Self { mu: 2.0 } }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct HalvorsenConfig {
+    pub a: f64,
+}
+impl Default for HalvorsenConfig {
+    fn default() -> Self { Self { a: 1.89 } }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AizawaConfig {
+    pub a: f64,
+    pub b: f64,
+    pub c: f64,
+    pub d: f64,
+    pub e: f64,
+    pub f: f64,
+}
+impl Default for AizawaConfig {
+    fn default() -> Self { Self { a: 0.95, b: 0.7, c: 0.6, d: 3.5, e: 0.25, f: 0.1 } }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ChuaConfig {
+    pub alpha: f64,
+    pub beta: f64,
+    pub m0: f64,
+    pub m1: f64,
+}
+impl Default for ChuaConfig {
+    fn default() -> Self { Self { alpha: 15.6, beta: 28.0, m0: -1.143, m1: -0.714 } }
 }
 
 // --- Conversions from string config to enums ---

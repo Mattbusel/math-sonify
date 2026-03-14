@@ -64,6 +64,17 @@ pub struct AudioParams {
     /// Bitcrusher parameters
     pub bit_depth: f32,
     pub rate_crush: f32,
+    /// Karplus-Strong trigger
+    pub ks_trigger: bool,
+    pub ks_freq: f32,
+    pub ks_volume: f32,
+    /// Chorus parameters
+    pub chorus_mix: f32,
+    pub chorus_rate: f32,
+    pub chorus_depth: f32,
+    /// Waveshaper parameters
+    pub waveshaper_drive: f32,
+    pub waveshaper_mix: f32,
 }
 
 impl Default for AudioParams {
@@ -96,6 +107,14 @@ impl Default for AudioParams {
             voice_shapes: [OscShape::Sine; 4],
             bit_depth: 16.0,
             rate_crush: 0.0,
+            ks_trigger: false,
+            ks_freq: 220.0,
+            ks_volume: 0.5,
+            chorus_mix: 0.0,
+            chorus_rate: 0.5,
+            chorus_depth: 3.0,
+            waveshaper_drive: 1.0,
+            waveshaper_mix: 0.0,
         }
     }
 }

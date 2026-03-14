@@ -52,6 +52,12 @@ pub struct AppState {
     pub bifurc_param: String,
     // Loop export
     pub loop_bars: u32,
+    // Karplus-Strong
+    pub ks_enabled: bool,
+    pub ks_volume: f32,
+    // 3D rotation
+    pub rotation_angle: f32,
+    pub auto_rotate: bool,
 }
 
 impl AppState {
@@ -90,6 +96,10 @@ impl AppState {
             bifurc_computing: false,
             bifurc_param: "rho".into(),
             loop_bars: 4,
+            ks_enabled: false,
+            ks_volume: 0.5,
+            rotation_angle: 0.0,
+            auto_rotate: false,
         }
     }
 }
@@ -157,6 +167,11 @@ fn system_display_name(s: &str) -> &'static str {
         "geodesic_torus" => "Geodesic Torus",
         "kuramoto" => "Kuramoto Oscillators",
         "three_body" => "Three-Body Problem",
+        "duffing" => "Duffing Oscillator",
+        "van_der_pol" => "Van der Pol",
+        "halvorsen" => "Halvorsen",
+        "aizawa" => "Aizawa",
+        "chua" => "Chua's Circuit",
         _ => "Unknown System",
     }
 }
@@ -169,6 +184,11 @@ fn system_internal_name(display: &str) -> &'static str {
         "Geodesic Torus" => "geodesic_torus",
         "Kuramoto Oscillators" => "kuramoto",
         "Three-Body Problem" => "three_body",
+        "Duffing Oscillator" => "duffing",
+        "Van der Pol" => "van_der_pol",
+        "Halvorsen" => "halvorsen",
+        "Aizawa" => "aizawa",
+        "Chua's Circuit" => "chua",
         _ => "lorenz",
     }
 }
@@ -301,8 +321,9 @@ pub fn draw_ui(
                 let selected = st.selected_preset.clone();
                 for preset in PRESETS.iter() {
                     let is_selected = selected == preset.name;
+                    let pc = preset.color;
                     let (stroke_color, bg_color) = if is_selected {
-                        (Color32::from_rgb(0, 180, 255), Color32::from_rgb(0, 40, 70))
+                        (pc, Color32::from_rgba_premultiplied(pc.r()/4, pc.g()/4, pc.b()/4, 255))
                     } else {
                         (Color32::from_rgb(50, 50, 80), Color32::from_rgb(20, 20, 35))
                     };
@@ -450,7 +471,7 @@ pub fn draw_ui(
 
             // ---- PHYSICS ENGINE ----
             collapsing_section(ui, "PHYSICS ENGINE", false, |ui| {
-                let systems_internal = ["lorenz", "rossler", "double_pendulum", "geodesic_torus", "kuramoto", "three_body"];
+                let systems_internal = ["lorenz", "rossler", "double_pendulum", "geodesic_torus", "kuramoto", "three_body", "duffing", "van_der_pol", "halvorsen", "aizawa", "chua"];
                 let systems_display: Vec<&str> = systems_internal.iter().map(|s| system_display_name(s)).collect();
                 let current_sys = st.config.system.name.clone();
                 let current_display = system_display_name(&current_sys);
@@ -502,6 +523,26 @@ pub fn draw_ui(
                         "kuramoto" => {
                             let r = ui.add(Slider::new(&mut st.config.kuramoto.coupling, 0.0..=5.0).text("Coupling K"));
                             r.on_hover_text("Coupling — drag up from 0 to hear synchronization happen");
+                        }
+                        "duffing" => {
+                            ui.add(Slider::new(&mut st.config.duffing.delta, 0.1..=1.0).text("delta"));
+                            ui.add(Slider::new(&mut st.config.duffing.gamma, 0.0..=1.5).text("Forcing"));
+                            ui.add(Slider::new(&mut st.config.duffing.omega, 0.5..=3.0).text("Drive freq"));
+                        }
+                        "van_der_pol" => {
+                            ui.add(Slider::new(&mut st.config.van_der_pol.mu, 0.1..=5.0).text("Nonlinearity"));
+                        }
+                        "halvorsen" => {
+                            ui.add(Slider::new(&mut st.config.halvorsen.a, 1.0..=3.0).text("a"));
+                        }
+                        "aizawa" => {
+                            ui.add(Slider::new(&mut st.config.aizawa.a, 0.5..=1.5).text("a"));
+                            ui.add(Slider::new(&mut st.config.aizawa.c, 0.3..=1.0).text("c"));
+                            ui.add(Slider::new(&mut st.config.aizawa.d, 2.0..=5.0).text("d"));
+                        }
+                        "chua" => {
+                            ui.add(Slider::new(&mut st.config.chua.alpha, 10.0..=20.0).text("alpha"));
+                            ui.add(Slider::new(&mut st.config.chua.beta, 20.0..=35.0).text("beta"));
                         }
                         _ => {}
                     }
@@ -569,6 +610,27 @@ pub fn draw_ui(
                 ui.label(RichText::new("Bitcrusher").color(Color32::WHITE));
                 ui.add(Slider::new(&mut st.config.audio.bit_depth, 1.0..=16.0).text("Bit Depth"));
                 ui.add(Slider::new(&mut st.config.audio.rate_crush, 0.0..=1.0).text("Rate Crush"));
+
+                ui.add_space(4.0);
+                ui.label(RichText::new("Chorus").color(Color32::WHITE));
+                ui.add(Slider::new(&mut st.config.audio.chorus_mix, 0.0..=1.0).text("Chorus"));
+                ui.add(Slider::new(&mut st.config.audio.chorus_rate, 0.1..=5.0).text("Chorus Rate"));
+                ui.add(Slider::new(&mut st.config.audio.chorus_depth, 0.5..=10.0).text("Depth ms"));
+
+                ui.add_space(4.0);
+                ui.label(RichText::new("Saturation").color(Color32::WHITE));
+                ui.add(Slider::new(&mut st.config.audio.waveshaper_mix, 0.0..=1.0).text("Saturation"));
+                if st.config.audio.waveshaper_mix > 0.0 {
+                    ui.add(Slider::new(&mut st.config.audio.waveshaper_drive, 1.0..=10.0).text("Drive"));
+                }
+
+                ui.add_space(4.0);
+                ui.label(RichText::new("Plucked Strings").color(Color32::WHITE));
+                ui.checkbox(&mut st.ks_enabled, RichText::new("Enable Plucked Strings (rhythm)").color(Color32::WHITE));
+                if st.ks_enabled {
+                    ui.add(Slider::new(&mut st.ks_volume, 0.0..=1.0).text("Volume"));
+                    ui.label(RichText::new("Triggers on attractor crossings").size(10.0).color(GRAY_HINT));
+                }
             });
 
             // ---- OUTPUT ----
@@ -812,6 +874,10 @@ pub fn draw_ui(
         // Trail length slider + projection buttons for Phase Portrait tab
         let viz_tab = st.viz_tab;
         if viz_tab == 0 {
+            // Auto-rotate increment
+            if st.auto_rotate {
+                st.rotation_angle = (st.rotation_angle + 0.005) % std::f32::consts::TAU;
+            }
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Trail:").color(Color32::WHITE));
                 ui.add(Slider::new(&mut st.config.viz.trail_length, 100..=2000).text("pts"));
@@ -827,6 +893,18 @@ pub fn draw_ui(
                     ).clicked() {
                         st.viz_projection = i;
                     }
+                }
+                ui.separator();
+                let rot_color = if st.auto_rotate { Color32::from_rgb(0, 160, 100) } else { Color32::from_rgb(40, 40, 70) };
+                if ui.add(
+                    Button::new(RichText::new("3D Rotate").color(Color32::WHITE))
+                        .fill(rot_color)
+                        .min_size(Vec2::new(72.0, 22.0))
+                ).clicked() {
+                    st.auto_rotate = !st.auto_rotate;
+                }
+                if !st.auto_rotate {
+                    ui.add(Slider::new(&mut st.rotation_angle, 0.0..=std::f32::consts::TAU).text("Angle"));
                 }
             });
         }
@@ -888,6 +966,8 @@ pub fn draw_ui(
         ui.separator();
 
         let projection = st.viz_projection;
+        let rotation_angle = st.rotation_angle;
+        let auto_rotate = st.auto_rotate;
         let system_name = st.config.system.name.clone();
         let mode_name = st.config.sonification.mode.clone();
         let freqs = [
@@ -906,7 +986,7 @@ pub fn draw_ui(
         drop(st); // release lock before painting
 
         match viz_tab {
-            0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection),
+            0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate),
             1 => draw_waveform(ui, waveform),
             2 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
             3 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases),
@@ -1017,6 +1097,8 @@ fn draw_phase_portrait(
     current_state: &[f64],
     current_deriv: &[f64],
     projection: usize,
+    rotation_angle: f32,
+    auto_rotate: bool,
 ) {
     let avail = ui.available_size();
     let (response, painter) = ui.allocate_painter(avail, Sense::hover());
@@ -1035,12 +1117,24 @@ fn draw_phase_portrait(
         return;
     }
 
-    // Extract projected coordinates
+    // Extract projected coordinates (with optional 3D Y-axis rotation)
+    let use_3d = auto_rotate || rotation_angle.abs() > 0.01;
+    let cos_a = rotation_angle.cos();
+    let sin_a = rotation_angle.sin();
     let proj_pts: Vec<(f32, f32, f32, bool)> = points.iter().map(|&(x, y, z, s, c)| {
-        let (pa, pb) = match projection {
-            1 => (x, z), // XZ
-            2 => (y, z), // YZ
-            _ => (x, y), // XY
+        let (pa, pb) = if use_3d {
+            // Rotate around Y axis
+            let rx = x * cos_a + z * sin_a;
+            let rz = -x * sin_a + z * cos_a;
+            let d = 3.0f32;
+            let perspective = d / (d + rz * 0.3 + 1.0).max(0.1);
+            (rx * perspective, y * perspective)
+        } else {
+            match projection {
+                1 => (x, z), // XZ
+                2 => (y, z), // YZ
+                _ => (x, y), // XY
+            }
         };
         (pa, pb, s, c)
     }).collect();
@@ -1070,7 +1164,23 @@ fn draw_phase_portrait(
 
     let n = proj_pts.len();
 
-    // Draw trail
+    // Draw trail — glow pass first, then bright core pass
+    for (idx, w) in proj_pts.windows(2).enumerate() {
+        let (x0, y0, s0, _) = w[0];
+        let (x1, y1, _, _) = w[1];
+        let p0 = to_screen(x0, y0);
+        let p1 = to_screen(x1, y1);
+        let recency = idx as f32 / n as f32;
+        let alpha = (recency * 255.0) as u8;
+        let col = speed_color(s0);
+        let glow_col = Color32::from_rgba_premultiplied(
+            (col.r() as f32 * recency * 0.3) as u8,
+            (col.g() as f32 * recency * 0.3) as u8,
+            (col.b() as f32 * recency * 0.3) as u8,
+            (alpha as f32 * 0.3) as u8,
+        );
+        painter.line_segment([p0, p1], Stroke::new(3.0, glow_col));
+    }
     for (idx, w) in proj_pts.windows(2).enumerate() {
         let (x0, y0, s0, _) = w[0];
         let (x1, y1, _, _) = w[1];
@@ -1085,14 +1195,7 @@ fn draw_phase_portrait(
             (col.b() as f32 * recency) as u8,
             alpha,
         );
-        let glow_col = Color32::from_rgba_premultiplied(
-            (col.r() as f32 * recency * 0.3) as u8,
-            (col.g() as f32 * recency * 0.3) as u8,
-            (col.b() as f32 * recency * 0.3) as u8,
-            (alpha as f32 * 0.3) as u8,
-        );
-        painter.line_segment([p0, p1], Stroke::new(4.0, glow_col));
-        painter.line_segment([p0, p1], Stroke::new(1.5, col_a));
+        painter.line_segment([p0, p1], Stroke::new(1.2, col_a));
     }
 
     // Poincaré section dots

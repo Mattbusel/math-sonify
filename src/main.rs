@@ -276,6 +276,7 @@ fn sim_thread(
         }
 
         // Update visualization
+        let mut is_poincare_crossing = false;
         {
             let state = system.state();
             if state.len() >= 2 {
@@ -290,6 +291,7 @@ fn sim_thread(
                 let prev_z = vh.last().map(|p| p.2).unwrap_or(0.0);
                 let mean_z_approx = 25.0f32;
                 let is_crossing = prev_z < mean_z_approx && z >= mean_z_approx;
+                is_poincare_crossing = is_crossing;
                 vh.push((state[0] as f32, state[1] as f32, z, speed_norm, is_crossing));
             }
         }
@@ -310,6 +312,11 @@ fn sim_thread(
         params.delay_feedback = config.audio.delay_feedback;
         params.bit_depth = config.audio.bit_depth;
         params.rate_crush = config.audio.rate_crush;
+        params.chorus_mix = config.audio.chorus_mix;
+        params.chorus_rate = config.audio.chorus_rate;
+        params.chorus_depth = config.audio.chorus_depth;
+        params.waveshaper_drive = config.audio.waveshaper_drive;
+        params.waveshaper_mix = config.audio.waveshaper_mix;
 
         // Voice shapes from config
         params.voice_shapes = [
@@ -318,6 +325,18 @@ fn sim_thread(
             osc_shape_from_str(&config.sonification.voice_shapes[2]),
             osc_shape_from_str(&config.sonification.voice_shapes[3]),
         ];
+
+        // Karplus-Strong trigger on Poincaré crossings
+        {
+            let st = shared.lock();
+            let ks_enabled = st.ks_enabled;
+            let ks_vol = st.ks_volume;
+            params.ks_volume = ks_vol;
+            if ks_enabled && is_poincare_crossing {
+                params.ks_trigger = true;
+                params.ks_freq = params.freqs[0].max(50.0);
+            }
+        }
 
         // Update shared state from simulation
         {
@@ -363,6 +382,43 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
         "geodesic_torus"  => Box::new(GeodesicTorus::new(config.geodesic_torus.big_r, config.geodesic_torus.r)),
         "kuramoto"        => Box::new(Kuramoto::new(config.kuramoto.n_oscillators, config.kuramoto.coupling)),
         "three_body"      => Box::new(ThreeBody::new([1.0, 1.0, 1.0])),
+        "duffing"         => {
+            let mut s = Duffing::new();
+            s.delta = config.duffing.delta;
+            s.alpha = config.duffing.alpha;
+            s.beta  = config.duffing.beta;
+            s.gamma = config.duffing.gamma;
+            s.omega = config.duffing.omega;
+            Box::new(s)
+        }
+        "van_der_pol"     => {
+            let mut s = VanDerPol::new();
+            s.mu = config.van_der_pol.mu;
+            Box::new(s)
+        }
+        "halvorsen"       => {
+            let mut s = Halvorsen::new();
+            s.a = config.halvorsen.a;
+            Box::new(s)
+        }
+        "aizawa"          => {
+            let mut s = Aizawa::new();
+            s.a = config.aizawa.a;
+            s.b = config.aizawa.b;
+            s.c = config.aizawa.c;
+            s.d = config.aizawa.d;
+            s.e = config.aizawa.e;
+            s.f = config.aizawa.f;
+            Box::new(s)
+        }
+        "chua"            => {
+            let mut s = Chua::new();
+            s.alpha = config.chua.alpha;
+            s.beta  = config.chua.beta;
+            s.m0    = config.chua.m0;
+            s.m1    = config.chua.m1;
+            Box::new(s)
+        }
         _                 => Box::new(Lorenz::new(config.lorenz.sigma, config.lorenz.rho, config.lorenz.beta)),
     }
 }
