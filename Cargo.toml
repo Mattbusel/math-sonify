@@ -12,7 +12,7 @@ path = "src/main.rs"
 [lib]
 name = "math_sonify_plugin"
 path = "src/plugin.rs"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Audio I/O
