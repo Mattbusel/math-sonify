@@ -50,6 +50,9 @@ pub trait DynamicalSystem: Send {
     fn current_deriv(&self) -> Vec<f64> {
         self.deriv_at(self.state())
     }
+
+    /// Load a saved state vector. Default: no-op (systems that don't override will ignore).
+    fn set_state(&mut self, _s: &[f64]) {}
 }
 
 /// Runge-Kutta 4 helper. Integrates `f(state) -> derivative` by dt.

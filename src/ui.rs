@@ -178,6 +178,15 @@ pub struct AppState {
     pub show_tips_window: bool,
     // Simple panel preset expansion
     pub simple_show_all_presets: bool,
+    // Ghost trails: periodic snapshots of the phase portrait trajectory
+    // Appear every 10-15 min, fade over a few seconds — visual memory of the attractor's past
+    pub portrait_ghosts: Vec<(Vec<(f32, f32)>, std::time::Instant)>,
+    pub portrait_ghost_last_capture: std::time::Instant,
+    // Portrait ink: long-session accumulated stain (x, y) positions
+    // Live trail is bright; historical stain is almost invisible
+    // Over hours the entire reachable set faintly emerges
+    pub portrait_ink: Vec<(f32, f32)>,
+    pub portrait_ink_sample_counter: u32,
 }
 
 #[derive(Clone)]
@@ -328,6 +337,10 @@ impl AppState {
             anaglyph_separation: 0.05,
             show_tips_window: false,
             simple_show_all_presets: false,
+            portrait_ghosts: Vec::new(),
+            portrait_ghost_last_capture: std::time::Instant::now(),
+            portrait_ink: Vec::new(),
+            portrait_ink_sample_counter: 0,
         }
     }
 }
@@ -518,8 +531,9 @@ pub fn draw_ui(
                  st.current_state.clone(), st.current_deriv.clone())
             };
             let (ag, ag_sep) = { let st = state.lock(); (st.anaglyph_3d, st.anaglyph_separation) };
+            let (pg, pi) = { let st = state.lock(); (st.portrait_ghosts.clone(), st.portrait_ink.clone()) };
             draw_phase_portrait(ui, viz_points, &system_name, &mode_name,
-                &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, ag, ag_sep);
+                &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, ag, ag_sep, &pg, &pi);
             // Dim hint in corner
             let rect = ui.min_rect();
             ui.painter().text(
@@ -769,8 +783,49 @@ pub fn draw_ui(
             (proj, rot, ar, sn, mn, fr, vl, ci, cs, cd, cl, op, kp, tc, pm, ag, ag_sep)
         };
 
+        // ── Ghost trails + portrait ink update (visual memory) ─────────────────
+        // Ghost snapshots: every 10-15 minutes take a snapshot of the current trail.
+        // Fade out over 8 seconds. Up to 4 ghosts visible at once.
+        // Portrait ink: accumulate faint long-term stain of all positions visited.
+        {
+            let mut st = state.lock();
+            // Ink: sample every ~30 frames (once per second at 30fps)
+            st.portrait_ink_sample_counter += 1;
+            if st.portrait_ink_sample_counter >= 30 && !viz_points.is_empty() {
+                st.portrait_ink_sample_counter = 0;
+                // Add the current trail tip to the ink
+                let (x, y, _, _, _) = viz_points[viz_points.len() - 1];
+                st.portrait_ink.push((x, y));
+                // Cap ink at ~18000 points (~5 hours of session data)
+                if st.portrait_ink.len() > 18000 {
+                    st.portrait_ink.drain(0..1000);
+                }
+            }
+            // Ghost capture: every 10-15 minutes (at 30fps = ~18000-27000 frames)
+            // Use a simple elapsed-time check
+            let ghost_interval_secs = 600.0 + (st.portrait_ghosts.len() as f64 * 47.0) % 300.0; // 10-15 min
+            if st.portrait_ghost_last_capture.elapsed().as_secs_f64() >= ghost_interval_secs
+               && !viz_points.is_empty() {
+                // Sample every 4th point to keep ghost compact
+                let ghost_pts: Vec<(f32, f32)> = viz_points.iter()
+                    .step_by(4)
+                    .map(|&(x, y, _, _, _)| (x, y))
+                    .collect();
+                st.portrait_ghosts.push((ghost_pts, std::time::Instant::now()));
+                st.portrait_ghost_last_capture = std::time::Instant::now();
+                // Keep at most 4 ghost snapshots
+                while st.portrait_ghosts.len() > 4 {
+                    st.portrait_ghosts.remove(0);
+                }
+            }
+        }
+        let (ghosts, ink) = {
+            let st = state.lock();
+            (st.portrait_ghosts.clone(), st.portrait_ink.clone())
+        };
+
         match viz_tab {
-            0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, anaglyph_3d, anaglyph_separation),
+            0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, anaglyph_3d, anaglyph_separation, &ghosts, &ink),
             1 => draw_mixer_tab(ui, state, viz_points),
             2 => draw_arrange_tab(ui, state, recording),
             3 => draw_waveform(ui, waveform),
@@ -2313,6 +2368,8 @@ fn draw_phase_portrait(
     trail_color: Color32,
     anaglyph_3d: bool,
     anaglyph_separation: f32,
+    ghosts: &[(Vec<(f32, f32)>, std::time::Instant)],
+    ink: &[(f32, f32)],
 ) {
     let avail = ui.available_size();
     let (response, painter) = ui.allocate_painter(avail, Sense::hover());
@@ -2377,6 +2434,58 @@ fn draw_phase_portrait(
     painter.line_segment([Pos2::new(origin.x, rect.top()), Pos2::new(origin.x, rect.bottom())], Stroke::new(1.0, grid_color));
 
     let n = proj_pts.len();
+
+    // ── Portrait ink: barely-visible long-session stain ──────────────────────
+    // The live trail is bright. The ink is almost invisible.
+    // After hours of use, the entire reachable set faintly emerges as a palimpsest.
+    if !ink.is_empty() {
+        // Ink points use the same coordinate space as the live trail
+        // (raw attractor x/y values), so we reuse min/max from current projection
+        let ink_alpha = 6u8; // near-invisible, 6/255 ≈ 2.4% opacity
+        let ink_col = Color32::from_rgba_premultiplied(
+            trail_color.r() / 6,
+            trail_color.g() / 6,
+            trail_color.b() / 6,
+            ink_alpha,
+        );
+        for &(ix, iy) in ink {
+            let sp = to_screen(ix, iy);
+            if rect.contains(sp) {
+                painter.circle_filled(sp, 1.2, ink_col);
+            }
+        }
+    }
+
+    // ── Ghost trails: faint afterimages of trajectories from earlier in the session ──
+    // Every 10-15 minutes, a snapshot appears for ~8 seconds then fades.
+    // Like a memory of where the attractor has been.
+    for (ghost_pts, captured_at) in ghosts {
+        let age_secs = captured_at.elapsed().as_secs_f32();
+        let fade_start = 2.0f32;
+        let fade_end = 10.0f32;
+        if age_secs > fade_end { continue; }
+        // Fade alpha: full for first 2s, then fades to 0 over 8s
+        let ghost_alpha = if age_secs < fade_start {
+            40u8
+        } else {
+            let t = (age_secs - fade_start) / (fade_end - fade_start);
+            (40.0 * (1.0 - t)) as u8
+        };
+        if ghost_alpha == 0 { continue; }
+        let ghost_col = Color32::from_rgba_premultiplied(
+            (trail_color.r() as f32 * 0.5) as u8,
+            (trail_color.g() as f32 * 0.5) as u8,
+            (trail_color.b() as f32 * 0.5) as u8,
+            ghost_alpha,
+        );
+        for pts in ghost_pts.windows(2) {
+            let p0 = to_screen(pts[0].0, pts[0].1);
+            let p1 = to_screen(pts[1].0, pts[1].1);
+            if rect.contains(p0) || rect.contains(p1) {
+                painter.line_segment([p0, p1], Stroke::new(1.0, ghost_col));
+            }
+        }
+    }
 
     // Draw trail — glow pass first, then bright core pass
     // Use audio-reactive trail_color (blended with speed for local brightness variation)

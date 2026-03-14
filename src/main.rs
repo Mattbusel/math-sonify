@@ -178,6 +178,99 @@ fn sim_thread(
     let control_period = Duration::from_secs_f64(1.0 / control_rate_hz);
     let mut next_tick = Instant::now();
 
+    // ── Time-of-day awareness (invisible — no UI) ──────────────────────────────
+    // 0.0 = midnight/dark, 1.0 = noon/bright
+    let time_of_day: f32 = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let hour_frac = (secs % 86400) as f64 / 86400.0;
+        (-(std::f64::consts::TAU * hour_frac).cos() * 0.5 + 0.5) as f32
+    };
+    // Bias initial macros subtly: night → slower/darker/richer reverb; day → brighter/faster
+    {
+        let mut st = shared.lock();
+        let night = 1.0 - time_of_day;
+        st.macro_chaos  = (st.macro_chaos  - night * 0.10).clamp(0.05, 0.95);
+        st.macro_space  = (st.macro_space  + night * 0.18).clamp(0.05, 0.95);
+        st.macro_rhythm = (st.macro_rhythm - night * 0.12).clamp(0.05, 0.95);
+        st.macro_warmth = (st.macro_warmth + night * 0.15).clamp(0.05, 0.95);
+    }
+
+    // Seasonal drift: fraction of year (0=Jan 1, 0.5≈Jul 2)
+    // Used to gently bias base frequency over the calendar year (±1.5%)
+    let seasonal_freq_mult: f64 = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let day_frac = (secs / 86400 % 365) as f64 / 365.0;
+        // Sine wave: peaks in summer (day ~172), troughs in winter (day ~355)
+        let angle = std::f64::consts::TAU * (day_frac - 172.0 / 365.0);
+        1.0 + angle.sin() * 0.015 // ±1.5% range
+    };
+
+    // ── Attractor state persistence ────────────────────────────────────────────
+    // Load the last saved state so the attractor resumes from where it was
+    {
+        let state_path = std::path::PathBuf::from("attractor_state.bin");
+        if state_path.exists() {
+            if let Ok(bytes) = std::fs::read(&state_path) {
+                let floats: Vec<f64> = bytes.chunks_exact(8)
+                    .filter_map(|c| {
+                        let arr: [u8; 8] = c.try_into().ok()?;
+                        let v = f64::from_le_bytes(arr);
+                        if v.is_finite() { Some(v) } else { None }
+                    })
+                    .collect();
+                if floats.len() >= 3 {
+                    system.set_state(&floats);
+                }
+            }
+        }
+    }
+
+    // ── Gravitational memory ───────────────────────────────────────────────────
+    // 20×20 histogram of (macro_chaos × macro_space) regions visited.
+    // The walk is gently nudged toward frequently-visited areas over sessions.
+    let gravity_path = std::path::PathBuf::from("gravity_map.bin");
+    let mut gravity_map = vec![1.0f32; 400];
+    if gravity_path.exists() {
+        if let Ok(bytes) = std::fs::read(&gravity_path) {
+            for (i, chunk) in bytes.chunks_exact(4).take(400).enumerate() {
+                if let Ok(arr) = chunk.try_into() {
+                    let v = f32::from_le_bytes(arr);
+                    if v.is_finite() && v >= 0.0 { gravity_map[i] = v; }
+                }
+            }
+        }
+    }
+
+    // ── Idle excursion state ───────────────────────────────────────────────────
+    // Every 10-20 min when Evolve is on: brief parameter bloom then settle back
+    let mut idle_ticks: u64 = 0;
+    let mut excursion_active = false;
+    let mut excursion_ticks: u64 = 0;
+    let mut excursion_return_chaos: f32 = 0.5;
+    let mut excursion_return_speed: f64 = 2.0;
+    // Next excursion fires between 10–20 minutes (at 120 Hz)
+    let mut walk_seed_ex: u64 = 0xDEADBEEF ^ std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().subsec_nanos() as u64;
+    let lcg = |s: &mut u64| -> f32 {
+        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (*s >> 33) as f32 / u32::MAX as f32
+    };
+    let mut next_excursion_tick: u64 = {
+        let r = lcg(&mut walk_seed_ex);
+        (10 * 60 * 120) + (r * 10.0 * 60.0 * 120.0) as u64 // 10-20 min in ticks
+    };
+
+    // ── Breathing oscillator ──────────────────────────────────────────────────
+    // ~4.5s cycle, ±0.3 dB (linear ≈ ±0.034) — subliminal organic warmth
+    let mut breathing_phase: f64 = 0.0;
+    const BREATHING_RATE: f64 = 1.0 / 4.5;
+
+    // ── State + gravity save timer ────────────────────────────────────────────
+    let mut state_save_timer: u64 = 0;
+    const STATE_SAVE_INTERVAL: u64 = 120 * 120; // every 2 min at 120 Hz
+
     // Macro random walk seed
     let mut walk_seed: u64 = 12345;
 
@@ -442,16 +535,93 @@ fn sim_thread(
             // Macro random walk (Brownian motion)
             if macro_walk_enabled {
                 let dt = 1.0 / control_rate_hz as f32;
-                let step = macro_walk_rate * dt;
                 let r = |seed: &mut u64| -> f32 {
                     *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
                     (*seed >> 33) as f32 / u32::MAX as f32 * 2.0 - 1.0
                 };
+
+                // Tidal pull: walk energy follows attractor chaos level
+                // Quiet stable regions → contemplative slow wandering
+                // Chaotic regions → restless faster exploration
+                let chaos_now = { shared.lock().chaos_level };
+                let tidal_scale = 0.25 + chaos_now * 1.5;
+
+                // Time-of-day walk character: night = wider slower wander, day = tighter faster
+                let night = 1.0 - time_of_day;
+                let tod_rate_mult = 0.6 + time_of_day * 0.8; // 0.6x at midnight, 1.4x at noon
+
+                let step = macro_walk_rate * dt * tidal_scale * tod_rate_mult;
+
+                // Gravitational memory: find gradient in histogram, apply tiny nudge toward
+                // frequently-visited regions — the instrument learns your taste over sessions
+                let (gravity_nudge_chaos, gravity_nudge_space) = {
+                    let st = shared.lock();
+                    let ci = ((st.macro_chaos * 19.0) as usize).min(19);
+                    let si = ((st.macro_space * 19.0) as usize).min(19);
+                    let here = gravity_map[ci * 20 + si];
+                    let right  = if ci < 19 { gravity_map[(ci+1)*20+si] } else { here };
+                    let left   = if ci > 0  { gravity_map[(ci-1)*20+si] } else { here };
+                    let up     = if si < 19 { gravity_map[ci*20+(si+1)] } else { here };
+                    let down   = if si > 0  { gravity_map[ci*20+(si-1)] } else { here };
+                    // Gradient points toward higher-density regions (home territory)
+                    let g_chaos = (right - left) * 0.003; // very subtle pull
+                    let g_space = (up - down) * 0.003;
+                    (g_chaos, g_space)
+                };
+
                 let mut st = shared.lock();
-                st.macro_chaos  = (st.macro_chaos  + r(&mut walk_seed) * step).clamp(0.05, 0.95);
-                st.macro_space  = (st.macro_space  + r(&mut walk_seed) * step).clamp(0.05, 0.95);
+
+                // Night walk: wider excursions (tod multiplier on noise amplitude)
+                let night_width = 1.0 + night * 0.6;
+                st.macro_chaos  = (st.macro_chaos  + r(&mut walk_seed) * step * night_width + gravity_nudge_chaos).clamp(0.05, 0.95);
+                st.macro_space  = (st.macro_space  + r(&mut walk_seed) * step * night_width + gravity_nudge_space).clamp(0.05, 0.95);
                 st.macro_rhythm = (st.macro_rhythm + r(&mut walk_seed) * step).clamp(0.05, 0.95);
                 st.macro_warmth = (st.macro_warmth + r(&mut walk_seed) * step).clamp(0.05, 0.95);
+
+                // Update gravitational memory: accumulate visit at current position
+                let ci = ((st.macro_chaos * 19.0) as usize).min(19);
+                let si = ((st.macro_space * 19.0) as usize).min(19);
+                gravity_map[ci * 20 + si] += 0.01;
+                // Clamp to prevent runaway; normalize occasionally via save
+                gravity_map[ci * 20 + si] = gravity_map[ci * 20 + si].min(1000.0);
+
+                // Idle excursion: track idle time, occasionally do a parameter bloom
+                // (only count as idle if walk is running — the instrument exploring on its own)
+                drop(st);
+                idle_ticks += 1;
+
+                if !excursion_active && idle_ticks >= next_excursion_tick {
+                    // Start a bloom: push into unstable high-chaos region
+                    let st = shared.lock();
+                    excursion_return_chaos = st.macro_chaos;
+                    excursion_return_speed = config.system.speed;
+                    drop(st);
+                    excursion_active = true;
+                    excursion_ticks = 0;
+                    let r01 = lcg(&mut walk_seed_ex);
+                    let target_chaos = (excursion_return_chaos + 0.3 + r01 * 0.25).clamp(0.5, 0.95);
+                    let mut st = shared.lock();
+                    st.macro_chaos = target_chaos;
+                    drop(st);
+                    let r01b = lcg(&mut walk_seed_ex);
+                    next_excursion_tick = idle_ticks + (10*60*120) + (r01b * 10.0*60.0*120.0) as u64;
+                } else if excursion_active {
+                    excursion_ticks += 1;
+                    let bloom_dur = 10 * 120u64;   // 10 seconds of bloom
+                    let return_dur = 15 * 120u64;  // 15 seconds drifting back
+                    if excursion_ticks >= bloom_dur + return_dur {
+                        // Bloom finished; let normal walk take over
+                        excursion_active = false;
+                    } else if excursion_ticks > bloom_dur {
+                        // Drift back toward original position
+                        let t = (excursion_ticks - bloom_dur) as f32 / return_dur as f32;
+                        let ease = t * t * (3.0 - 2.0 * t); // smoothstep
+                        let mut st = shared.lock();
+                        st.macro_chaos = st.macro_chaos + (excursion_return_chaos - st.macro_chaos) * ease * 0.04;
+                    }
+                }
+            } else {
+                idle_ticks = 0; // reset idle counter when walk is off
             }
 
             // Chaos → speed, sigma, rho
@@ -893,6 +1063,35 @@ fn sim_thread(
             params.waveshaper_drive = 1.0 + macro_warmth * 4.0;
             // Volume slider always wins — arrangement scene volumes are ignored in simple mode
             params.master_volume    = { shared.lock().config.audio.master_volume };
+        }
+
+        // ── Breathing: ~0.3 dB master volume oscillation at human respiratory rate ──
+        // 4.5-second cycle, ±0.034 linear gain — subliminal organic warmth.
+        // Every acoustic instrument has this. Synthesizers don't. This closes the gap.
+        breathing_phase = (breathing_phase + BREATHING_RATE / control_rate_hz) % 1.0;
+        let breathing_gain = (breathing_phase * std::f64::consts::TAU).sin() as f32 * 0.034 + 1.0;
+        params.master_volume = (params.master_volume * breathing_gain).clamp(0.0, 1.2);
+
+        // ── Seasonal drift: barely perceptible frequency shift over the calendar year ──
+        // Warmer, lower in winter; brighter, higher in summer. ±1.5% range.
+        // Someone who uses Math Sonify for six months will notice the feel changed.
+        let sf = seasonal_freq_mult as f32;
+        for f in &mut params.freqs { *f *= sf; }
+        params.grain_base_freq *= sf;
+
+        // ── State + gravity map persistence (every ~2 minutes) ────────────────────
+        state_save_timer += 1;
+        if state_save_timer >= STATE_SAVE_INTERVAL {
+            state_save_timer = 0;
+            // Save attractor state
+            let state_vec = system.state().to_vec();
+            let state_bytes: Vec<u8> = state_vec.iter().flat_map(|f| f.to_le_bytes()).collect();
+            let _ = std::fs::write("attractor_state.bin", &state_bytes);
+            // Normalize and save gravity map
+            let g_max = gravity_map.iter().cloned().fold(1.0f32, f32::max);
+            let gravity_bytes: Vec<u8> = gravity_map.iter()
+                .flat_map(|f| (f / g_max).to_le_bytes()).collect();
+            let _ = std::fs::write("gravity_map.bin", &gravity_bytes);
         }
 
         let batch: [Option<AudioParams>; 3] = [Some(params), layer1_params, layer2_params];

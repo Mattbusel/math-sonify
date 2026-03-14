@@ -344,6 +344,11 @@ struct SynthState {
     loop_recorder: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>,
     // Clip buffer (circular, last CLIP_SECONDS seconds)
     pub clip_buffer: ClipBuffer,
+    // Sympathetic resonance: tiny crosstalk energy between layers (last sample per layer)
+    layer_last: [f32; 3],
+    // Breathing: phase accumulator for the ~4.5s volume oscillation
+    // (This layer handles the audio-thread-side application to each sample)
+    breathing_phase: f64,
 }
 
 impl SynthState {
@@ -381,6 +386,8 @@ impl SynthState {
             loop_export,
             loop_recorder: None,
             clip_buffer,
+            layer_last: [0.0; 3],
+            breathing_phase: 0.0,
         }
     }
 
@@ -411,14 +418,35 @@ impl SynthState {
     }
 
     fn next_stereo_sample(&mut self) -> (f32, f32) {
-        // Sum all active layers
+        // Sum all active layers, with sympathetic resonance crosstalk between them.
+        // Like piano strings that resonate when nearby strings are struck —
+        // layers running together sound subtly richer than two layers summed in a DAW.
         let mut sum_l = 0.0f32;
         let mut sum_r = 0.0f32;
+        let mut layer_out = [(0.0f32, 0.0f32); 3];
+
         for i in 0..3 {
             if let Some(ref p) = self.layer_params[i].clone() {
+                // Sympathetic resonance: inject a tiny fraction of the previous sample
+                // from the other active layers into this layer's frequency smoothing.
+                // Not enough to hear deliberately — enough to make layers feel acoustically coupled.
+                let sympathy = 0.0008f32; // –62 dB crosstalk (inaudible as a signal, felt as warmth)
+                let crosstalk_l: f32 = self.layer_last.iter().enumerate()
+                    .filter(|&(j, _)| j != i)
+                    .map(|(_, &v)| v)
+                    .sum::<f32>() * sympathy;
+
                 let (l, r) = self.layers[i].next_sample(p);
+                // Resonance: crosstalk modulates the output (not the input frequencies,
+                // to stay lock-free). The effect is a gentle intermodulation.
+                let l = l + crosstalk_l;
+                let r = r + crosstalk_l;
+                layer_out[i] = (l, r);
+                self.layer_last[i] = (l + r) * 0.5;
                 sum_l += l;
                 sum_r += r;
+            } else {
+                self.layer_last[i] *= 0.999; // slow decay when layer inactive
             }
         }
 

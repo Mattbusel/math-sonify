@@ -35,6 +35,12 @@ impl DynamicalSystem for Lorenz {
     fn name(&self) -> &str { "Lorenz" }
     fn speed(&self) -> f64 { self.speed }
     fn deriv_at(&self, state: &[f64]) -> Vec<f64> { Self::deriv(state, self.sigma, self.rho, self.beta) }
+    fn set_state(&mut self, s: &[f64]) {
+        let n = self.state.len().min(s.len());
+        for i in 0..n {
+            if s[i].is_finite() { self.state[i] = s[i]; }
+        }
+    }
 
     fn step(&mut self, dt: f64) {
         let (sigma, rho, beta) = (self.sigma, self.rho, self.beta);
