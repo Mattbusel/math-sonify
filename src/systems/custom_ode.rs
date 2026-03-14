@@ -220,7 +220,7 @@ impl CustomOde {
             expr_x,
             expr_y,
             expr_z,
-            state: vec![0.1, 0.1, 0.1],
+            state: vec![1.0, 0.0, 0.0], // start further from origin for faster attractor development
             t: 0.0,
             last_speed: 0.0,
         }
@@ -228,9 +228,9 @@ impl CustomOde {
 
     fn deriv_internal(&self, state: &[f64]) -> Vec<f64> {
         let (x, y, z) = (state[0], state[1], state[2]);
-        let dx = eval_expr(&self.expr_x, x, y, z, self.t);
-        let dy = eval_expr(&self.expr_y, x, y, z, self.t);
-        let dz = eval_expr(&self.expr_z, x, y, z, self.t);
+        let dx = eval_expr(&self.expr_x, x, y, z, self.t).clamp(-1e6, 1e6);
+        let dy = eval_expr(&self.expr_y, x, y, z, self.t).clamp(-1e6, 1e6);
+        let dz = eval_expr(&self.expr_z, x, y, z, self.t).clamp(-1e6, 1e6);
         vec![dx, dy, dz]
     }
 }
@@ -247,12 +247,19 @@ impl DynamicalSystem for CustomOde {
         rk4(&mut self.state, dt, |s| {
             let (x, y, z) = (s[0], s[1], s[2]);
             vec![
-                eval_expr(ex, x, y, z, t),
-                eval_expr(ey, x, y, z, t),
-                eval_expr(ez, x, y, z, t),
+                eval_expr(ex, x, y, z, t).clamp(-1e6, 1e6),
+                eval_expr(ey, x, y, z, t).clamp(-1e6, 1e6),
+                eval_expr(ez, x, y, z, t).clamp(-1e6, 1e6),
             ]
         });
         self.t += dt;
+
+        // Reset if state blows up (divide-by-zero, unstable ODE, etc.)
+        let magnitude = self.state[0].powi(2) + self.state[1].powi(2) + self.state[2].powi(2);
+        if magnitude > 1e10 || !self.state[0].is_finite() || !self.state[1].is_finite() || !self.state[2].is_finite() {
+            self.state = vec![1.0, 0.0, 0.0];
+        }
+
         let speed = (deriv_before[0].powi(2) + deriv_before[1].powi(2) + deriv_before[2].powi(2)).sqrt();
         self.last_speed = speed;
     }

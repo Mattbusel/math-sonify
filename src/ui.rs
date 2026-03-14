@@ -8,7 +8,7 @@ use crate::sonification::chord_intervals_for;
 use crate::patches::{PRESETS, load_preset, save_patch, list_patches, load_patch_file};
 use crate::audio::{WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer, save_clip, save_portrait_png};
 use crate::systems::*;
-use crate::arrangement::{Scene, total_duration, generate_song};
+use crate::arrangement::{Scene, total_duration, scene_at, generate_song};
 use hound;
 
 /// A single looper layer (stereo interleaved samples).
@@ -488,12 +488,13 @@ pub fn draw_ui(
             if i.key_pressed(Key::ArrowLeft) {
                 st.config.system.speed = (st.config.system.speed / 1.2).max(0.1);
             }
-            if i.key_pressed(Key::Num1) { st.viz_tab = 0; }
-            if i.key_pressed(Key::Num2) { st.viz_tab = 1; }
-            if i.key_pressed(Key::Num3) { st.viz_tab = 2; }
-            if i.key_pressed(Key::Num4) { st.viz_tab = 3; }
-            if i.key_pressed(Key::Num5) { st.viz_tab = 4; }
-            if i.key_pressed(Key::Num6) { st.viz_tab = 5; }
+            if i.key_pressed(Key::Num1) { st.viz_tab = 0; } // Phase Portrait
+            if i.key_pressed(Key::Num2) { st.viz_tab = 1; } // MIXER
+            if i.key_pressed(Key::Num3) { st.viz_tab = 2; } // ARRANGE
+            if i.key_pressed(Key::Num4) { st.viz_tab = 3; } // Waveform
+            if i.key_pressed(Key::Num5) { st.viz_tab = 4; } // Note Map
+            if i.key_pressed(Key::Num6) { st.viz_tab = 5; } // Math View
+            if i.key_pressed(Key::Num7) { st.viz_tab = 6; } // Bifurcation
             if i.key_pressed(Key::F) { st.perf_mode = !st.perf_mode; }
         });
     } // lock released here
@@ -563,7 +564,7 @@ pub fn draw_ui(
     CentralPanel::default().show(ctx, |ui| {
         // Tab bar row with theme switcher on the right
         ui.horizontal(|ui| {
-            let tabs = ["Phase Portrait", "Waveform", "Note Map", "ARRANGE", "MIXER", "Math View", "Bifurcation"];
+            let tabs = ["Phase Portrait", "MIXER", "ARRANGE", "Waveform", "Note Map", "Math View", "Bifurcation"];
             let mut viz_tab = state.lock().viz_tab;
             for (i, name) in tabs.iter().enumerate() {
                 let selected = viz_tab == i;
@@ -764,10 +765,10 @@ pub fn draw_ui(
 
         match viz_tab {
             0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, anaglyph_3d, anaglyph_separation),
-            1 => draw_waveform(ui, waveform),
-            2 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
-            3 => draw_arrange_tab(ui, state, recording),
-            4 => draw_mixer_tab(ui, state, viz_points),
+            1 => draw_mixer_tab(ui, state, viz_points),
+            2 => draw_arrange_tab(ui, state, recording),
+            3 => draw_waveform(ui, waveform),
+            4 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
             5 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases),
             6 => draw_bifurc_diagram(ui, bifurc_data),
             _ => {}
@@ -791,7 +792,7 @@ fn draw_advanced_panel(
     ui.add(
         Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0)
             .text("Volume")
-    );
+    ).on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
     ui.add_space(6.0);
 
     // ---- Pause button ----
@@ -804,7 +805,7 @@ fn draw_advanced_panel(
     let btn = Button::new(RichText::new(pause_label).color(Color32::WHITE).strong())
         .fill(pause_color)
         .min_size(Vec2::new(ui.available_width(), 36.0));
-    if ui.add(btn).clicked() {
+    if ui.add(btn).on_hover_text("Pause or resume the simulation and audio. Shortcut: Space bar.").clicked() {
         st.paused = !st.paused;
     }
     ui.add_space(6.0);
@@ -820,7 +821,7 @@ fn draw_advanced_panel(
         ProgressBar::new(chaos)
             .text(format!("Chaos  {:.0}%", chaos * 100.0))
             .fill(chaos_color)
-    );
+    ).on_hover_text("Real-time measure of the attractor's Lyapunov exponent — how quickly nearby trajectories diverge. Blue = ordered, red = fully chaotic.");
 
     ui.add_space(6.0);
     ui.separator();
@@ -902,18 +903,23 @@ fn draw_advanced_panel(
         ui.add_space(4.0);
 
         ui.add(Slider::new(&mut st.config.sonification.base_frequency, 55.0..=880.0)
-            .text("Root Hz").logarithmic(true));
+            .text("Root Hz").logarithmic(true))
+            .on_hover_text("Root/base frequency in Hz. All pitched notes are mapped relative to this. A2=110, A3=220, A4=440.");
         ui.add(Slider::new(&mut st.config.sonification.octave_range, 1.0..=6.0)
-            .text("Octave Range"));
+            .text("Octave Range"))
+            .on_hover_text("How many octaves the attractor's position maps across. Wider = more dramatic pitch leaps. Narrow = drone-like, stable pitch.");
 
         ui.add_space(6.0);
 
         CollapsingHeader::new(
             RichText::new("LFO").size(12.0).color(GRAY_HINT)
         ).default_open(false).show(ui, |ui| {
-            ui.checkbox(&mut st.lfo_enabled, RichText::new("Enable LFO").color(Color32::WHITE));
-            ui.add(Slider::new(&mut st.lfo_rate, 0.01..=2.0).text("Rate Hz").logarithmic(true));
-            ui.add(Slider::new(&mut st.lfo_depth, 0.0..=1.0).text("Depth"));
+            ui.checkbox(&mut st.lfo_enabled, RichText::new("Enable LFO").color(Color32::WHITE))
+                .on_hover_text("Low Frequency Oscillator — automatically sweeps a chosen parameter at a sub-audio rate, creating tremolo, vibrato, or slow parameter evolution.");
+            ui.add(Slider::new(&mut st.lfo_rate, 0.01..=2.0).text("Rate Hz").logarithmic(true))
+                .on_hover_text("LFO cycle rate. Below 0.1 Hz = very slow sweep (tens of seconds). 1-2 Hz = fast tremolo or vibrato.");
+            ui.add(Slider::new(&mut st.lfo_depth, 0.0..=1.0).text("Depth"))
+                .on_hover_text("How much the LFO moves the target parameter. 0 = no effect, 1.0 = full sweep of the parameter's range.");
             let lfo_targets = ["speed", "sigma", "rho", "beta", "a", "b", "c", "coupling"];
             let current_target = st.lfo_target.clone();
             ComboBox::from_label("Target")
@@ -940,15 +946,18 @@ fn draw_advanced_panel(
                         st.config.sonification.chord_mode = cm.to_string();
                     }
                 }
-            });
+            }).response.on_hover_text("Add harmonic voices below the melody voice. 'major' = +4, +7 semitones. 'dom7' = jazz dominant 7th. 'none' = unison only.");
 
         let mut ts = st.config.sonification.transpose_semitones as f64;
-        if ui.add(Slider::new(&mut ts, -24.0..=24.0).text("Transpose").step_by(1.0)).changed() {
+        if ui.add(Slider::new(&mut ts, -24.0..=24.0).text("Transpose").step_by(1.0))
+            .on_hover_text("Shift all pitches by this many semitones. ±12 = one octave. Useful for key changes without re-tuning.")
+            .changed() {
             st.config.sonification.transpose_semitones = ts as f32;
         }
 
         ui.add(Slider::new(&mut st.config.sonification.portamento_ms, 1.0..=1000.0)
-            .text("Portamento ms").logarithmic(true));
+            .text("Portamento ms").logarithmic(true))
+            .on_hover_text("Glide time between notes in milliseconds. 1-20ms = snappy note changes. 200-1000ms = smooth, continuous pitch sweeps — great for ambient and drone sounds.");
 
         ui.add_space(4.0);
         ui.label(RichText::new("Voice Levels").color(Color32::WHITE));
@@ -997,7 +1006,8 @@ fn draw_advanced_panel(
                 }
             });
 
-        ui.add(Slider::new(&mut st.config.system.speed, 0.1..=10.0).text("Speed"));
+        ui.add(Slider::new(&mut st.config.system.speed, 0.1..=10.0).text("Speed"))
+            .on_hover_text("Controls how fast the attractor evolves. Higher = more rapid pitch changes and rhythmic activity. Use ←/→ arrow keys as a shortcut.");
 
         CollapsingHeader::new(
             RichText::new("Parameters").size(12.0).color(GRAY_HINT)
@@ -1005,11 +1015,11 @@ fn draw_advanced_panel(
             match st.config.system.name.as_str() {
                 "lorenz" => {
                     ui.add(Slider::new(&mut st.config.lorenz.sigma, 1.0..=20.0).text("sigma"))
-                        .on_hover_text("Turbulence — higher = more chaotic");
+                        .on_hover_text("Prandtl number — controls the rate of convection. Values above 10 produce the classic butterfly pattern. Higher = faster pitch variation.");
                     ui.add(Slider::new(&mut st.config.lorenz.rho, 10.0..=50.0).text("rho"))
-                        .on_hover_text("Chaos threshold — above ~24 = butterfly attractor");
+                        .on_hover_text("Rayleigh number — the chaos threshold is near 24.74. Below = stable fixed point, above = chaotic butterfly attractor.");
                     ui.add(Slider::new(&mut st.config.lorenz.beta, 0.5..=5.0).text("beta"))
-                        .on_hover_text("Damping — lower = wilder oscillations");
+                        .on_hover_text("Geometric factor. The classic value is 8/3 ≈ 2.667. Lower values increase oscillation amplitude.");
                 }
                 "fractional_lorenz" => {
                     ui.add(Slider::new(&mut st.lorenz_alpha, 0.5..=1.0).text("α (order)"))
@@ -1039,7 +1049,7 @@ fn draw_advanced_panel(
                 }
                 "kuramoto" => {
                     ui.add(Slider::new(&mut st.config.kuramoto.coupling, 0.0..=5.0).text("Coupling K"))
-                        .on_hover_text("Coupling — drag up from 0 to hear synchronization happen");
+                        .on_hover_text("Coupling strength between oscillators. Watch synchronization emerge as you raise this above ~1.5 — the oscillators phase-lock and the sound suddenly coheres.");
                 }
                 "duffing" => {
                     ui.add(Slider::new(&mut st.config.duffing.delta, 0.1..=1.0).text("delta"));
@@ -1098,9 +1108,12 @@ fn draw_advanced_panel(
 
     // ---- EFFECTS ----
     collapsing_section(ui, "EFFECTS", false, |ui| {
-        ui.add(Slider::new(&mut st.config.audio.reverb_wet, 0.0..=1.0).text("Reverb"));
-        ui.add(Slider::new(&mut st.config.audio.delay_ms, 0.0..=1000.0).text("Delay Time ms"));
-        ui.add(Slider::new(&mut st.config.audio.delay_feedback, 0.0..=0.95).text("Feedback (max 90%)"));
+        ui.add(Slider::new(&mut st.config.audio.reverb_wet, 0.0..=1.0).text("Reverb"))
+            .on_hover_text("Wet/dry mix of the Freeverb reverb. Higher values create cavernous, atmospheric spaces. Zero = completely dry, close, and intimate.");
+        ui.add(Slider::new(&mut st.config.audio.delay_ms, 0.0..=1000.0).text("Delay Time ms"))
+            .on_hover_text("Echo delay time in milliseconds. 125ms = 1/8th note at 120 BPM. 250ms = 1/4 note. Use BPM Sync to auto-calculate musical values.");
+        ui.add(Slider::new(&mut st.config.audio.delay_feedback, 0.0..=0.95).text("Feedback (max 90%)"))
+            .on_hover_text("How much of the delayed signal feeds back into the delay — controls how many repeats you hear. Above 0.9 can create infinite feedback drones.");
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -1121,20 +1134,27 @@ fn draw_advanced_panel(
 
         ui.add_space(4.0);
         ui.label(RichText::new("Bitcrusher").color(Color32::WHITE));
-        ui.add(Slider::new(&mut st.config.audio.bit_depth, 1.0..=16.0).text("Bit Depth"));
-        ui.add(Slider::new(&mut st.config.audio.rate_crush, 0.0..=1.0).text("Rate Crush"));
+        ui.add(Slider::new(&mut st.config.audio.bit_depth, 1.0..=16.0).text("Bit Depth"))
+            .on_hover_text("Reduces audio word length. 16-bit = studio quality. Below 8 bits gives lo-fi digital grit. 1-4 bits gives extreme aliasing and crunchy distortion.");
+        ui.add(Slider::new(&mut st.config.audio.rate_crush, 0.0..=1.0).text("Rate Crush"))
+            .on_hover_text("Sample rate reduction. At 0, no effect. Higher values reduce effective sample rate, adding staircase artifacts and aliased harmonics.");
 
         ui.add_space(4.0);
         ui.label(RichText::new("Chorus").color(Color32::WHITE));
-        ui.add(Slider::new(&mut st.config.audio.chorus_mix, 0.0..=1.0).text("Chorus"));
-        ui.add(Slider::new(&mut st.config.audio.chorus_rate, 0.1..=5.0).text("Chorus Rate"));
-        ui.add(Slider::new(&mut st.config.audio.chorus_depth, 0.5..=10.0).text("Depth ms"));
+        ui.add(Slider::new(&mut st.config.audio.chorus_mix, 0.0..=1.0).text("Chorus"))
+            .on_hover_text("Chorus wet/dry mix. Adds a lush, widened stereo effect by mixing pitch-modulated copies. Great for pads and ambient sounds.");
+        ui.add(Slider::new(&mut st.config.audio.chorus_rate, 0.1..=5.0).text("Chorus Rate"))
+            .on_hover_text("LFO rate of the chorus modulation in Hz. Slow (0.1-0.5 Hz) = gentle movement. Fast (3-5 Hz) = obvious vibrato effect.");
+        ui.add(Slider::new(&mut st.config.audio.chorus_depth, 0.5..=10.0).text("Depth ms"))
+            .on_hover_text("Depth of chorus pitch modulation in milliseconds. More depth = wider pitch variation and a thicker, more detuned sound.");
 
         ui.add_space(4.0);
         ui.label(RichText::new("Saturation").color(Color32::WHITE));
-        ui.add(Slider::new(&mut st.config.audio.waveshaper_mix, 0.0..=1.0).text("Saturation"));
+        ui.add(Slider::new(&mut st.config.audio.waveshaper_mix, 0.0..=1.0).text("Saturation"))
+            .on_hover_text("Tanh waveshaper wet/dry mix. Adds harmonic richness and warmth at low values, aggressive distortion at high values. Zero = clean signal.");
         if st.config.audio.waveshaper_mix > 0.0 {
-            ui.add(Slider::new(&mut st.config.audio.waveshaper_drive, 1.0..=10.0).text("Drive"));
+            ui.add(Slider::new(&mut st.config.audio.waveshaper_drive, 1.0..=10.0).text("Drive"))
+                .on_hover_text("Waveshaper drive/gain. Low values (1-2) = gentle warmth. High values (7-10) = hard clipping and aggressive harmonic distortion.");
         }
     });
 
@@ -1520,12 +1540,29 @@ fn draw_advanced_panel(
         }
     });
 
-    // Keyboard shortcuts hint
-    ui.add_space(10.0);
-    ui.separator();
-    ui.label(RichText::new("Space: pause  ↑↓: vol  ←→: speed  1-6: tabs  F: perf mode")
-        .size(10.0)
-        .color(GRAY_HINT));
+    // ---- KEYBOARD SHORTCUTS ----
+    collapsing_section(ui, "KEYBOARD SHORTCUTS", false, |ui| {
+        let shortcuts = [
+            ("Space",   "Pause / Resume simulation"),
+            ("F",       "Toggle performance mode (fullscreen portrait)"),
+            ("↑ / ↓",  "Volume up / down (+/- 5%)"),
+            ("← / →",  "Speed slower / faster (÷1.2 / ×1.2)"),
+            ("1",       "Tab: Phase Portrait"),
+            ("2",       "Tab: MIXER"),
+            ("3",       "Tab: ARRANGE"),
+            ("4",       "Tab: Waveform"),
+            ("5",       "Tab: Note Map"),
+            ("6",       "Tab: Math View"),
+            ("7",       "Tab: Bifurcation Diagram"),
+        ];
+        for (key, desc) in &shortcuts {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(*key).color(AMBER).strong().size(11.0).monospace());
+                ui.add_space(8.0);
+                ui.label(RichText::new(*desc).color(GRAY_HINT).size(11.0));
+            });
+        }
+    });
     ui.add_space(4.0);
 }
 
@@ -1549,7 +1586,7 @@ fn draw_simple_panel(ui: &mut Ui, state: &SharedState) {
             Button::new(RichText::new(auto_label).color(Color32::WHITE).size(15.0).strong())
                 .fill(auto_color)
                 .min_size(Vec2::new(ui.available_width(), 48.0))
-        ).clicked() {
+        ).on_hover_text("Auto-generate a full arrangement from the selected mood and play it through continuously. Each run creates a unique sequence of morphing scenes.").clicked() {
             let mut st = state.lock();
             if st.auto_mode {
                 st.auto_mode = false;
@@ -1568,6 +1605,40 @@ fn draw_simple_panel(ui: &mut Ui, state: &SharedState) {
                 st.paused = false; // always unpause when AUTO starts
             }
         }
+
+        // AUTO progress indicator
+        if auto_mode {
+            let (arr_elapsed, scenes_snap) = {
+                let st = state.lock();
+                (st.arr_elapsed, st.scenes.clone())
+            };
+            let total = total_duration(&scenes_snap);
+            if let Some((scene_idx, morphing, _t)) = scene_at(&scenes_snap, arr_elapsed) {
+                let active_scenes: Vec<usize> = (0..scenes_snap.len()).filter(|&i| scenes_snap[i].active).collect();
+                let scene_ord = active_scenes.iter().position(|&i| i == scene_idx).unwrap_or(0) + 1;
+                let scene_count = active_scenes.len();
+                let scene_name = &scenes_snap[scene_idx].name;
+                let phase_label = if morphing { "morphing →" } else { "holding" };
+                let elapsed_m = (arr_elapsed / 60.0) as u32;
+                let elapsed_s = (arr_elapsed % 60.0) as u32;
+                let total_m = (total / 60.0) as u32;
+                let total_s = (total % 60.0) as u32;
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!(
+                    "Scene {}/{} — {} ({}) {:02}:{:02}/{:02}:{:02}",
+                    scene_ord, scene_count, scene_name, phase_label,
+                    elapsed_m, elapsed_s, total_m, total_s
+                )).color(CYAN).size(11.0));
+                let progress = if total > 0.001 { (arr_elapsed / total).clamp(0.0, 1.0) } else { 0.0 };
+                ui.add(ProgressBar::new(progress).desired_width(ui.available_width()));
+            }
+        } else {
+            // First-run hint when nothing is playing
+            ui.add_space(4.0);
+            ui.label(RichText::new("👆 Hit AUTO to start — generates a unique arrangement each time")
+                .color(AMBER).size(11.0).italics());
+        }
+
         ui.add_space(8.0);
 
         // ---- Mood selector ----
@@ -1584,9 +1655,24 @@ fn draw_simple_panel(ui: &mut Ui, state: &SharedState) {
                 } else {
                     Color32::from_rgb(30, 30, 50)
                 };
+                let tooltip = match *mood_key {
+                    "ambient"      => "Slow drift, deep reverb, harmonic pads — peaceful and meditative",
+                    "rhythmic"     => "Pulsing, granular, FM — driven rhythmic energy and percussive textures",
+                    _              => "Glitch, spectral, microtonal — unexpected and experimental combinations",
+                };
                 if ui.add(Button::new(RichText::new(*label).color(Color32::WHITE).size(11.0))
-                    .fill(col).min_size(Vec2::new(88.0, 26.0))).clicked() {
-                    state.lock().arr_mood = mood_key.to_string();
+                    .fill(col).min_size(Vec2::new(88.0, 26.0))).on_hover_text(tooltip).clicked() {
+                    let mut st = state.lock();
+                    st.arr_mood = mood_key.to_string();
+                    // If AUTO is playing, regenerate immediately with new mood
+                    if st.auto_mode {
+                        let seed = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .subsec_nanos() as u64;
+                        st.scenes = generate_song(mood_key, seed);
+                        st.arr_elapsed = 0.0;
+                    }
                 }
             }
         });
@@ -1627,13 +1713,13 @@ fn draw_simple_panel(ui: &mut Ui, state: &SharedState) {
     {
         let mut st = state.lock();
         ui.add(Slider::new(&mut st.macro_chaos, 0.0..=1.0).text("Chaos"))
-            .on_hover_text("Intensity of chaos — higher = more unpredictable pitch movement");
+            .on_hover_text("How unpredictable and wild the sound is. At max, the attractor is in a fully chaotic regime — pitch leaps are large and seemingly random. At zero, the system settles into a predictable cycle.");
         ui.add(Slider::new(&mut st.macro_space, 0.0..=1.0).text("Space"))
-            .on_hover_text("Reverb and depth — higher = more spacious and ambient");
+            .on_hover_text("Depth, reverb, and dimension. Max = vast cavernous room with long reverb tails. Zero = completely dry, close, and intimate — like you're right next to the source.");
         ui.add(Slider::new(&mut st.macro_rhythm, 0.0..=1.0).text("Rhythm"))
-            .on_hover_text("Rhythmic energy — higher = faster arpeggio and more attack");
+            .on_hover_text("Punchiness and attack. Zero = slow pad-like attack that fades in gently. Max = percussive, instant attack with tight, rhythmic energy.");
         ui.add(Slider::new(&mut st.macro_warmth, 0.0..=1.0).text("Warmth"))
-            .on_hover_text("Tonal warmth — higher = softer filter and richer harmonics");
+            .on_hover_text("Tonal color. Zero = bright, clear, full bandwidth sound. Max = filtered, saturation-rich, low-frequency emphasis — dark and warm like analog tape.");
         ui.add_space(6.0);
         ui.checkbox(&mut st.macro_walk_enabled, RichText::new("Evolve (random walk macros)").color(Color32::WHITE));
         if st.macro_walk_enabled {
@@ -1920,7 +2006,14 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
     }
 
     ui.add_space(6.0);
-    ui.colored_label(GRAY_HINT, "Capture your current sound into a scene, set durations, then Play.");
+    // Empty state hint
+    let has_active = scenes_snapshot.iter().any(|s| s.active);
+    if !has_active {
+        ui.label(RichText::new("Hit Generate to create an arrangement, or Capture your current sound into scenes.")
+            .color(AMBER).size(11.0).italics());
+    } else {
+        ui.colored_label(GRAY_HINT, "Capture your current sound into a scene, set durations, then Play.");
+    }
     ui.add_space(6.0);
 
     // Visual timeline
@@ -2587,6 +2680,9 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
             ui.add_space(4.0);
             // Layer list
             let n_layers = st.looper_layers.len();
+            if n_layers == 0 {
+                ui.label(egui::RichText::new("No loops recorded — hit REC to start").color(mc_gray).size(11.0).italics());
+            }
             for i in 0..n_layers {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(format!("L{}", i + 1)).color(mc_gray).size(11.0));

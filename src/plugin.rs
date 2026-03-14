@@ -133,7 +133,7 @@ impl Default for MathSonifyParams {
                 FloatRange::Linear { min: 0.0, max: 1.0 }),
 
             waveshaper_drive: FloatParam::new(
-                "Drive", 1.0,
+                "Waveshaper Drive", 1.0,
                 FloatRange::Skewed { min: 1.0, max: 10.0, factor: FloatRange::skew_factor(-1.0) }),
 
             portamento_ms: FloatParam::new(
@@ -159,6 +159,8 @@ impl Default for MathSonifyParams {
                 "Release", 400.0,
                 FloatRange::Skewed { min: 10.0, max: 5000.0, factor: FloatRange::skew_factor(-1.5) })
                 .with_unit(" ms"),
+            // Note: All parameters have clear names for DAW automation lanes.
+            // Master Volume default=0.7, Speed default=1.0, Base Frequency default=110 Hz.
         }
     }
 }
@@ -378,10 +380,10 @@ impl Default for MathSonify {
 
 impl Plugin for MathSonify {
     const NAME:              &'static str = "Math Sonify";
-    const VENDOR:            &'static str = "Math Sonify";
-    const URL:               &'static str = "";
-    const EMAIL:             &'static str = "";
-    const VERSION:           &'static str = "0.7.0";
+    const VENDOR:            &'static str = "Mattbusel";
+    const URL:               &'static str = "https://github.com/Mattbusel/math-sonify";
+    const EMAIL:             &'static str = "mattbusel@gmail.com";
+    const VERSION:           &'static str = "0.9.0";
     const AUDIO_IO_LAYOUTS:  &'static [AudioIOLayout] = &[
         AudioIOLayout {
             main_input_channels:  None,
@@ -441,9 +443,12 @@ impl Plugin for MathSonify {
             }
         }
 
-        // Synthesize audio
+        // Synthesize audio — guard against NaN/Inf from any DSP stage
         for channel_samples in buffer.iter_samples() {
-            let (l, r) = dsp.next_sample(&self.params);
+            let (l_raw, r_raw) = dsp.next_sample(&self.params);
+            // Final safety clamp — prevents NaN or clipping from reaching the DAW
+            let l = if l_raw.is_finite() { l_raw.clamp(-1.0, 1.0) } else { 0.0 };
+            let r = if r_raw.is_finite() { r_raw.clamp(-1.0, 1.0) } else { 0.0 };
             let mut iter = channel_samples.into_iter();
             if let Some(out_l) = iter.next() { *out_l = l; }
             if let Some(out_r) = iter.next() { *out_r = r; }

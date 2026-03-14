@@ -120,8 +120,8 @@ pub fn load_preset(name: &str) -> Config {
             system: SystemConfig { name: "geodesic_torus".into(), dt: 0.005, speed: 0.5 },
             sonification: SonificationConfig {
                 mode: "orbital".into(), scale: "just_intonation".into(),
-                base_frequency: 55.0, octave_range: 3.0,
-                chord_mode: "major".into(), transpose_semitones: -12.0,
+                base_frequency: 65.0, octave_range: 3.0,
+                chord_mode: "major".into(), transpose_semitones: -7.0,
                 voice_levels: [1.0, 0.9, 0.7, 0.5], portamento_ms: 400.0,
                 voice_shapes: ["sine".into(), "sine".into(), "sine".into(), "sine".into()],
             },
@@ -263,7 +263,7 @@ pub fn load_preset(name: &str) -> Config {
             },
             audio: AudioConfig {
                 reverb_wet: 0.1, delay_ms: 187.5, delay_feedback: 0.5,
-                master_volume: 0.9, bit_depth: 16.0, rate_crush: 0.0,
+                master_volume: 0.82, bit_depth: 16.0, rate_crush: 0.0,
                 waveshaper_drive: 0.7, waveshaper_mix: 0.8,
                 chorus_mix: 0.0, chorus_rate: 0.0, chorus_depth: 0.0,
                 ..Default::default()
@@ -301,7 +301,7 @@ pub fn load_preset(name: &str) -> Config {
             },
             audio: AudioConfig {
                 reverb_wet: 0.1, delay_ms: 250.0, delay_feedback: 0.4,
-                master_volume: 0.88, bit_depth: 16.0, rate_crush: 0.0,
+                master_volume: 0.80, bit_depth: 16.0, rate_crush: 0.0,
                 waveshaper_drive: 0.6, waveshaper_mix: 0.7,
                 chorus_mix: 0.0, chorus_rate: 0.0, chorus_depth: 0.0,
                 ..Default::default()
@@ -334,8 +334,8 @@ pub fn load_preset(name: &str) -> Config {
             system: SystemConfig { name: "lorenz".into(), dt: 0.0005, speed: 0.3 },
             sonification: SonificationConfig {
                 mode: "orbital".into(), scale: "just_intonation".into(),
-                base_frequency: 40.0, octave_range: 4.0,
-                chord_mode: "major".into(), transpose_semitones: -24.0,
+                base_frequency: 55.0, octave_range: 4.0,
+                chord_mode: "major".into(), transpose_semitones: -12.0,
                 voice_levels: [1.0, 0.6, 0.4, 0.2], portamento_ms: 800.0,
                 voice_shapes: ["sine".into(), "sine".into(), "sine".into(), "sine".into()],
             },
@@ -353,8 +353,8 @@ pub fn load_preset(name: &str) -> Config {
             system: SystemConfig { name: "geodesic_torus".into(), dt: 0.01, speed: 0.2 },
             sonification: SonificationConfig {
                 mode: "granular".into(), scale: "just_intonation".into(),
-                base_frequency: 60.0, octave_range: 3.5,
-                chord_mode: "major".into(), transpose_semitones: -12.0,
+                base_frequency: 80.0, octave_range: 3.5,
+                chord_mode: "major".into(), transpose_semitones: -7.0,
                 voice_levels: [1.0, 0.7, 0.5, 0.3], portamento_ms: 600.0,
                 voice_shapes: ["sine".into(), "sine".into(), "sine".into(), "sine".into()],
             },
@@ -391,8 +391,8 @@ pub fn load_preset(name: &str) -> Config {
             system: SystemConfig { name: "halvorsen".into(), dt: 0.002, speed: 0.25 },
             sonification: SonificationConfig {
                 mode: "orbital".into(), scale: "just_intonation".into(),
-                base_frequency: 55.0, octave_range: 2.5,
-                chord_mode: "none".into(), transpose_semitones: -12.0,
+                base_frequency: 80.0, octave_range: 2.5,
+                chord_mode: "none".into(), transpose_semitones: -7.0,
                 voice_levels: [1.0, 0.3, 0.1, 0.0], portamento_ms: 900.0,
                 voice_shapes: ["sine".into(), "sine".into(), "sine".into(), "sine".into()],
             },
@@ -719,14 +719,14 @@ pub fn load_preset(name: &str) -> Config {
             system: SystemConfig { name: "lorenz".into(), dt: 0.001, speed: 0.7 },
             sonification: SonificationConfig {
                 mode: "direct".into(), scale: "pentatonic".into(),
-                base_frequency: 27.5, octave_range: 1.5,
-                chord_mode: "power".into(), transpose_semitones: -24.0,
+                base_frequency: 55.0, octave_range: 1.5,
+                chord_mode: "power".into(), transpose_semitones: -12.0,
                 voice_levels: [1.0, 0.8, 0.0, 0.0], portamento_ms: 80.0,
                 voice_shapes: ["saw".into(), "sine".into(), "sine".into(), "sine".into()],
             },
             audio: AudioConfig {
                 reverb_wet: 0.2, delay_ms: 300.0, delay_feedback: 0.35,
-                master_volume: 0.85, bit_depth: 24.0, rate_crush: 0.0,
+                master_volume: 0.75, bit_depth: 24.0, rate_crush: 0.0,
                 waveshaper_drive: 0.3, waveshaper_mix: 0.4,
                 chorus_mix: 0.1, chorus_rate: 0.1, chorus_depth: 0.2,
                 ..Default::default()
@@ -738,14 +738,14 @@ pub fn load_preset(name: &str) -> Config {
             system: SystemConfig { name: "duffing".into(), dt: 0.001, speed: 1.0 },
             sonification: SonificationConfig {
                 mode: "direct".into(), scale: "pentatonic".into(),
-                base_frequency: 30.87, octave_range: 1.0,
-                chord_mode: "power".into(), transpose_semitones: -24.0,
+                base_frequency: 55.0, octave_range: 1.0,
+                chord_mode: "power".into(), transpose_semitones: -12.0,
                 voice_levels: [1.0, 0.6, 0.0, 0.0], portamento_ms: 60.0,
                 voice_shapes: ["saw".into(), "saw".into(), "sine".into(), "sine".into()],
             },
             audio: AudioConfig {
                 reverb_wet: 0.15, delay_ms: 250.0, delay_feedback: 0.3,
-                master_volume: 0.88, bit_depth: 24.0, rate_crush: 0.0,
+                master_volume: 0.75, bit_depth: 24.0, rate_crush: 0.0,
                 waveshaper_drive: 0.4, waveshaper_mix: 0.5,
                 chorus_mix: 0.0, chorus_rate: 0.0, chorus_depth: 0.0,
                 ..Default::default()
@@ -757,14 +757,14 @@ pub fn load_preset(name: &str) -> Config {
             system: SystemConfig { name: "chua".into(), dt: 0.0005, speed: 0.5 },
             sonification: SonificationConfig {
                 mode: "direct".into(), scale: "chromatic".into(),
-                base_frequency: 20.0, octave_range: 1.5,
-                chord_mode: "power".into(), transpose_semitones: -24.0,
+                base_frequency: 40.0, octave_range: 1.5,
+                chord_mode: "power".into(), transpose_semitones: -12.0,
                 voice_levels: [1.0, 0.7, 0.0, 0.0], portamento_ms: 120.0,
                 voice_shapes: ["sine".into(), "sine".into(), "sine".into(), "sine".into()],
             },
             audio: AudioConfig {
                 reverb_wet: 0.25, delay_ms: 400.0, delay_feedback: 0.4,
-                master_volume: 0.9, bit_depth: 24.0, rate_crush: 0.0,
+                master_volume: 0.72, bit_depth: 24.0, rate_crush: 0.0,
                 waveshaper_drive: 0.2, waveshaper_mix: 0.3,
                 chorus_mix: 0.1, chorus_rate: 0.05, chorus_depth: 0.3,
                 ..Default::default()
@@ -776,7 +776,7 @@ pub fn load_preset(name: &str) -> Config {
             system: SystemConfig { name: "van_der_pol".into(), dt: 0.001, speed: 0.6 },
             sonification: SonificationConfig {
                 mode: "direct".into(), scale: "pentatonic".into(),
-                base_frequency: 32.7, octave_range: 1.5,
+                base_frequency: 55.0, octave_range: 1.5,
                 chord_mode: "power".into(), transpose_semitones: -12.0,
                 voice_levels: [1.0, 0.5, 0.0, 0.0], portamento_ms: 100.0,
                 voice_shapes: ["saw".into(), "sine".into(), "sine".into(), "sine".into()],

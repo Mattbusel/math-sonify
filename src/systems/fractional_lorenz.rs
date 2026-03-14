@@ -98,6 +98,20 @@ impl DynamicalSystem for FractionalLorenz {
         if self.history_y.len() > self.memory_len { self.history_y.pop_back(); }
         if self.history_z.len() > self.memory_len { self.history_z.pop_back(); }
 
+        // Safety clamp: GL approximation can blow up for very low alpha (<0.7)
+        // If any state component exceeds 1000.0, reset to a safe state
+        if new_x.abs() > 1000.0 || new_y.abs() > 1000.0 || new_z.abs() > 1000.0
+            || !new_x.is_finite() || !new_y.is_finite() || !new_z.is_finite()
+        {
+            self.state[0] = 0.1;
+            self.state[1] = 0.0;
+            self.state[2] = 0.1;
+            self.history_x.clear(); self.history_x.push_back(0.1);
+            self.history_y.clear(); self.history_y.push_back(0.0);
+            self.history_z.clear(); self.history_z.push_back(0.1);
+            return;
+        }
+
         self.state[0] = new_x;
         self.state[1] = new_y;
         self.state[2] = new_z;

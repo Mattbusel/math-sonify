@@ -180,14 +180,27 @@ impl LayerSynth {
             (raw_l, raw_r)
         };
 
+        // NaN guard after raw synthesis
+        let raw_l = if raw_l.is_finite() { raw_l } else { 0.0 };
+        let raw_r = if raw_r.is_finite() { raw_r } else { 0.0 };
+
         // Karplus-Strong mixed before per-layer waveshaper
         let ks = self.ks.next_sample();
+        let ks = if ks.is_finite() { ks } else { 0.0 };
         let l = self.waveshaper.process(raw_l + ks * 0.5);
         let r = self.waveshaper.process(raw_r + ks * 0.5);
+
+        // NaN guard after waveshaper
+        let l = if l.is_finite() { l } else { 0.0 };
+        let r = if r.is_finite() { r } else { 0.0 };
 
         // Per-layer bitcrusher
         let l = self.bitcrusher.process(l);
         let r = self.bitcrusher.process(r);
+
+        // NaN guard after bitcrusher
+        let l = if l.is_finite() { l } else { 0.0 };
+        let r = if r.is_finite() { r } else { 0.0 };
 
         // Apply level + pan
         let pan_l = (1.0 - (self.pan + p.layer_pan).clamp(-1.0, 1.0).max(0.0)).max(0.0);
@@ -425,8 +438,18 @@ impl SynthState {
             self.filter.process(sum_r),
         );
         let (ld, rd) = self.delay.process(lf, rf);
-        let (lc, rc) = self.chorus.process(ld, rd);
-        let (lrev, rrev) = self.reverb.process(lc, rc);
+        // Skip chorus computation when mix is negligible (CPU optimization)
+        let (lc, rc) = if self.chorus.mix > 0.001 {
+            self.chorus.process(ld, rd)
+        } else {
+            (ld, rd)
+        };
+        // Skip reverb computation when wet is negligible (CPU optimization)
+        let (lrev, rrev) = if self.reverb.wet > 0.001 {
+            self.reverb.process(lc, rc)
+        } else {
+            (lc, rc)
+        };
         let (lo_raw, ro_raw) = self.limiter.process(lrev, rrev);
 
         // Final NaN guard
