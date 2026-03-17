@@ -22,7 +22,7 @@ use crate::sonification::{
     DirectMapping, OrbitalResonance, GranularMapping, SpectralMapping, FmMapping, VocalMapping,
     chord_intervals_for,
 };
-use crate::audio::{AudioEngine, WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer};
+use crate::audio::{AudioEngine, WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer, SnippetPlayback, SharedSnippetPlayback};
 use crate::synth::OscShape;
 use midir;
 use crate::ui::{AppState, SharedState, draw_ui};
@@ -68,6 +68,9 @@ fn main() -> anyhow::Result<()> {
     // Clip buffer (~60s stereo audio)
     let clip_buffer: ClipBuffer = Arc::new(Mutex::new(std::collections::VecDeque::new()));
 
+    // Snippet/song playback shared state
+    let snippet_pb: SharedSnippetPlayback = Arc::new(Mutex::new(SnippetPlayback::idle()));
+
     // Audio engine
     let (_audio, actual_sr) = AudioEngine::start(
         rx,
@@ -82,6 +85,7 @@ fn main() -> anyhow::Result<()> {
         vu_meter.clone(),
         clip_buffer.clone(),
         sidechain_level.clone(),
+        snippet_pb.clone(),
     )?;
 
     // Store actual sample rate and shared state in AppState
@@ -91,6 +95,7 @@ fn main() -> anyhow::Result<()> {
         st.vu_meter = vu_meter;
         st.clip_buffer = clip_buffer;
         st.sidechain_level_shared = sidechain_level.clone();
+        st.snippet_pb = snippet_pb;
     }
 
     // Simulation thread

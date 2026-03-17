@@ -7,7 +7,7 @@ use std::time::Instant;
 use crate::config::Config;
 use crate::sonification::chord_intervals_for;
 use crate::patches::{PRESETS, load_preset, save_patch, list_patches, load_patch_file};
-use crate::audio::{WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer, save_clip, save_portrait_png};
+use crate::audio::{WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer, SharedSnippetPlayback, SnippetPlayback, save_clip, save_portrait_png, capture_snippet};
 use crate::systems::*;
 use crate::arrangement::{Scene, total_duration, scene_at, generate_song, demo_arrangement};
 use hound;
@@ -18,6 +18,57 @@ pub struct LooperLayer {
     pub active: bool,
     pub level: f32,
     pub playback_pos: usize,
+}
+
+/// A captured audio snippet (saved to disk, available for song sequencing).
+#[derive(Clone)]
+pub struct Snippet {
+    pub name: String,
+    pub path: String,
+    pub duration_secs: f32,
+    pub sample_rate: u32,
+    /// ~128-point peak envelope for waveform thumbnail display.
+    pub thumb: Vec<f32>,
+    /// Color index 0..8 for visual identity.
+    pub color_idx: usize,
+    /// Loaded samples (stereo interleaved). Wrapped in Arc so clone is cheap.
+    pub samples: Arc<Vec<f32>>,
+}
+
+impl Snippet {
+    pub fn from_samples(name: String, path: String, samples: Vec<f32>, sample_rate: u32) -> Self {
+        let duration_secs = samples.len() as f32 / (sample_rate as f32 * 2.0);
+        let thumb = Self::make_thumb(&samples, 128);
+        static COLOR_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let color_idx = COLOR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 8;
+        Self { name, path, duration_secs, sample_rate, thumb, color_idx, samples: Arc::new(samples) }
+    }
+
+    fn make_thumb(samples: &[f32], points: usize) -> Vec<f32> {
+        if samples.is_empty() { return vec![0.0; points]; }
+        let chunk = (samples.len() / points).max(2) & !1; // even for stereo
+        (0..points).map(|i| {
+            let start = (i * samples.len() / points) & !1;
+            let end = (start + chunk).min(samples.len());
+            samples[start..end].iter().map(|s| s.abs()).fold(0.0f32, f32::max)
+        }).collect()
+    }
+
+    /// 8 distinct colors for snippet identity.
+    pub fn color(idx: usize) -> egui::Color32 {
+        const COLORS: [(u8,u8,u8); 8] = [
+            (0, 190, 255),   // cyan
+            (255, 80, 120),  // pink
+            (80, 255, 140),  // green
+            (255, 170, 0),   // amber
+            (180, 100, 255), // violet
+            (255, 120, 40),  // orange
+            (40, 220, 220),  // teal
+            (200, 255, 60),  // lime
+        ];
+        let (r,g,b) = COLORS[idx % 8];
+        egui::Color32::from_rgb(r,g,b)
+    }
 }
 
 /// A parameter change event for replay recording.
@@ -222,6 +273,27 @@ pub struct AppState {
     pub permutation_entropy: f64,
     pub integrator_divergence: f64,
     pub session_log: Vec<SessionEntry>,
+    // ── Snippet Studio ──────────────────────────────────────────────────────
+    /// Library of captured snippets (current session + loaded from disk).
+    pub snippets: Vec<Snippet>,
+    /// Song grid: up to 32 slots, each holds an optional index into `snippets`.
+    pub snippet_slots: Vec<Option<usize>>,
+    /// Duration to capture when the user presses Capture.
+    pub snippet_capture_secs: f32,
+    /// Currently selected snippet in the library (for assigning to slots).
+    pub snippet_selected: Option<usize>,
+    /// Status message shown under the capture button.
+    pub snippet_status: String,
+    /// Song sequencer: is the song playing?
+    pub song_playing: bool,
+    /// Which slot is currently playing (0-based).
+    pub song_play_slot: usize,
+    /// Volume for snippet playback (0..1).
+    pub snippet_volume: f32,
+    /// Loop the song when it reaches the last slot.
+    pub song_loop: bool,
+    /// Shared with audio thread for snippet playback.
+    pub snippet_pb: SharedSnippetPlayback,
 }
 
 #[derive(Clone)]
@@ -414,6 +486,16 @@ impl AppState {
             permutation_entropy: 0.0,
             integrator_divergence: 0.0,
             session_log: Vec::new(),
+            snippets: Vec::new(),
+            snippet_slots: vec![None; 32],
+            snippet_capture_secs: 8.0,
+            snippet_selected: None,
+            snippet_status: String::new(),
+            song_playing: false,
+            song_play_slot: 0,
+            snippet_volume: 0.8,
+            song_loop: false,
+            snippet_pb: Arc::new(Mutex::new(SnippetPlayback::idle())),
         }
     }
 }
@@ -824,6 +906,7 @@ pub fn draw_ui(
                 ("🎵", "Notes"),
                 ("∑", "Math"),
                 ("∿", "Bifurc"),
+                ("📼", "Studio"),
             ];
             let mut viz_tab = state.lock().viz_tab;
             for (i, (icon, name)) in tabs.iter().enumerate() {
@@ -874,6 +957,58 @@ pub fn draw_ui(
         });
 
         let viz_tab = state.lock().viz_tab;
+
+        // ── Song sequencer tick (runs every UI frame regardless of active tab) ──
+        {
+            let (song_playing, song_loop) = {
+                let st = state.lock();
+                (st.song_playing, st.song_loop)
+            };
+            if song_playing {
+                let on_complete = {
+                    let st = state.lock();
+                    let v = st.snippet_pb.lock().on_complete;
+                    v
+                };
+                if on_complete {
+                    // Reset the flag
+                    {
+                        let st = state.lock();
+                        st.snippet_pb.lock().on_complete = false;
+                    }
+                    // Advance to next populated slot
+                    let mut st = state.lock();
+                    let mut next = st.song_play_slot + 1;
+                    // Find next non-empty slot
+                    while next < st.snippet_slots.len() && st.snippet_slots[next].is_none() {
+                        next += 1;
+                    }
+                    if next >= st.snippet_slots.len() {
+                        if song_loop {
+                            // Loop: find first non-empty slot
+                            next = 0;
+                            while next < st.snippet_slots.len() && st.snippet_slots[next].is_none() {
+                                next += 1;
+                            }
+                        } else {
+                            // Song ended
+                            st.song_playing = false;
+                            next = 0;
+                        }
+                    }
+                    st.song_play_slot = next;
+                    if st.song_playing {
+                        if let Some(idx) = st.snippet_slots[next] {
+                            if idx < st.snippets.len() {
+                                let samples = (*st.snippets[idx].samples).clone();
+                                let vol = st.snippet_volume;
+                                *st.snippet_pb.lock() = SnippetPlayback::play(samples, vol);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Trail length slider + projection buttons for Phase Portrait tab
         if viz_tab == 0 {
@@ -1157,9 +1292,15 @@ pub fn draw_ui(
             4 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
             5 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases, &lyapunov_spectrum, &attractor_type, kolmogorov_entropy, energy_error, sync_error, permutation_entropy, integrator_divergence),
             6 => draw_bifurc_diagram(ui, bifurc_data, state),
+            7 => draw_studio_tab(ui, state),
             _ => {}
         }
     });
+}
+
+fn draw_studio_tab(ui: &mut egui::Ui, state: &SharedState) {
+    ui.label("Studio tab — coming soon");
+    let _ = state;
 }
 
 // ---------------------------------------------------------------------------
