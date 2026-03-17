@@ -316,6 +316,10 @@ fn sim_thread(
     // ── Lyapunov spectrum timer ───────────────────────────────────────────────
     let mut lyap_timer: u64 = 0;
     const LYAP_INTERVAL: u64 = 600; // every ~5s at 120 Hz
+    let mut lyap_cycles: u64 = 0;
+
+    // ── Trajectory buffer for analysis (permutation entropy, RQA, etc.) ───────
+    let mut analysis_trajectory: Vec<Vec<f64>> = Vec::with_capacity(500);
 
     // ── Session transcript timer ──────────────────────────────────────────────
     let mut session_log_timer: u64 = 0;
@@ -596,6 +600,14 @@ fn sim_thread(
 
         // UPTIME and WOUND HEALING increment
         uptime_ticks += 1;
+
+        // Collect trajectory points for analysis (every 12 ticks = 10x subsampled at 120Hz)
+        if uptime_ticks % 12 == 0 {
+            if analysis_trajectory.len() >= 500 {
+                analysis_trajectory.remove(0);
+            }
+            analysis_trajectory.push(system.state().to_vec());
+        }
         wound_t = (wound_t + 1.0 / (20.0 * 60.0 * 120.0)).min(1.0);
 
         // STARTUP RAMP: ramp from 0 to 1 over 2 seconds (240 ticks)
@@ -1765,19 +1777,42 @@ fn sim_thread(
         lyap_timer += 1;
         if lyap_timer >= LYAP_INTERVAL {
             lyap_timer = 0;
+            lyap_cycles += 1;
             let dim = system.dimension().min(3);
             if dim > 0 {
+                // Compute all metrics outside the lock
                 let state_snap = system.state().to_vec();
                 let lyap = crate::systems::lyapunov_spectrum(
                     &state_snap, dim, dim, 300, config.system.dt, &|s| system.deriv_at(s),
                 );
                 let atype = crate::systems::classify_attractor(&lyap);
                 let k_entropy = crate::systems::kolmogorov_entropy(&lyap);
+
+                // Permutation entropy of x-component
+                let perm_ent = if analysis_trajectory.len() >= 20 {
+                    let ts: Vec<f64> = analysis_trajectory.iter()
+                        .filter_map(|s| s.first().copied()).collect();
+                    crate::systems::permutation_entropy(&ts, 4, 1)
+                } else { 0.0 };
+
+                // RK4 vs RK45 validation (every 6th lyap cycle = ~30s)
+                let integrator_div = if lyap_cycles % 6 == 0 {
+                    crate::systems::compare_integrators(
+                        &state_snap, config.system.dt, 1000,
+                        &|s| system.deriv_at(s),
+                    )
+                } else {
+                    shared.lock().integrator_divergence
+                };
+
+                // Single lock write for all results
                 {
                     let mut st = shared.lock();
                     st.lyapunov_spectrum = lyap;
                     st.attractor_type = atype.to_string();
                     st.kolmogorov_entropy = k_entropy;
+                    st.permutation_entropy = perm_ent;
+                    st.integrator_divergence = integrator_div;
                 }
             }
         }

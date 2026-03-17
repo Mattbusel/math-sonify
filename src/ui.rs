@@ -680,8 +680,9 @@ pub fn draw_ui(
             let (pg, pi) = { let st = state.lock(); (st.portrait_ghosts.clone(), st.portrait_ink.clone()) };
             let lunar = { state.lock().lunar_phase };
             let (scars_perf, tod_perf) = { let st = state.lock(); (st.scars.clone(), st.time_of_day_f) };
+            let ee_perf = { state.lock().energy_error };
             draw_phase_portrait(ui, viz_points, &system_name, &mode_name,
-                &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, ag, ag_sep, &pg, &pi, lunar, &scars_perf, tod_perf);
+                &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, ag, ag_sep, &pg, &pi, lunar, &scars_perf, tod_perf, ee_perf);
             // Dim hint in corner
             let rect = ui.min_rect();
             ui.painter().text(
@@ -3085,6 +3086,7 @@ fn draw_phase_portrait(
     lunar_phase: f32,
     scars: &[(f32, f32)],
     time_of_day_f: f32,
+    energy_error: f64,
 ) {
     let avail = ui.available_size();
     let (response, painter) = ui.allocate_painter(avail, Sense::hover());
@@ -3389,6 +3391,20 @@ fn draw_phase_portrait(
             let pos = rect.right_top() + Vec2::new(-10.0, 12.0 + i as f32 * 15.0);
             painter.text(pos, Align2::RIGHT_TOP, text, FontId::monospace(10.5), Color32::from_rgba_premultiplied(80, 210, 130, 220));
         }
+    }
+
+    // Energy drift indicator (bottom-left, above equation overlay)
+    if energy_error > 1e-8 {
+        let edrift_color = if energy_error >= 1e-4 {
+            Color32::from_rgb(255, 60, 60)
+        } else if energy_error >= 1e-6 {
+            Color32::from_rgb(255, 220, 0)
+        } else {
+            Color32::from_rgb(60, 220, 80)
+        };
+        let edrift_text = format!("E-drift: {:.2e}", energy_error);
+        let edrift_pos = rect.left_bottom() + Vec2::new(8.0, -26.0);
+        painter.text(edrift_pos, Align2::LEFT_BOTTOM, edrift_text, FontId::monospace(10.0), edrift_color);
     }
 }
 
@@ -4084,6 +4100,10 @@ fn draw_math_view(
     lyapunov_spectrum: &[f64],
     attractor_type: &str,
     kolmogorov_entropy: f64,
+    energy_error: f64,
+    sync_error: f32,
+    permutation_entropy: f64,
+    integrator_divergence: f64,
 ) {
     let avail = ui.available_size();
     let (response, painter) = ui.allocate_painter(avail, Sense::hover());
@@ -4224,6 +4244,51 @@ fn draw_math_view(
                 format!("K-entropy: {:.4} nats/s", kolmogorov_entropy),
                 FontId::monospace(12.0),
                 Color32::from_rgb(200, 180, 100),
+            );
+            y += 16.0;
+        }
+        if permutation_entropy > 0.0 {
+            painter.text(
+                Pos2::new(x, y),
+                Align2::LEFT_TOP,
+                format!("Perm. entropy: {:.3}", permutation_entropy),
+                FontId::monospace(12.0),
+                Color32::from_rgb(160, 200, 160),
+            );
+            y += 16.0;
+        }
+        if energy_error > 1e-10 {
+            let ee_color = if energy_error > 1e-6 {
+                Color32::from_rgb(255, 60, 60)
+            } else {
+                Color32::from_rgb(200, 200, 200)
+            };
+            painter.text(
+                Pos2::new(x, y),
+                Align2::LEFT_TOP,
+                format!("Energy drift: {:.2e}", energy_error),
+                FontId::monospace(12.0),
+                ee_color,
+            );
+            y += 16.0;
+        }
+        if sync_error > 0.001 {
+            painter.text(
+                Pos2::new(x, y),
+                Align2::LEFT_TOP,
+                format!("Sync error: {:.3}", sync_error),
+                FontId::monospace(12.0),
+                Color32::from_rgb(200, 160, 255),
+            );
+            y += 16.0;
+        }
+        if integrator_divergence > 0.0 {
+            painter.text(
+                Pos2::new(x, y),
+                Align2::LEFT_TOP,
+                format!("RK4 vs RK45 drift: {:.2e}", integrator_divergence),
+                FontId::monospace(12.0),
+                Color32::from_rgb(180, 180, 100),
             );
             y += 16.0;
         }
