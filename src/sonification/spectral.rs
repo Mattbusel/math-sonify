@@ -96,7 +96,7 @@ impl Sonification for SpectralMapping {
             mode: SonifMode::Spectral,
             partials: self.smoothed,
             partials_base_freq: base,
-            gain: 0.15,
+            gain: 0.30, // was 0.15 — spectral DFT bins were normalized so output was 6 dB too quiet
             filter_cutoff: 8000.0,
             filter_q: 0.7,
             ..Default::default()

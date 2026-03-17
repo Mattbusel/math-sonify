@@ -209,7 +209,9 @@ pub fn quantize_to_scale(t: f32, base_hz: f32, octave_range: f32, scale: Scale) 
     let n = intervals.len() as f32;
     // Map t to a position in the scale across octave_range octaves
     let total_steps = octave_range * n;
-    let step_float = (t.clamp(0.0, 1.0) * total_steps) as usize;
+    // Clamp to total_steps-1 so t=1.0 doesn't map one octave past the range
+    let step_float = ((t.clamp(0.0, 1.0) * total_steps) as usize)
+        .min((total_steps as usize).saturating_sub(1));
     let octave = step_float / intervals.len();
     let degree = step_float % intervals.len();
     let semitones = octave as f32 * 12.0 + intervals[degree];

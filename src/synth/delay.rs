@@ -51,8 +51,11 @@ impl DelayLine {
         let del_l = if del_l.is_finite() { del_l } else { 0.0 };
         let del_r = if del_r.is_finite() { del_r } else { 0.0 };
 
-        self.buf_l[self.pos] = ((l + del_l * self.feedback) * 0.25).tanh() * 4.0;
-        self.buf_r[self.pos] = ((r + del_r * self.feedback) * 0.25).tanh() * 4.0;
+        // Simple clamp instead of tanh saturation: tanh in the feedback loop
+        // causes amplitude compression at moderate levels, heard as squishy pumping
+        // on percussion hits and sharp transients.
+        self.buf_l[self.pos] = (l + del_l * self.feedback).clamp(-4.0, 4.0);
+        self.buf_r[self.pos] = (r + del_r * self.feedback).clamp(-4.0, 4.0);
         self.pos = (self.pos + 1) % self.buf_l.len();
 
         let dry = 1.0 - self.mix;

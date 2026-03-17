@@ -398,7 +398,12 @@ impl LayerSynth {
         // Fundamental follows the first attractor frequency (clamped to a
         // singable range) so the voice actually tracks the dynamics of the
         // underlying mathematical system rather than being a fixed 120 Hz drone.
-        let fundamental = p.freqs[0].clamp(60.0, 400.0);
+        let fundamental_base = p.freqs[0].clamp(60.0, 400.0);
+        // Subtle vibrato LFO (5 Hz, ±0.5 semitone depth) using the noise_phase
+        // counter as a cheap sinusoidal LFO (no extra state needed). The small
+        // depth (0.3%) is natural and prevents the voice sounding machine-like.
+        let vibrato_lfo = (self.noise_phase * TAU * 5.0 / self.sr).sin();
+        let fundamental = fundamental_base * (1.0 + vibrato_lfo * 0.003);
         self.vocal_osc_phase = (self.vocal_osc_phase + TAU * fundamental / self.sr).rem_euclid(TAU);
 
         // PolyBLEP sawtooth glottal source (alias-free at all pitches)
@@ -423,7 +428,9 @@ impl LayerSynth {
         // --- Formant filters --------------------------------------------------
         // Smooth coefficient updates (no hard reset) to avoid zipper noise when
         // the attractor drifts the formant frequencies.
-        let q = 9.0f32; // slightly higher Q for more vocal clarity
+        // Dynamic formant Q: higher chaos → narrower, more resonant formants (edgy timbre);
+        // lower chaos → broader, breathier vowels. Range 5–14.
+        let q = 5.0 + p.chaos_level.clamp(0.0, 1.0) * 9.0;
         let sr = self.sr;
         for (i, freq) in [p.freqs[0], p.freqs[1], p.freqs[2]].iter().enumerate() {
             let f = freq.clamp(100.0, sr * 0.45);
@@ -598,7 +605,7 @@ impl SynthState {
                 // Resonance: crosstalk modulates the output (not the input frequencies,
                 // to stay lock-free). The effect is a gentle intermodulation.
                 let l = l + crosstalk_l;
-                let r = r + crosstalk_l;
+                let r = r + crosstalk_l; // same mono crosstalk into both channels (intentional)
                 layer_out[i] = (l, r);
                 self.layer_last[i] = (l + r) * 0.5;
                 sum_l += l;
@@ -619,31 +626,36 @@ impl SynthState {
         }
 
         // Shared master effects chain
+        // Order: filter → delay → reverb → chorus → EQ → limiter
+        // EQ after reverb shapes the full wet+dry mix (boosts bass before reverb
+        // would over-excite low-frequency room modes). Chorus after reverb avoids
+        // modulating the reverb tail which causes flamming on dense textures.
         let (lf, rf) = (
             self.filter.process(sum_l),
             self.filter.process(sum_r),
         );
-        // 3-band parametric EQ (between filter and delay)
-        let (leq, req) = self.eq.process(lf, rf);
-        let (ld, rd) = self.delay.process(leq, req);
-        // Skip chorus computation when mix is negligible (CPU optimization)
-        let (lc, rc) = if self.chorus.mix > 0.001 {
-            self.chorus.process(ld, rd)
-        } else {
-            (ld, rd)
-        };
+        let (ld, rd) = self.delay.process(lf, rf);
         // Noise gate: −70 dBFS (3.16e-4) threshold — raised from −80 dBFS (1e-4)
         // which was cutting off valid soft content (granular at low density, quiet
         // vocal breathiness transitions).
         let gate_threshold = 3.16e-4;
         // Skip reverb when both signal AND wet are negligible (CPU optimisation).
-        let (lrev, rrev) = if self.reverb.wet > 0.001 && lc.abs().max(rc.abs()) > gate_threshold {
-            let (rl, rr) = self.reverb.process(lc, rc);
+        let (lrv, rrv) = if self.reverb.wet > 0.001 && ld.abs().max(rd.abs()) > gate_threshold {
+            let (rl, rr) = self.reverb.process(ld, rd);
             // Apply sidechain duck to reverb output
             (rl * self.sidechain_duck, rr * self.sidechain_duck)
         } else {
-            (lc, rc)
+            (ld, rd)
         };
+        // Chorus after reverb — modulating already-diffused signal sounds lush
+        // without the flamming artifact of modulating pre-reverb input.
+        let (lc, rc) = if self.chorus.mix > 0.001 {
+            self.chorus.process(lrv, rrv)
+        } else {
+            (lrv, rrv)
+        };
+        // 3-band EQ at the end of the chain shapes the full mix including reverb tail
+        let (lrev, rrev) = self.eq.process(lc, rc);
         // Sidechain duck recovery — slower (0.0001 ≈ 4.5s) to avoid obvious pumping
         // at fast arpeggio rates where 0.0003 never let reverb fully recover.
         self.sidechain_duck += 0.0001 * (1.0 - self.sidechain_duck);

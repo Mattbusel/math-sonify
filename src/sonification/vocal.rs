@@ -78,9 +78,10 @@ impl Sonification for VocalMapping {
 
         let (f1, f2, f3) = Self::interpolate_formants(self.vowel_pos);
 
-        // Breathiness from speed/chaos
+        // Breathiness from speed/chaos — minimum floor of 0.08 ensures slow/periodic
+        // attractors still produce an audible airy quality instead of a dead sine.
         let chaos = (speed.abs() as f32 / 100.0).clamp(0.0, 1.0);
-        self.breathiness += 0.01 * (chaos * 0.6 - self.breathiness);
+        self.breathiness += 0.01 * ((chaos * 0.6).max(0.08) - self.breathiness);
 
         let mut params = AudioParams {
             mode: SonifMode::Vocal,

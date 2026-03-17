@@ -121,8 +121,10 @@ impl GrainEngine {
         // Duration 40–220 ms; shorter grains at higher spawn rates → pitched texture
         let dur_ms = 40.0 + self.rand_f32() * 180.0;
         let dur_samples = (dur_ms * 0.001 * sr).max(1.0);
-        // Amplitude: slightly randomised to add natural variation
-        let amplitude = 0.75 + self.rand_f32() * 0.25;
+        // Amplitude: compensate for Hann window energy loss.
+        // The Hann window averages 0.5 vs a rectangle window's 1.0, so multiply
+        // by sqrt(2) ≈ 1.41 to restore perceptual loudness parity with other modes.
+        let amplitude = (1.06 + self.rand_f32() * 0.35) * std::f32::consts::SQRT_2;
 
         if let Some(g) = self.grains.iter_mut().find(|g| !g.active) {
             g.freq = freq;

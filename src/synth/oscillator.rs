@@ -63,8 +63,10 @@ impl Oscillator {
                 let sq = sq_naive
                     + poly_blep(t, dt)
                     - poly_blep((t + 0.5) % 1.0, dt);
-                // DC-block the square before integrating (prevents sub-bass accumulation)
-                self.sq_dc += 0.00001 * (sq - self.sq_dc);
+                // DC-block the square before integrating (prevents sub-bass accumulation).
+                // α=0.001 gives a ~1000-sample (23ms at 44.1kHz) time constant — fast
+                // enough to track any DC offset without affecting the audio band.
+                self.sq_dc += 0.001 * (sq - self.sq_dc);
                 let sq_ac = sq - self.sq_dc;
                 // Integrate: step size = 4*dt to get correct ±1 amplitude
                 self.tri_state += 4.0 * dt * sq_ac;
