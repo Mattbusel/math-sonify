@@ -342,19 +342,26 @@ impl LayerSynth {
         let mut out_l = 0.0f32;
         let mut out_r = 0.0f32;
         let num_bands = self.vocoder_filters.len();
+        let mut active_bands = 0usize;
         for i in 0..num_bands {
             let partial_idx = (i * 2).min(31);
             let amp = p.partials[partial_idx];
             if amp > 0.001 {
+                active_bands += 1;
                 let filtered = self.vocoder_filters[i].process(excitation) * amp;
-                // Pan bands across stereo field: even = slight left, odd = slight right
-                let pan = (i as f32 / (num_bands - 1) as f32) * 2.0 - 1.0; // -1..1
-                out_l += filtered * (1.0 - pan.max(0.0));
-                out_r += filtered * (1.0 + pan.min(0.0));
+                // Equal-power panning: low freqs left → high freqs right.
+                // cos/sin maintains constant loudness; old linear formula attenuated centre.
+                use std::f32::consts::FRAC_PI_4;
+                let pan = (i as f32 / (num_bands - 1) as f32) * 2.0 - 1.0;
+                let angle = (pan + 1.0) * FRAC_PI_4;
+                out_l += filtered * angle.cos();
+                out_r += filtered * angle.sin();
             }
         }
 
-        let scale = 1.0 / (num_bands as f32).sqrt();
+        // Normalise by *active* bands so sparse attractors aren't 8× quieter
+        // than full-spectrum ones (previously always divided by √16 regardless).
+        let scale = 1.0 / (active_bands.max(1) as f32).sqrt();
         (out_l * p.gain * scale, out_r * p.gain * scale)
     }
 
@@ -420,12 +427,12 @@ impl LayerSynth {
         let sr = self.sr;
         for (i, freq) in [p.freqs[0], p.freqs[1], p.freqs[2]].iter().enumerate() {
             let f = freq.clamp(100.0, sr * 0.45);
-            // Only update coefficients when frequency moves by more than 2 Hz —
-            // rebuilding the filter struct every sample resets z1/z2 to zero,
-            // which destroys the IIR memory and makes the formant filters silent.
-            if (f - self.formant_freqs[i]).abs() > 2.0 {
-                self.formant_filters[i].update_bp(f, q, sr);
-                self.formant_freqs[i] = f;
+            // Smooth the target frequency before deciding to update coefficients.
+            // The old 2 Hz dead-band caused audible "stepping" during slow glides;
+            // 0.5 Hz is fine since filter coeff recalculation is cheap (~10 ns).
+            self.formant_freqs[i] += 0.008 * (f - self.formant_freqs[i]);
+            if (f - self.formant_freqs[i]).abs() > 0.5 {
+                self.formant_filters[i].update_bp(self.formant_freqs[i], q, sr);
             }
         }
 
@@ -537,6 +544,19 @@ impl SynthState {
             self.chorus.mix   = params.chorus_mix;
             self.chorus.rate  = params.chorus_rate;
             self.chorus.depth = params.chorus_depth;
+            // 3-band EQ — rebuild coefficients only when gain/freq changes
+            let eq = &mut self.eq;
+            let changed = (eq.low_gain_db - params.eq_low_db).abs() > 0.01
+                || (eq.mid_gain_db - params.eq_mid_db).abs() > 0.01
+                || (eq.high_gain_db - params.eq_high_db).abs() > 0.01
+                || (eq.mid_freq - params.eq_mid_freq).abs() > 1.0;
+            if changed {
+                eq.low_gain_db  = params.eq_low_db;
+                eq.mid_gain_db  = params.eq_mid_db;
+                eq.high_gain_db = params.eq_high_db;
+                eq.mid_freq     = params.eq_mid_freq;
+                eq.update();
+            }
         }
         // Sidechain compression: KS trigger ducks reverb/delay output
         if params.ks_trigger {
@@ -612,23 +632,21 @@ impl SynthState {
         } else {
             (ld, rd)
         };
-        // Noise gate: skip reverb for signals below -80 dBFS
-        let gate_threshold = 1e-4;
-        let (lc_gated, rc_gated) = if lc.abs().max(rc.abs()) > gate_threshold {
-            (lc, rc)
-        } else {
-            (lc, rc) // pass through dry (reverb skipped below)
-        };
-        // Skip reverb computation when wet is negligible (CPU optimization)
+        // Noise gate: −70 dBFS (3.16e-4) threshold — raised from −80 dBFS (1e-4)
+        // which was cutting off valid soft content (granular at low density, quiet
+        // vocal breathiness transitions).
+        let gate_threshold = 3.16e-4;
+        // Skip reverb when both signal AND wet are negligible (CPU optimisation).
         let (lrev, rrev) = if self.reverb.wet > 0.001 && lc.abs().max(rc.abs()) > gate_threshold {
-            let (rl, rr) = self.reverb.process(lc_gated, rc_gated);
+            let (rl, rr) = self.reverb.process(lc, rc);
             // Apply sidechain duck to reverb output
             (rl * self.sidechain_duck, rr * self.sidechain_duck)
         } else {
-            (lc_gated, rc_gated)
+            (lc, rc)
         };
-        // Sidechain duck recovery
-        self.sidechain_duck += 0.0003 * (1.0 - self.sidechain_duck);
+        // Sidechain duck recovery — slower (0.0001 ≈ 4.5s) to avoid obvious pumping
+        // at fast arpeggio rates where 0.0003 never let reverb fully recover.
+        self.sidechain_duck += 0.0001 * (1.0 - self.sidechain_duck);
         let (lo_raw, ro_raw) = self.limiter.process(lrev, rrev);
 
         // Final NaN guard

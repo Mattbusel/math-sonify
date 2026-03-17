@@ -20,6 +20,10 @@ pub struct Config {
     pub chua: ChuaConfig,
     pub hindmarsh_rose: HindmarshRoseConfig,
     pub coupled_map_lattice: CmlConfig,
+    pub mackey_glass: MackeyGlassConfig,
+    pub nose_hoover: NoseHooverConfig,
+    pub henon_map: HenonMapConfig,
+    pub lorenz96: Lorenz96Config,
 }
 
 impl Default for Config {
@@ -41,6 +45,10 @@ impl Default for Config {
             chua: ChuaConfig::default(),
             hindmarsh_rose: HindmarshRoseConfig::default(),
             coupled_map_lattice: CmlConfig::default(),
+            mackey_glass: MackeyGlassConfig::default(),
+            nose_hoover: NoseHooverConfig::default(),
+            henon_map: HenonMapConfig::default(),
+            lorenz96: Lorenz96Config::default(),
         }
     }
 }
@@ -270,6 +278,46 @@ pub struct CmlConfig {
 }
 impl Default for CmlConfig {
     fn default() -> Self { Self { r: 3.9, eps: 0.35 } }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MackeyGlassConfig {
+    pub beta: f64,
+    pub gamma: f64,
+    pub tau: f64,
+    pub n: f64,
+}
+impl Default for MackeyGlassConfig {
+    fn default() -> Self { Self { beta: 0.2, gamma: 0.1, tau: 17.0, n: 10.0 } }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct NoseHooverConfig {
+    pub a: f64,
+}
+impl Default for NoseHooverConfig {
+    fn default() -> Self { Self { a: 3.0 } }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct HenonMapConfig {
+    pub a: f64,
+    pub b: f64,
+}
+impl Default for HenonMapConfig {
+    fn default() -> Self { Self { a: 1.4, b: 0.3 } }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Lorenz96Config {
+    pub f: f64,
+}
+impl Default for Lorenz96Config {
+    fn default() -> Self { Self { f: 8.0 } }
 }
 
 // --- Conversions from string config to enums ---

@@ -101,7 +101,7 @@ impl Adsr {
             Stage::Release => {
                 // Exponential decay toward zero
                 self.level *= self.release_coeff;
-                if self.level < 0.0002 {
+                if self.level < 1e-6 { // −120 dBFS — no audible tail, no DC accumulation
                     self.level = 0.0;
                     self.stage = Stage::Idle;
                 }

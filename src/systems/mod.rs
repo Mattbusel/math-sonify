@@ -69,6 +69,9 @@ pub trait DynamicalSystem: Send {
 
     /// Load a saved state vector. Default: no-op (systems that don't override will ignore).
     fn set_state(&mut self, _s: &[f64]) {}
+
+    /// Return current energy conservation error (relative), if applicable.
+    fn energy_error(&self) -> Option<f64> { None }
 }
 
 /// Runge-Kutta 4 helper. Integrates `f(state) -> derivative` by dt.
@@ -259,6 +262,81 @@ where
         prev = state.clone();
     }
     crossings
+}
+
+/// Ground-truth validation: compare RK4 vs RK45 trajectory divergence over time.
+/// Runs both integrators from the same initial condition for `n_steps` steps.
+/// Returns the RMS state divergence at the final step.
+pub fn compare_integrators<F>(
+    initial_state: &[f64],
+    dt: f64,
+    n_steps: usize,
+    f: &F,
+) -> f64
+where
+    F: Fn(&[f64]) -> Vec<f64>,
+{
+    let mut s_rk4 = initial_state.to_vec();
+    let mut s_rk45 = initial_state.to_vec();
+    for _ in 0..n_steps {
+        rk4(&mut s_rk4, dt, f);
+        integrate_adaptive(&mut s_rk45, dt, 1e-8, |s| f(s));
+    }
+    let rms: f64 = s_rk4.iter().zip(s_rk45.iter())
+        .map(|(a, b)| (a - b).powi(2)).sum::<f64>() / s_rk4.len() as f64;
+    rms.sqrt()
+}
+
+/// Cluster trajectory points into k groups using k-means (Lloyd's algorithm).
+/// Returns `(centroids, labels)` where labels[i] is the cluster index for trajectory[i].
+/// Uses up to `max_iter` iterations. Only uses the first `use_dims` dimensions.
+pub fn kmeans_cluster(
+    trajectory: &[Vec<f64>],
+    k: usize,
+    use_dims: usize,
+    max_iter: usize,
+) -> (Vec<Vec<f64>>, Vec<usize>) {
+    if k == 0 || trajectory.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let n = trajectory.len();
+    let d = use_dims.min(trajectory[0].len());
+    // Initialize centroids: evenly-spaced points from trajectory
+    let mut centroids: Vec<Vec<f64>> = (0..k).map(|i| {
+        let idx = (i * n) / k;
+        trajectory[idx][..d].to_vec()
+    }).collect();
+    let mut labels = vec![0usize; n];
+    for _ in 0..max_iter {
+        // Assignment step
+        let mut changed = false;
+        for (i, point) in trajectory.iter().enumerate() {
+            let best = (0..k).min_by(|&a, &b| {
+                let da: f64 = centroids[a].iter().zip(&point[..d])
+                    .map(|(c, p)| (c - p).powi(2)).sum();
+                let db: f64 = centroids[b].iter().zip(&point[..d])
+                    .map(|(c, p)| (c - p).powi(2)).sum();
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            }).unwrap_or(0);
+            if labels[i] != best { changed = true; }
+            labels[i] = best;
+        }
+        // Update centroids
+        let mut sums = vec![vec![0.0f64; d]; k];
+        let mut counts = vec![0usize; k];
+        for (i, point) in trajectory.iter().enumerate() {
+            let c = labels[i];
+            for j in 0..d { sums[c][j] += point[j]; }
+            counts[c] += 1;
+        }
+        for c in 0..k {
+            if counts[c] > 0 {
+                for j in 0..d { centroids[c][j] = sums[c][j] / counts[c] as f64; }
+            }
+        }
+        if !changed { break; }
+    }
+    (centroids, labels)
 }
 
 /// Estimate the period of a (near-)periodic orbit by tracking Poincaré crossings.
@@ -582,6 +660,51 @@ pub fn leapfrog<Fv, Fa>(
     }
 }
 
+/// Yoshida 4th-order symplectic integrator for Hamiltonian systems.
+/// Composes three leapfrog steps with coefficients w0, w1 chosen to cancel
+/// leading error terms. More accurate than plain leapfrog at same step size.
+pub fn yoshida4<Fv, Fa>(
+    state: &mut Vec<f64>,
+    q_idx: &[usize],
+    p_idx: &[usize],
+    dt: f64,
+    velocity: Fv,
+    force: Fa,
+)
+where
+    Fv: Fn(&[f64]) -> Vec<f64>,
+    Fa: Fn(&[f64]) -> Vec<f64>,
+{
+    // Yoshida (1990) coefficients
+    let cbrt2: f64 = 2.0f64.cbrt();
+    let w1 = 1.0 / (2.0 - cbrt2);
+    let w0 = -cbrt2 * w1;
+    let c1 = w1 / 2.0;
+    let c2 = (w0 + w1) / 2.0;
+    let d1 = w1;
+    let d2 = w0;
+    // Three-step composition: c1,d1,c2,d2,c2,d1,c1
+    // Step 1
+    let n = q_idx.len();
+    let v = velocity(state);
+    for i in 0..n { state[q_idx[i]] += c1 * dt * v[i]; }
+    let f = force(state);
+    for i in 0..n { state[p_idx[i]] += d1 * dt * f[i]; }
+    // Step 2
+    let v = velocity(state);
+    for i in 0..n { state[q_idx[i]] += c2 * dt * v[i]; }
+    let f = force(state);
+    for i in 0..n { state[p_idx[i]] += d2 * dt * f[i]; }
+    // Step 3 (mirror of step 1)
+    let v = velocity(state);
+    for i in 0..n { state[q_idx[i]] += c2 * dt * v[i]; }
+    let f = force(state);
+    for i in 0..n { state[p_idx[i]] += d1 * dt * f[i]; }
+    // Final half-drift
+    let v = velocity(state);
+    for i in 0..n { state[q_idx[i]] += c1 * dt * v[i]; }
+}
+
 /// Estimate transfer entropy from time series X → Y (information flow from X to Y).
 /// Uses k=1 nearest-neighbor estimator approximated by binning.
 /// `x` and `y`: equal-length 1D time series (first component of each system's state).
@@ -878,6 +1001,99 @@ where
         .sum::<f64>()
         .sqrt();
     if norm_init > 1e-15 { error / norm_init } else { error }
+}
+
+/// Compute an Arnold tongue map for a periodically forced system.
+/// Sweeps driving frequency (omega) and amplitude (A) over a 2D grid.
+/// At each (omega, A), runs the system and measures the dominant output frequency
+/// (via zero-crossings of state[0]). Returns sync_ratio = output_freq / drive_freq.
+/// Points where sync_ratio ≈ p/q (simple rational) indicate Arnold tongues (synchronization).
+///
+/// `make_deriv`: closure returning a deriv_fn for given (omega, A).
+/// Returns Vec<(omega, amplitude, sync_ratio, is_locked)> for each grid point.
+pub fn arnold_tongue_map<F>(
+    omega_range: (f64, f64),
+    amp_range: (f64, f64),
+    grid_n: usize,
+    initial_state: &[f64],
+    t_warmup: f64,
+    t_measure: f64,
+    dt: f64,
+    make_deriv: F,
+) -> Vec<(f64, f64, f64, bool)>
+where
+    F: Fn(f64, f64) -> Box<dyn Fn(&[f64]) -> Vec<f64>> + Sync + Send,
+{
+    use std::f64::consts::PI;
+    let n = grid_n.max(2);
+    let indices: Vec<(usize, usize)> = (0..n).flat_map(|i| (0..n).map(move |j| (i, j))).collect();
+
+    indices.par_iter().map(|&(i, j)| {
+        let omega = omega_range.0 + i as f64 * (omega_range.1 - omega_range.0) / (n - 1) as f64;
+        let amp   = amp_range.0   + j as f64 * (amp_range.1   - amp_range.0)   / (n - 1) as f64;
+
+        let deriv_fn = make_deriv(omega, amp);
+        let mut state = initial_state.to_vec();
+
+        // Warmup
+        let n_warmup = (t_warmup / dt).round() as usize;
+        for _ in 0..n_warmup {
+            rk4(&mut state, dt, &*deriv_fn);
+        }
+
+        // Measure zero crossings (negative→positive) of state[0]
+        let n_measure = (t_measure / dt).round() as usize;
+        let mut n_crossings: usize = 0;
+        let mut prev_val = state[0];
+        for _ in 0..n_measure {
+            rk4(&mut state, dt, &*deriv_fn);
+            let curr_val = state[0];
+            if prev_val < 0.0 && curr_val >= 0.0 {
+                n_crossings += 1;
+            }
+            prev_val = curr_val;
+        }
+
+        let output_freq = n_crossings as f64 / t_measure;
+        let drive_freq = omega / (2.0 * PI);
+        let sync_ratio = if omega > 0.0 { output_freq / drive_freq.max(1e-15) } else { 0.0 };
+
+        // is_locked: sync_ratio near a simple rational p/q (p,q ≤ 4)
+        let is_locked = {
+            let near_integer = (sync_ratio - sync_ratio.round()).abs() < 0.1;
+            let near_simple = {
+                let mut found = false;
+                'outer: for p in 1usize..=4 {
+                    for q in 1usize..=4 {
+                        if (sync_ratio - p as f64 / q as f64).abs() < 0.05 {
+                            found = true;
+                            break 'outer;
+                        }
+                    }
+                }
+                found
+            };
+            near_integer || near_simple
+        };
+
+        (omega, amp, sync_ratio, is_locked)
+    }).collect()
+}
+
+/// Compute a distance between two parameter vectors in normalized parameter space.
+/// Uses Euclidean distance with each parameter normalized by its expected range.
+/// `params_a`, `params_b`: parameter slices of equal length.
+/// `ranges`: (min, max) for each parameter dimension.
+/// Returns normalized distance in [0, 1].
+pub fn param_distance(params_a: &[f64], params_b: &[f64], ranges: &[(f64, f64)]) -> f64 {
+    let n = params_a.len().min(params_b.len()).min(ranges.len());
+    if n == 0 { return 0.0; }
+    let sum_sq: f64 = (0..n).map(|i| {
+        let range = (ranges[i].1 - ranges[i].0).abs().max(1e-10);
+        let d = (params_a[i] - params_b[i]) / range;
+        d * d
+    }).sum();
+    (sum_sq / n as f64).sqrt().clamp(0.0, 1.0)
 }
 
 /// Compute the empirical volume contraction rate of the flow.

@@ -77,6 +77,10 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
         chua:            ChuaConfig { alpha: lf64(a.chua.alpha, b.chua.alpha), beta: lf64(a.chua.beta, b.chua.beta), m0: lf64(a.chua.m0, b.chua.m0), m1: lf64(a.chua.m1, b.chua.m1) },
         hindmarsh_rose:  HindmarshRoseConfig { current_i: lf64(a.hindmarsh_rose.current_i, b.hindmarsh_rose.current_i), r: lf64(a.hindmarsh_rose.r, b.hindmarsh_rose.r) },
         coupled_map_lattice: CmlConfig { r: lf64(a.coupled_map_lattice.r, b.coupled_map_lattice.r), eps: lf64(a.coupled_map_lattice.eps, b.coupled_map_lattice.eps) },
+        mackey_glass:    MackeyGlassConfig { beta: lf64(a.mackey_glass.beta, b.mackey_glass.beta), gamma: lf64(a.mackey_glass.gamma, b.mackey_glass.gamma), tau: lf64(a.mackey_glass.tau, b.mackey_glass.tau), n: lf64(a.mackey_glass.n, b.mackey_glass.n) },
+        nose_hoover:     NoseHooverConfig { a: lf64(a.nose_hoover.a, b.nose_hoover.a) },
+        henon_map:       HenonMapConfig { a: lf64(a.henon_map.a, b.henon_map.a), b: lf64(a.henon_map.b, b.henon_map.b) },
+        lorenz96:        Lorenz96Config { f: lf64(a.lorenz96.f, b.lorenz96.f) },
         viz:             a.viz.clone(), // don't morph viz settings
     }
 }

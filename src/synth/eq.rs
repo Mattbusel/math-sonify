@@ -115,7 +115,9 @@ impl ThreeBandEq {
     pub fn update(&mut self) {
         let sr = self.sample_rate;
         let low = Biquad::low_shelf(200.0, self.low_gain_db.clamp(-12.0, 12.0), sr);
-        let mid = Biquad::peak(self.mid_freq.clamp(200.0, sr * 0.45), self.mid_gain_db.clamp(-12.0, 12.0), 1.0, sr);
+        // Q=2.5: ~2/3 octave bandwidth — surgical enough to sculpt specific
+        // resonances without sounding mushy (Q=1.0 ≈ 2 octaves was too wide).
+        let mid = Biquad::peak(self.mid_freq.clamp(200.0, sr * 0.45), self.mid_gain_db.clamp(-12.0, 12.0), 2.5, sr);
         let high = Biquad::high_shelf(6000.0, self.high_gain_db.clamp(-12.0, 12.0), sr);
         self.low_shelf_l = low.clone();
         self.low_shelf_r = low;

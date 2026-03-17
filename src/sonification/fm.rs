@@ -18,8 +18,11 @@ impl Sonification for FmMapping {
 
         // Use first state dimension to determine carrier frequency
         let norm0 = if state.len() > 0 {
+            // tanh-based soft normalisation: smoothly maps any real value to [0,1]
+            // without hard-clipping at ±30, so attractors with large state ranges
+            // (three-body, Lorenz ρ=100) still produce musical frequency sweeps.
             let v = state[0] as f32;
-            ((v + 30.0) / 60.0).clamp(0.0, 1.0)
+            (v / 30.0).tanh() * 0.5 + 0.5
         } else { 0.5 };
 
         let carrier_freq = quantize_to_scale(norm0, base_hz, octave_range, scale);

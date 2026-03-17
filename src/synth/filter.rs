@@ -42,9 +42,12 @@ impl BiquadFilter {
         let y = self.b0 * x + self.z1;
         self.z1 = self.b1 * x - self.a1 * y + self.z2;
         self.z2 = self.b2 * x - self.a2 * y;
+        // On NaN: clear state rather than clamping to ±1.
+        // Clamping leaves stored energy that causes a loud transient on recovery;
+        // zeroing gives a clean restart with only a brief silence artefact.
         if y.is_finite() { y } else {
-            self.z1 = self.z1.clamp(-1.0, 1.0);
-            self.z2 = self.z2.clamp(-1.0, 1.0);
+            self.z1 = 0.0;
+            self.z2 = 0.0;
             0.0
         }
     }

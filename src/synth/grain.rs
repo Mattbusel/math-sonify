@@ -153,9 +153,13 @@ impl GrainEngine {
             r += gr;
         }
 
-        // Normalise by √(active count) to maintain roughly constant loudness
+        // Normalise by √N gives correct RMS loudness for incoherent (random-phase)
+        // grains. But when many grains share similar frequencies and phases they can
+        // add constructively, pushing peaks up to N rather than √N. The extra 0.6×
+        // factor provides ~4 dB of headroom against coherent-phase worst-case peaks
+        // without making sparse clouds sound noticeably quieter.
         let active = self.grains.iter().filter(|g| g.active).count().max(1) as f32;
-        let norm = 1.0 / active.sqrt();
+        let norm = 0.6 / active.sqrt();
         (l * norm, r * norm)
     }
 }

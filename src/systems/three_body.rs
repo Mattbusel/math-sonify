@@ -8,27 +8,59 @@ pub struct ThreeBody {
     pub masses: [f64; 3],
     g: f64,
     speed: f64,
+    initial_energy: f64,
+    pub energy_error: f64,
 }
 
 impl ThreeBody {
     /// Figure-8 initial conditions (Chenciner & Montgomery, 2000).
     pub fn new(masses: [f64; 3]) -> Self {
         // Scaled figure-8 ICs for unit masses
+        let state = vec![
+            // positions
+            -0.97000436,  0.24308753,
+             0.97000436, -0.24308753,
+             0.0,         0.0,
+            // velocities
+             0.93240737 / 2.0,  0.86473146 / 2.0,
+             0.93240737 / 2.0,  0.86473146 / 2.0,
+            -0.93240737,       -0.86473146,
+        ];
+        let g = 1.0;
+        let initial_energy = Self::compute_hamiltonian(&state, &masses, g);
         Self {
-            state: vec![
-                // positions
-                -0.97000436,  0.24308753,
-                 0.97000436, -0.24308753,
-                 0.0,         0.0,
-                // velocities
-                 0.93240737 / 2.0,  0.86473146 / 2.0,
-                 0.93240737 / 2.0,  0.86473146 / 2.0,
-                -0.93240737,       -0.86473146,
-            ],
+            state,
             masses,
-            g: 1.0,
+            g,
             speed: 0.0,
+            initial_energy,
+            energy_error: 0.0,
         }
+    }
+
+    fn compute_hamiltonian(state: &[f64], masses: &[f64; 3], g: f64) -> f64 {
+        // T = (1/2) * sum (vx_i^2 + vy_i^2) / m_i
+        let mut t = 0.0f64;
+        for i in 0..3 {
+            let vx = state[6 + 2 * i];
+            let vy = state[6 + 2 * i + 1];
+            t += 0.5 * (vx * vx + vy * vy) / masses[i];
+        }
+        // V = -G * sum_{i<j} m_i * m_j / |r_i - r_j|
+        let mut v = 0.0f64;
+        for i in 0..3 {
+            for j in (i + 1)..3 {
+                let dx = state[2 * j] - state[2 * i];
+                let dy = state[2 * j + 1] - state[2 * i + 1];
+                let r = (dx * dx + dy * dy).sqrt().max(1e-10);
+                v -= g * masses[i] * masses[j] / r;
+            }
+        }
+        t + v
+    }
+
+    pub fn hamiltonian(&self) -> f64 {
+        Self::compute_hamiltonian(&self.state, &self.masses, self.g)
     }
 
     fn accelerations(state: &[f64], masses: &[f64; 3], g: f64) -> Vec<f64> {
@@ -71,6 +103,8 @@ impl DynamicalSystem for ThreeBody {
         d
     }
 
+    fn energy_error(&self) -> Option<f64> { Some(self.energy_error) }
+
     fn step(&mut self, dt: f64) {
         let prev = self.state.clone();
         let (masses, g) = (self.masses, self.g);
@@ -94,5 +128,11 @@ impl DynamicalSystem for ThreeBody {
         let ds: f64 = self.state.iter().zip(prev.iter())
             .map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
         self.speed = ds / dt;
+
+        // Update energy conservation error
+        let h_now = self.hamiltonian();
+        if self.initial_energy.abs() > 1e-15 {
+            self.energy_error = ((h_now - self.initial_energy) / self.initial_energy).abs();
+        }
     }
 }

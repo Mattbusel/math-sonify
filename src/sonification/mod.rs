@@ -94,6 +94,11 @@ pub struct AudioParams {
     pub spectral_freeze_active: bool,
     pub spectral_freeze_freqs: [f32; 16],
     pub spectral_freeze_amps: [f32; 16],
+    /// 3-band EQ (dB, ±12)
+    pub eq_low_db: f32,
+    pub eq_mid_db: f32,
+    pub eq_high_db: f32,
+    pub eq_mid_freq: f32,
 }
 
 impl Default for AudioParams {
@@ -147,6 +152,10 @@ impl Default for AudioParams {
             spectral_freeze_active: false,
             spectral_freeze_freqs: [0.0; 16],
             spectral_freeze_amps: [0.0; 16],
+            eq_low_db: 0.0,
+            eq_mid_db: 0.0,
+            eq_high_db: 0.0,
+            eq_mid_freq: 1000.0,
         }
     }
 }

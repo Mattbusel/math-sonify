@@ -317,6 +317,10 @@ fn sim_thread(
     let mut lyap_timer: u64 = 0;
     const LYAP_INTERVAL: u64 = 600; // every ~5s at 120 Hz
 
+    // ── Session transcript timer ──────────────────────────────────────────────
+    let mut session_log_timer: u64 = 0;
+    const SESSION_LOG_INTERVAL: u64 = 120 * 60; // every 60s at 120Hz
+
     // Macro random walk seed
     let mut walk_seed: u64 = 12345;
 
@@ -1236,6 +1240,11 @@ fn sim_thread(
             system.step(config.system.dt);
         }
 
+        // Energy conservation tracking
+        if let Some(ee) = system.energy_error() {
+            shared.lock().energy_error = ee;
+        }
+
         // SCARRING: detect near-divergence and record scar position
         {
             let st = system.state();
@@ -1297,6 +1306,14 @@ fn sim_thread(
         params.waveshaper_drive = config.audio.waveshaper_drive;
         params.waveshaper_mix = config.audio.waveshaper_mix;
 
+        // EQ fields from AppState
+        {
+            let st = shared.lock();
+            params.eq_low_db   = st.eq_low_db;
+            params.eq_mid_db   = st.eq_mid_db;
+            params.eq_high_db  = st.eq_high_db;
+            params.eq_mid_freq = st.eq_mid_freq;
+        }
 
         // Voice shapes from config
         params.voice_shapes = [
@@ -1765,6 +1782,28 @@ fn sim_thread(
             }
         }
 
+        // ── Session transcript (every 60s) ────────────────────────────────────────
+        session_log_timer += 1;
+        if session_log_timer >= SESSION_LOG_INTERVAL {
+            session_log_timer = 0;
+            let entry = {
+                let st = shared.lock();
+                crate::ui::SessionEntry {
+                    elapsed_secs: uptime_ticks as f32 / 120.0,
+                    system_name: st.config.system.name.clone(),
+                    lyapunov_max: st.lyapunov_spectrum.first().copied().unwrap_or(0.0),
+                    attractor_type: st.attractor_type.clone(),
+                    kolmogorov_entropy: st.kolmogorov_entropy,
+                    chaos_level: st.chaos_level,
+                }
+            };
+            let mut st = shared.lock();
+            st.session_log.push(entry);
+            if st.session_log.len() > 1440 { // cap at 24 hours
+                st.session_log.remove(0);
+            }
+        }
+
         // ── State + gravity map persistence (every ~2 minutes) ────────────────────
         state_save_timer += 1;
         if state_save_timer >= STATE_SAVE_INTERVAL {
@@ -1878,11 +1917,31 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
         "coupled_map_lattice" => Box::new(CoupledMapLattice::new(
             config.coupled_map_lattice.r, config.coupled_map_lattice.eps,
         )),
-        "mackey_glass"    => Box::new(MackeyGlass::new()),
-        "nose_hoover"     => Box::new(NoseHoover::new()),
+        "mackey_glass"    => {
+            let mut s = MackeyGlass::new();
+            s.beta  = config.mackey_glass.beta;
+            s.gamma = config.mackey_glass.gamma;
+            s.tau   = config.mackey_glass.tau;
+            s.n     = config.mackey_glass.n;
+            Box::new(s)
+        }
+        "nose_hoover"     => {
+            let mut s = NoseHoover::new();
+            s.a = config.nose_hoover.a;
+            Box::new(s)
+        }
         "sprott_b"        => Box::new(SprottB::new()),
-        "henon_map"       => Box::new(HenonMap::new()),
-        "lorenz96"        => Box::new(Lorenz96::new()),
+        "henon_map"       => {
+            let mut s = HenonMap::new();
+            s.a = config.henon_map.a;
+            s.b = config.henon_map.b;
+            Box::new(s)
+        }
+        "lorenz96"        => {
+            let mut s = Lorenz96::new();
+            s.f = config.lorenz96.f;
+            Box::new(s)
+        }
         _                 => Box::new(Lorenz::new(config.lorenz.sigma, config.lorenz.rho, config.lorenz.beta)),
     }
 }

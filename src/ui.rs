@@ -114,6 +114,11 @@ pub struct AppState {
     pub clip_buffer: ClipBuffer,
     // Status message for clip save
     pub clip_status: String,
+    // 3-band EQ
+    pub eq_low_db: f32,
+    pub eq_mid_db: f32,
+    pub eq_high_db: f32,
+    pub eq_mid_freq: f32,
     // Macro knobs (Simple mode)
     pub macro_chaos: f32,
     pub macro_space: f32,
@@ -213,6 +218,18 @@ pub struct AppState {
     pub bifurc_param2: String,
     pub bifurc_2d_mode: bool,
     pub bifurc_data_2d: Arc<Mutex<Vec<(f32, f32, f32)>>>,
+    pub energy_error: f64,
+    pub session_log: Vec<SessionEntry>,
+}
+
+#[derive(Clone)]
+pub struct SessionEntry {
+    pub elapsed_secs: f32,
+    pub system_name: String,
+    pub lyapunov_max: f64,
+    pub attractor_type: String,
+    pub kolmogorov_entropy: f64,
+    pub chaos_level: f32,
 }
 
 #[derive(Clone)]
@@ -315,6 +332,10 @@ impl AppState {
             sidechain_level_shared: Arc::new(Mutex::new(0.0)),
             clip_buffer: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             clip_status: String::new(),
+            eq_low_db: 0.0,
+            eq_mid_db: 0.0,
+            eq_high_db: 0.0,
+            eq_mid_freq: 1000.0,
             macro_chaos: 0.5,
             macro_space: 0.4,
             macro_rhythm: 0.0,
@@ -387,6 +408,8 @@ impl AppState {
             bifurc_param2: "sigma".into(),
             bifurc_2d_mode: false,
             bifurc_data_2d: Arc::new(Mutex::new(Vec::new())),
+            energy_error: 0.0,
+            session_log: Vec::new(),
         }
     }
 }
@@ -1476,6 +1499,37 @@ fn draw_advanced_panel(
                     ui.add(Slider::new(&mut st.config.chua.alpha, 10.0..=20.0).text("alpha"));
                     ui.add(Slider::new(&mut st.config.chua.beta, 20.0..=35.0).text("beta"));
                 }
+                "mackey_glass" => {
+                    ui.add(Slider::new(&mut st.config.mackey_glass.beta, 0.1..=0.5).text("β feedback"))
+                        .on_hover_text("Feedback gain. Higher values push the system toward sustained oscillations and chaos.");
+                    ui.add(Slider::new(&mut st.config.mackey_glass.gamma, 0.05..=0.3).text("γ decay"))
+                        .on_hover_text("Decay rate. Higher values damp the oscillation more quickly.");
+                    ui.add(Slider::new(&mut st.config.mackey_glass.tau, 5.0..=30.0).text("τ delay"))
+                        .on_hover_text("Time delay. The classic chaotic regime is τ≈17. Longer delays add more complexity.");
+                    ui.add(Slider::new(&mut st.config.mackey_glass.n, 5.0..=15.0).text("n steepness"))
+                        .on_hover_text("Nonlinearity steepness. Higher n = sharper transition, more sensitive to initial conditions.");
+                }
+                "nose_hoover" => {
+                    ui.add(Slider::new(&mut st.config.nose_hoover.a, 1.0..=6.0).text("a"))
+                        .on_hover_text("Thermostat strength. Near a=3 gives the classic chaotic Nose-Hoover attractor. Very high values become quasi-periodic.");
+                }
+                "sprott_b" => {
+                    ui.label(RichText::new("Sprott B has no tunable parameters.")
+                        .color(GRAY_HINT).italics().size(11.0));
+                    ui.label(RichText::new("x'=yz  y'=x-y  z'=1-xy")
+                        .color(Color32::from_rgb(100, 200, 255)).size(11.0)
+                        .font(egui::FontId::monospace(11.0)));
+                }
+                "henon_map" => {
+                    ui.add(Slider::new(&mut st.config.henon_map.a, 0.5..=1.8).text("a"))
+                        .on_hover_text("Classic Hénon map parameter. a=1.4 gives the standard strange attractor. Near 1.0 creates period-doubling cascades.");
+                    ui.add(Slider::new(&mut st.config.henon_map.b, 0.0..=0.5).text("b"))
+                        .on_hover_text("Area contraction. b=0.3 is classic. Values near 0 collapse the map to nearly 1D.");
+                }
+                "lorenz96" => {
+                    ui.add(Slider::new(&mut st.config.lorenz96.f, 4.0..=16.0).text("F forcing"))
+                        .on_hover_text("Atmospheric forcing. F<5: periodic, F≈8: chaos (weather-like), F>12: turbulent high-dimensional chaos with many positive Lyapunov exponents.");
+                }
                 _ => {}
             }
         });
@@ -1560,6 +1614,33 @@ fn draw_advanced_panel(
         if st.config.audio.waveshaper_mix > 0.0 {
             ui.add(Slider::new(&mut st.config.audio.waveshaper_drive, 1.0..=10.0).text("Drive"))
                 .on_hover_text("Waveshaper drive/gain. Low values (1-2) = gentle warmth. High values (7-10) = hard clipping and aggressive harmonic distortion.");
+        }
+
+        ui.add_space(6.0);
+        ui.separator();
+        ui.add_space(2.0);
+        ui.label(RichText::new("3-Band EQ").color(Color32::WHITE).strong());
+        ui.label(RichText::new("Low shelf 200 Hz  ·  Mid peak  ·  High shelf 6 kHz")
+            .size(10.0).color(GRAY_HINT).italics());
+        ui.add_space(2.0);
+        ui.add(Slider::new(&mut st.eq_low_db, -12.0..=12.0).text("Low  dB"))
+            .on_hover_text("Low shelf gain at 200 Hz. Boost for warmth and bass weight; cut to thin out muddy low-end.");
+        ui.add(Slider::new(&mut st.eq_mid_db, -12.0..=12.0).text("Mid  dB"))
+            .on_hover_text("Peaking mid-band gain. Boost presence and body; cut to scoop out harshness.");
+        ui.add(Slider::new(&mut st.eq_mid_freq, 200.0..=8000.0).text("Mid Hz").logarithmic(true))
+            .on_hover_text("Center frequency of the mid peak filter (200–8000 Hz).");
+        ui.add(Slider::new(&mut st.eq_high_db, -12.0..=12.0).text("High dB"))
+            .on_hover_text("High shelf gain at 6 kHz. Boost for air and brightness; cut to soften harsh highs.");
+        let any_nonzero = st.eq_low_db.abs() > 0.1 || st.eq_mid_db.abs() > 0.1 || st.eq_high_db.abs() > 0.1;
+        if any_nonzero {
+            if ui.add(Button::new(RichText::new("Reset EQ").color(Color32::WHITE).size(11.0))
+                .fill(Color32::from_rgb(40, 30, 50))
+                .min_size(Vec2::new(ui.available_width(), 24.0))
+            ).clicked() {
+                st.eq_low_db = 0.0;
+                st.eq_mid_db = 0.0;
+                st.eq_high_db = 0.0;
+            }
         }
     });
 

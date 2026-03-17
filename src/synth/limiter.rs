@@ -18,7 +18,9 @@ impl Limiter {
         Self {
             threshold,
             envelope: 0.0,
-            attack_coeff: 1.0 - (-2.2 / (0.001 * sample_rate)).exp(),
+            // 5 ms attack (was 1 ms) — avoids zipper noise on complex multi-layer
+            // content where rapid gain changes were audible as digital clatter.
+            attack_coeff: 1.0 - (-2.2 / (0.005 * sample_rate)).exp(),
             release_coeff: 1.0 - (-2.2 / (0.300 * sample_rate)).exp(),
             lookahead: vec![(0.0, 0.0); lh_len],
             lh_pos: 0,

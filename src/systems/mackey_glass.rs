@@ -13,6 +13,8 @@ pub struct MackeyGlass {
     pub n: f64,
     dt: f64,
     speed: f64,
+    /// Previous derivative, used by Adams-Bashforth 2 predictor
+    prev_deriv: f64,
     /// 3-element observable: [x(t), x(t-τ/3), x(t-2τ/3)]
     observable: Vec<f64>,
 }
@@ -38,6 +40,7 @@ impl MackeyGlass {
             tau,
             dt,
             speed: 0.0,
+            prev_deriv: 0.0,
             observable,
         }
     }
@@ -79,12 +82,24 @@ impl DynamicalSystem for MackeyGlass {
 
     fn step(&mut self, _dt: f64) {
         let x_delayed = self.delayed_x();
-        let dx = self.mg_deriv(self.current_x, x_delayed);
-        let new_x = self.current_x + self.dt * dx;
+        let deriv_curr = self.mg_deriv(self.current_x, x_delayed);
+
+        // Adams-Bashforth 2 predictor: x_pred = x + dt*(1.5*f_curr - 0.5*f_prev)
+        let x_pred = self.current_x + self.dt * (1.5 * deriv_curr - 0.5 * self.prev_deriv);
+
+        // Compute derivative at predicted state (use same delayed value as approximation)
+        let deriv_pred = self.mg_deriv(x_pred, x_delayed);
+
+        // Adams-Moulton 2 corrector: x_new = x + dt*0.5*(f_curr + f_pred)
+        let new_x = self.current_x + self.dt * 0.5 * (deriv_curr + deriv_pred);
+
+        // Update previous derivative before advancing
+        self.prev_deriv = deriv_curr;
+
         // Overwrite the oldest slot with the new value
         self.history[self.head] = new_x;
         self.head = (self.head + 1) % self.buf_len;
-        self.speed = dx.abs();
+        self.speed = deriv_curr.abs();
         self.current_x = new_x;
         self.update_observable();
     }
@@ -93,6 +108,7 @@ impl DynamicalSystem for MackeyGlass {
         if let Some(&v) = s.first() {
             if v.is_finite() {
                 self.current_x = v;
+                self.prev_deriv = 0.0;
                 for slot in &mut self.history { *slot = v; }
                 for o in &mut self.observable { *o = v; }
             }

@@ -1,4 +1,4 @@
-use super::DynamicalSystem;
+use super::{DynamicalSystem, yoshida4};
 
 /// Double pendulum in Hamiltonian form.
 /// State: [θ1, θ2, p1, p2] where p_i are conjugate momenta.
@@ -84,23 +84,37 @@ impl DynamicalSystem for DoublePendulum {
     }
 
     fn step(&mut self, dt: f64) {
-        // Leapfrog (Störmer-Verlet)
+        // Yoshida 4th-order symplectic integrator
         let prev = self.state.clone();
+        let (m1, m2, l1, l2, g) = (self.m1, self.m2, self.l1, self.l2, self.g);
 
-        // Half-kick momenta
-        let (dp1, dp2) = self.d_p();
-        self.state[2] += 0.5 * dt * dp1;
-        self.state[3] += 0.5 * dt * dp2;
+        let velocity = |s: &[f64]| -> Vec<f64> {
+            let (th1, th2, p1, p2) = (s[0], s[1], s[2], s[3]);
+            let delta = th2 - th1;
+            let denom = (m1 + m2 - m2 * delta.cos().powi(2)).max(1e-10);
+            let dth1 = (m2 * l2 * p1 - m2 * l1 * p2 * delta.cos())
+                / (m1 * m2 * l1.powi(2) * l2 * denom);
+            let dth2 = ((m1 + m2) * l1 * p2 - m2 * l2 * p1 * delta.cos())
+                / (m1 * m2 * l1 * l2.powi(2) * denom);
+            vec![dth1, dth2]
+        };
 
-        // Full drift angles
-        let (dth1, dth2) = self.d_theta();
-        self.state[0] += dt * dth1;
-        self.state[1] += dt * dth2;
+        let force = |s: &[f64]| -> Vec<f64> {
+            let (th1, th2, p1, p2) = (s[0], s[1], s[2], s[3]);
+            let delta = th2 - th1;
+            let denom = (m1 + m2 - m2 * delta.cos().powi(2)).max(1e-10);
+            let dth1 = (m2 * l2 * p1 - m2 * l1 * p2 * delta.cos())
+                / (m1 * m2 * l1.powi(2) * l2 * denom);
+            let dth2 = ((m1 + m2) * l1 * p2 - m2 * l2 * p1 * delta.cos())
+                / (m1 * m2 * l1 * l2.powi(2) * denom);
+            let dp1 = -(m1 + m2) * g * l1 * th1.sin()
+                - m2 * l1 * l2 * dth1 * dth2 * delta.sin();
+            let dp2 = -m2 * g * l2 * th2.sin()
+                + m2 * l1 * l2 * dth1 * dth2 * delta.sin();
+            vec![dp1, dp2]
+        };
 
-        // Half-kick momenta again
-        let (dp1, dp2) = self.d_p();
-        self.state[2] += 0.5 * dt * dp1;
-        self.state[3] += 0.5 * dt * dp2;
+        yoshida4(&mut self.state, &[0, 1], &[2, 3], dt, velocity, force);
 
         let ds: f64 = self.state.iter().zip(prev.iter())
             .map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
