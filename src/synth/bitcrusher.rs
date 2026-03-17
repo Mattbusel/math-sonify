@@ -9,13 +9,18 @@ pub struct Bitcrusher {
 
 impl Bitcrusher {
     pub fn new() -> Self {
+        Self::with_seed(0xDEADBEEFCAFEBABE)
+    }
+
+    /// Construct with a caller-supplied seed so per-layer dither is decorrelated.
+    pub fn with_seed(seed: u64) -> Self {
         Self {
             bit_depth: 16.0,
             rate_crush: 0.0,
             sample_hold: 0.0,
             sample_counter: 0,
             rate_period: 1,
-            rng_state: 0xDEADBEEFCAFEBABE,
+            rng_state: seed,
         }
     }
 

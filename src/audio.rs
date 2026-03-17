@@ -25,6 +25,28 @@ pub type SidechainLevel = Arc<Mutex<f32>>;
 /// Circular audio clip buffer (last ~60 seconds stereo interleaved f32).
 pub type ClipBuffer = Arc<Mutex<VecDeque<f32>>>;
 
+/// One-shot playback of a pre-recorded snippet (stereo interleaved f32).
+/// Written by the UI thread (song sequencer), read+consumed by the audio thread.
+pub struct SnippetPlayback {
+    pub samples: Vec<f32>,
+    pub pos: usize,
+    pub active: bool,
+    pub volume: f32,
+    /// Set to true by audio thread when playback ends (UI reads this to advance to next slot).
+    pub on_complete: bool,
+}
+
+pub type SharedSnippetPlayback = Arc<Mutex<SnippetPlayback>>;
+
+impl SnippetPlayback {
+    pub fn idle() -> Self {
+        Self { samples: Vec::new(), pos: 0, active: false, volume: 0.8, on_complete: false }
+    }
+    pub fn play(samples: Vec<f32>, volume: f32) -> Self {
+        Self { samples, pos: 0, active: true, volume, on_complete: false }
+    }
+}
+
 const CLIP_SECONDS: usize = 60;
 
 // ---------------------------------------------------------------------------
@@ -68,7 +90,14 @@ struct LayerSynth {
 }
 
 impl LayerSynth {
-    fn new(sr: f32) -> Self {
+    fn new(sr: f32) -> Self { Self::new_with_index(sr, 0) }
+
+    /// Layer-indexed constructor — gives each layer a unique bitcrusher seed so
+    /// dither noise is decorrelated (identical seeds produce audible beating at
+    /// high bit-crush settings).
+    fn new_with_index(sr: f32, layer_idx: usize) -> Self {
+        let crush_seed = 0xDEADBEEFCAFEBABEu64
+            .wrapping_add(layer_idx as u64 * 0x9E3779B97F4A7C15);
         Self {
             sr,
             oscs: std::array::from_fn(|i| Oscillator::new(110.0 * (i + 1) as f32, OscShape::Sine, sr)),
@@ -96,7 +125,7 @@ impl LayerSynth {
             fm_phase: 0.0,
             fm_mod_phase: 0.0,
             waveshaper: Waveshaper::new(),
-            bitcrusher: Bitcrusher::new(),
+            bitcrusher: Bitcrusher::with_seed(crush_seed),
             level: 1.0,
             pan: 0.0,
             peak: 0.0,
@@ -493,6 +522,8 @@ struct SynthState {
     // Breathing: phase accumulator for the ~4.5s volume oscillation
     // (This layer handles the audio-thread-side application to each sample)
     breathing_phase: f64,
+    // Snippet/song playback
+    pub snippet_pb: SharedSnippetPlayback,
 }
 
 impl SynthState {
@@ -503,6 +534,7 @@ impl SynthState {
         loop_export: LoopExportPending,
         meter: VuMeter,
         clip_buffer: ClipBuffer,
+        snippet_pb: SharedSnippetPlayback,
     ) -> Self {
         let mut reverb = FdnReverb::new(sr);
         reverb.wet = reverb_wet;
@@ -513,7 +545,7 @@ impl SynthState {
         Self {
             sample_rate: sr,
             layer_params: [None, None, None],
-            layers: [LayerSynth::new(sr), LayerSynth::new(sr), LayerSynth::new(sr)],
+            layers: [LayerSynth::new_with_index(sr, 0), LayerSynth::new_with_index(sr, 1), LayerSynth::new_with_index(sr, 2)],
             filter: BiquadFilter::low_pass(8000.0, 0.7, sr),
             eq: ThreeBandEq::new(sr),
             reverb,
@@ -534,6 +566,7 @@ impl SynthState {
             clip_buffer,
             layer_last: [0.0; 3],
             breathing_phase: 0.0,
+            snippet_pb,
         }
     }
 
@@ -662,8 +695,21 @@ impl SynthState {
         let (lo_raw, ro_raw) = self.limiter.process(lrev, rrev);
 
         // Final NaN guard
-        let lo = if lo_raw.is_finite() { lo_raw } else { 0.0 };
-        let ro = if ro_raw.is_finite() { ro_raw } else { 0.0 };
+        let mut lo = if lo_raw.is_finite() { lo_raw } else { 0.0 };
+        let mut ro = if ro_raw.is_finite() { ro_raw } else { 0.0 };
+
+        // Snippet/song playback — mix pre-recorded audio directly into master output
+        if let Some(mut pb) = self.snippet_pb.try_lock() {
+            if pb.active && pb.pos + 1 < pb.samples.len() {
+                lo += pb.samples[pb.pos]     * pb.volume;
+                ro += pb.samples[pb.pos + 1] * pb.volume;
+                pb.pos += 2;
+                if pb.pos >= pb.samples.len() {
+                    pb.active = false;
+                    pb.on_complete = true;
+                }
+            }
+        }
 
         // Master peak for VU with proper ballistic decay (~300ms release)
         let mpeak = lo.abs().max(ro.abs());
@@ -759,6 +805,7 @@ impl AudioEngine {
         meter: VuMeter,
         clip_buffer: ClipBuffer,
         sidechain_level: SidechainLevel,
+        snippet_pb: SharedSnippetPlayback,
     ) -> anyhow::Result<(Self, u32)> {
         let host = cpal::default_host();
         let device = host.default_output_device()
@@ -771,7 +818,7 @@ impl AudioEngine {
         let sr = actual_sr as f32;
         let synth = Arc::new(Mutex::new(
             SynthState::new(sr, reverb_wet, delay_ms, delay_feedback,
-                            waveform, recording, loop_export, meter, clip_buffer)
+                            waveform, recording, loop_export, meter, clip_buffer, snippet_pb)
         ));
         synth.lock().master_volume = master_volume;
 
@@ -889,6 +936,39 @@ pub fn save_clip(clip_buffer: &ClipBuffer, sample_rate: u32) -> anyhow::Result<S
     for s in &samples { writer.write_sample(*s)?; }
     writer.finalize()?;
     Ok(filename.to_string_lossy().into_owned())
+}
+
+/// Capture last `capture_secs` seconds from the clip buffer, save to snippets/ dir.
+/// Returns (filepath, stereo_interleaved_samples).
+pub fn capture_snippet(
+    clip_buffer: &ClipBuffer,
+    sample_rate: u32,
+    capture_secs: f32,
+) -> anyhow::Result<(String, Vec<f32>)> {
+    let all_samples: Vec<f32> = {
+        let cb = clip_buffer.lock();
+        cb.iter().copied().collect()
+    };
+    let want = ((capture_secs * sample_rate as f32 * 2.0) as usize) & !1;
+    let start = all_samples.len().saturating_sub(want);
+    let samples: Vec<f32> = all_samples[start..].to_vec();
+    if samples.len() < 2 {
+        anyhow::bail!("Not enough audio captured yet — play for a few seconds first");
+    }
+    let dir = std::path::PathBuf::from("snippets");
+    if !dir.exists() { std::fs::create_dir_all(&dir)?; }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_secs();
+    let filename = dir.join(format!("snippet_{}.wav", ts));
+    let spec = hound::WavSpec {
+        channels: 2, sample_rate, bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(&filename, spec)?;
+    for s in &samples { writer.write_sample(*s)?; }
+    writer.finalize()?;
+    Ok((filename.to_string_lossy().into_owned(), samples))
 }
 
 /// Render the phase portrait trail to a PNG file. Returns filename.
