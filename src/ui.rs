@@ -208,6 +208,7 @@ pub struct AppState {
     // Lyapunov exponent spectrum (computed every ~5s in sim thread, largest-first)
     pub lyapunov_spectrum: Vec<f64>,
     pub attractor_type: String,
+    pub kolmogorov_entropy: f64,
     // 2D bifurcation map
     pub bifurc_param2: String,
     pub bifurc_2d_mode: bool,
@@ -382,6 +383,7 @@ impl AppState {
             wounded: false,
             lyapunov_spectrum: Vec::new(),
             attractor_type: String::new(),
+            kolmogorov_entropy: 0.0,
             bifurc_param2: "sigma".into(),
             bifurc_2d_mode: false,
             bifurc_data_2d: Arc::new(Mutex::new(Vec::new())),
@@ -1038,7 +1040,8 @@ pub fn draw_ui(
         let (projection, rotation_angle, auto_rotate, system_name, mode_name,
              freqs, voice_levels, chord_intervals, current_state, current_deriv,
              chaos_level, order_param, kuramoto_phases, trail_color, perf_mode,
-             anaglyph_3d, anaglyph_separation, lyapunov_spectrum, attractor_type) = {
+             anaglyph_3d, anaglyph_separation, lyapunov_spectrum, attractor_type,
+             kolmogorov_entropy) = {
             let st = state.lock();
             let proj = st.viz_projection;
             let rot = st.rotation_angle;
@@ -1064,7 +1067,8 @@ pub fn draw_ui(
             let ag_sep = st.anaglyph_separation;
             let ls = st.lyapunov_spectrum.clone();
             let at = st.attractor_type.clone();
-            (proj, rot, ar, sn, mn, fr, vl, ci, cs, cd, cl, op, kp, tc, pm, ag, ag_sep, ls, at)
+            let ke = st.kolmogorov_entropy;
+            (proj, rot, ar, sn, mn, fr, vl, ci, cs, cd, cl, op, kp, tc, pm, ag, ag_sep, ls, at, ke)
         };
 
         // ── Ghost trails + portrait ink update (visual memory) ─────────────────
@@ -1118,7 +1122,7 @@ pub fn draw_ui(
             2 => draw_arrange_tab(ui, state, recording),
             3 => draw_waveform(ui, waveform),
             4 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
-            5 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases, &lyapunov_spectrum, &attractor_type),
+            5 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases, &lyapunov_spectrum, &attractor_type, kolmogorov_entropy),
             6 => draw_bifurc_diagram(ui, bifurc_data, state),
             _ => {}
         }
@@ -3989,6 +3993,7 @@ fn draw_math_view(
     kuramoto_phases: &[f64],
     lyapunov_spectrum: &[f64],
     attractor_type: &str,
+    kolmogorov_entropy: f64,
 ) {
     let avail = ui.available_size();
     let (response, painter) = ui.allocate_painter(avail, Sense::hover());
@@ -4122,6 +4127,16 @@ fn draw_math_view(
             atype_color,
         );
         y += 16.0;
+        if kolmogorov_entropy > 0.0 {
+            painter.text(
+                Pos2::new(x, y),
+                Align2::LEFT_TOP,
+                format!("K-entropy: {:.4} nats/s", kolmogorov_entropy),
+                FontId::monospace(12.0),
+                Color32::from_rgb(200, 180, 100),
+            );
+            y += 16.0;
+        }
         let _ = y; // suppress unused warning
     }
 

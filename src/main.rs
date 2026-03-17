@@ -1755,10 +1755,12 @@ fn sim_thread(
                     &state_snap, dim, dim, 300, config.system.dt, &|s| system.deriv_at(s),
                 );
                 let atype = crate::systems::classify_attractor(&lyap);
+                let k_entropy = crate::systems::kolmogorov_entropy(&lyap);
                 {
                     let mut st = shared.lock();
                     st.lyapunov_spectrum = lyap;
                     st.attractor_type = atype.to_string();
+                    st.kolmogorov_entropy = k_entropy;
                 }
             }
         }

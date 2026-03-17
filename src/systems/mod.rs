@@ -1,3 +1,5 @@
+use rayon::prelude::*;
+
 pub mod lorenz;
 pub mod custom_ode;
 pub mod fractional_lorenz;
@@ -578,4 +580,324 @@ pub fn leapfrog<Fv, Fa>(
     for i in 0..n {
         state[p_idx[i]] += 0.5 * dt * f2[i];
     }
+}
+
+/// Estimate transfer entropy from time series X → Y (information flow from X to Y).
+/// Uses k=1 nearest-neighbor estimator approximated by binning.
+/// `x` and `y`: equal-length 1D time series (first component of each system's state).
+/// `lag`: time lag in samples (how far back in X to look).
+/// `n_bins`: number of histogram bins per dimension.
+/// Returns T_{X→Y} in nats (>0 means X drives Y, 0 means no coupling).
+pub fn transfer_entropy(x: &[f64], y: &[f64], lag: usize, n_bins: usize) -> f64 {
+    if x.len() != y.len() || x.len() < lag + 2 || n_bins < 2 { return 0.0; }
+    let n = n_bins;
+    // Normalize to [0, 1] then bin
+    let normalize = |v: &[f64]| -> Vec<usize> {
+        let lo = v.iter().cloned().fold(f64::INFINITY, f64::min);
+        let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let range = (hi - lo).max(1e-15);
+        v.iter().map(|&val| ((val - lo) / range * (n as f64 - 1e-9)).floor() as usize).collect()
+    };
+    let xb = normalize(x);
+    let yb = normalize(y);
+
+    let start = lag + 1;
+    let len = x.len() - start;
+
+    // 3D histogram: (y_future, y_past, x_past)
+    let mut hist3 = vec![vec![vec![0.0f64; n]; n]; n];
+    // 2D histogram: (y_future, y_past)
+    let mut hist_yfy = vec![vec![0.0f64; n]; n];
+    // 2D histogram: (y_past, x_past)
+    let mut hist_yx = vec![vec![0.0f64; n]; n];
+    // 1D histogram: y_past
+    let mut hist_y = vec![0.0f64; n];
+
+    for t in start..(start + len) {
+        let yf = yb[t];
+        let yp = yb[t - 1];
+        let xp = xb[t - lag];
+        hist3[yf][yp][xp] += 1.0;
+        hist_yfy[yf][yp] += 1.0;
+        hist_yx[yp][xp] += 1.0;
+        hist_y[yp] += 1.0;
+    }
+
+    // Add Laplace smoothing
+    let total3 = len as f64 + (n * n * n) as f64;
+    let total_yfy = len as f64 + (n * n) as f64;
+    let total_yx = len as f64 + (n * n) as f64;
+    let total_y = len as f64 + n as f64;
+
+    let entropy = |counts: &[f64], total: f64| -> f64 {
+        counts.iter().map(|&c| {
+            let p = (c + 1.0) / total;
+            -p * p.ln()
+        }).sum::<f64>()
+    };
+
+    // H(y_future, y_past)
+    let h_yfy = entropy(&hist_yfy.iter().flatten().cloned().collect::<Vec<_>>(), total_yfy);
+    // H(y_past)
+    let h_y = entropy(&hist_y, total_y);
+    // H(y_future, y_past, x_past)
+    let h3 = entropy(&hist3.iter().flatten().flatten().cloned().collect::<Vec<_>>(), total3);
+    // H(y_past, x_past)
+    let h_yx = entropy(&hist_yx.iter().flatten().cloned().collect::<Vec<_>>(), total_yx);
+
+    // T = H(yf,yp) - H(yp) - H(yf,yp,xp) + H(yp,xp)
+    let te = h_yfy - h_y - h3 + h_yx;
+    te.max(0.0)
+}
+
+/// Estimate mutual information between two 1D time series using histogram binning.
+/// I(X;Y) = H(X) + H(Y) - H(X,Y)
+/// `n_bins`: histogram bins per axis (8-16 typical).
+/// Returns mutual information in nats.
+pub fn mutual_information(x: &[f64], y: &[f64], n_bins: usize) -> f64 {
+    if x.len() != y.len() || x.is_empty() || n_bins < 2 { return 0.0; }
+    let n = n_bins;
+    let normalize = |v: &[f64]| -> Vec<usize> {
+        let lo = v.iter().cloned().fold(f64::INFINITY, f64::min);
+        let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let range = (hi - lo).max(1e-15);
+        v.iter().map(|&val| ((val - lo) / range * (n as f64 - 1e-9)).floor() as usize).collect()
+    };
+    let xb = normalize(x);
+    let yb = normalize(y);
+
+    let mut hist_x = vec![0.0f64; n];
+    let mut hist_y = vec![0.0f64; n];
+    let mut hist_xy = vec![vec![0.0f64; n]; n];
+
+    for (&xi, &yi) in xb.iter().zip(yb.iter()) {
+        hist_x[xi] += 1.0;
+        hist_y[yi] += 1.0;
+        hist_xy[xi][yi] += 1.0;
+    }
+
+    let len = x.len() as f64;
+    let total_x = len + n as f64;
+    let total_y = len + n as f64;
+    let total_xy = len + (n * n) as f64;
+
+    let h_x: f64 = hist_x.iter().map(|&c| { let p = (c + 1.0) / total_x; -p * p.ln() }).sum();
+    let h_y: f64 = hist_y.iter().map(|&c| { let p = (c + 1.0) / total_y; -p * p.ln() }).sum();
+    let h_xy: f64 = hist_xy.iter().flatten().map(|&c| { let p = (c + 1.0) / total_xy; -p * p.ln() }).sum();
+
+    (h_x + h_y - h_xy).max(0.0)
+}
+
+/// Compute RQA measures from a trajectory.
+/// Returns `RqaResult` with determinism, laminarity, and average diagonal line length.
+#[derive(Debug, Clone)]
+pub struct RqaResult {
+    pub recurrence_rate: f64,   // fraction of recurrent points
+    pub determinism: f64,       // fraction of recurrent points in diagonal lines >= min_line
+    pub laminarity: f64,        // fraction of recurrent points in vertical lines >= min_line
+    pub avg_diag_len: f64,      // average diagonal line length
+    pub entropy_diag: f64,      // Shannon entropy of diagonal line lengths
+}
+
+pub fn recurrence_quantification(
+    trajectory: &[Vec<f64>],
+    threshold: f64,
+    min_line: usize,
+) -> RqaResult {
+    let raw_n = trajectory.len();
+    if raw_n < 2 {
+        return RqaResult { recurrence_rate: 0.0, determinism: 0.0, laminarity: 0.0, avg_diag_len: 0.0, entropy_diag: 0.0 };
+    }
+    // Cap at 200 points
+    let max_n = 200usize;
+    let (traj, n) = if raw_n > max_n {
+        let step = raw_n / max_n;
+        let sub: Vec<Vec<f64>> = trajectory.iter().step_by(step).take(max_n).cloned().collect();
+        let len = sub.len();
+        (sub, len)
+    } else {
+        (trajectory.to_vec(), raw_n)
+    };
+
+    // Build recurrence matrix
+    let mut recur = vec![vec![false; n]; n];
+    for i in 0..n {
+        for j in 0..n {
+            let dist: f64 = traj[i].iter().zip(traj[j].iter())
+                .map(|(&a, &b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt();
+            recur[i][j] = dist < threshold;
+        }
+    }
+
+    let total_points = n * n;
+    let rec_sum: usize = recur.iter().flatten().filter(|&&v| v).count();
+    let recurrence_rate = rec_sum as f64 / total_points as f64;
+
+    // Diagonal lines
+    let mut diag_lengths: Vec<usize> = Vec::new();
+    for start_diag in (-(n as i64 - 1))..=(n as i64 - 1) {
+        let mut run = 0usize;
+        let i_start = (-start_diag).max(0) as usize;
+        let j_start = start_diag.max(0) as usize;
+        let diag_len = n - i_start.max(j_start);
+        for k in 0..diag_len {
+            if recur[i_start + k][j_start + k] {
+                run += 1;
+            } else {
+                if run >= min_line { diag_lengths.push(run); }
+                run = 0;
+            }
+        }
+        if run >= min_line { diag_lengths.push(run); }
+    }
+
+    let diag_rec_points: usize = diag_lengths.iter().sum();
+    let determinism = if rec_sum > 0 { diag_rec_points as f64 / rec_sum as f64 } else { 0.0 };
+    let avg_diag_len = if !diag_lengths.is_empty() {
+        diag_rec_points as f64 / diag_lengths.len() as f64
+    } else { 0.0 };
+
+    // Shannon entropy of diagonal line lengths
+    let max_len = diag_lengths.iter().cloned().max().unwrap_or(0);
+    let entropy_diag = if max_len >= min_line {
+        let mut len_counts = vec![0usize; max_len + 1];
+        for &l in &diag_lengths { len_counts[l] += 1; }
+        let total_dl = diag_lengths.len() as f64;
+        len_counts.iter().filter(|&&c| c > 0).map(|&c| {
+            let p = c as f64 / total_dl;
+            -p * p.ln()
+        }).sum()
+    } else { 0.0 };
+
+    // Vertical lines (laminarity)
+    let mut vert_rec_points = 0usize;
+    for j in 0..n {
+        let mut run = 0usize;
+        for i in 0..n {
+            if recur[i][j] {
+                run += 1;
+            } else {
+                if run >= min_line { vert_rec_points += run; }
+                run = 0;
+            }
+        }
+        if run >= min_line { vert_rec_points += run; }
+    }
+    let laminarity = if rec_sum > 0 { vert_rec_points as f64 / rec_sum as f64 } else { 0.0 };
+
+    RqaResult { recurrence_rate, determinism, laminarity, avg_diag_len, entropy_diag }
+}
+
+/// Compute the FTLE field over a 2D grid of initial conditions in the (dim_x, dim_y) plane.
+/// The FTLE measures local stretching — reveals stable and unstable manifolds.
+/// `center`: center of the grid in state space; `extent`: half-width in each dimension.
+/// `grid_n`: grid size (grid_n × grid_n points).
+/// `T`: integration time; `dt`: step size.
+/// `fixed_dims`: values for all dimensions NOT being varied (length = dim - 2).
+/// Returns a Vec of (x_coord, y_coord, ftle_value) for each grid point.
+pub fn ftle_field<F>(
+    center: [f64; 2],
+    extent: [f64; 2],
+    grid_n: usize,
+    dim_x: usize,
+    dim_y: usize,
+    t_integration: f64,
+    dt: f64,
+    full_dim: usize,
+    fixed_state: &[f64],
+    f: &F,
+) -> Vec<(f64, f64, f64)>
+where
+    F: Fn(&[f64]) -> Vec<f64> + Sync,
+{
+    if grid_n < 2 || full_dim == 0 || dt <= 0.0 || t_integration <= 0.0 {
+        return Vec::new();
+    }
+    let n_steps = (t_integration / dt).round() as usize;
+    let eps = 1e-6;
+    let inv_t = 1.0 / t_integration;
+
+    let indices: Vec<(usize, usize)> = (0..grid_n).flat_map(|i| (0..grid_n).map(move |j| (i, j))).collect();
+
+    indices.par_iter().map(|&(i, j)| {
+        let xc = center[0] + (i as f64 / (grid_n - 1) as f64 - 0.5) * 2.0 * extent[0];
+        let yc = center[1] + (j as f64 / (grid_n - 1) as f64 - 0.5) * 2.0 * extent[1];
+
+        let mut state_ref = fixed_state.to_vec();
+        if state_ref.len() < full_dim {
+            state_ref.resize(full_dim, 0.0);
+        }
+        state_ref[dim_x] = xc;
+        state_ref[dim_y] = yc;
+
+        let mut state_pert = state_ref.clone();
+        state_pert[dim_x] += eps;
+
+        for _ in 0..n_steps {
+            rk4(&mut state_ref, dt, f);
+            rk4(&mut state_pert, dt, f);
+        }
+
+        let dist: f64 = state_ref.iter().zip(state_pert.iter())
+            .map(|(&a, &b)| (a - b) * (a - b))
+            .sum::<f64>()
+            .sqrt();
+
+        let ftle = if dist > 1e-20 { inv_t * (dist / eps).ln() } else { 0.0 };
+        (xc, yc, ftle)
+    }).collect()
+}
+
+/// Test time-reversibility: integrate forward N steps, then backward N steps.
+/// Returns the return error |x_final - x_initial| / |x_initial|.
+/// For Hamiltonian systems this should be ~machine epsilon; dissipative systems will be large.
+pub fn reversibility_test<F>(
+    initial_state: &[f64],
+    dt: f64,
+    n_steps: usize,
+    f: &F,
+) -> f64
+where
+    F: Fn(&[f64]) -> Vec<f64>,
+{
+    let mut state = initial_state.to_vec();
+    // Integrate forward
+    for _ in 0..n_steps {
+        rk4(&mut state, dt, f);
+    }
+    // Integrate backward
+    for _ in 0..n_steps {
+        rk4(&mut state, -dt, f);
+    }
+    // Relative return error
+    let norm_init: f64 = initial_state.iter().map(|&v| v * v).sum::<f64>().sqrt();
+    let error: f64 = state.iter().zip(initial_state.iter())
+        .map(|(&a, &b)| (a - b) * (a - b))
+        .sum::<f64>()
+        .sqrt();
+    if norm_init > 1e-15 { error / norm_init } else { error }
+}
+
+/// Compute the empirical volume contraction rate of the flow.
+/// For a dissipative system this should be negative (= sum of Jacobian diagonal = ∇·f).
+/// Estimated as d/dt[ln(vol)] where vol is approximated by a simplex of perturbed trajectories.
+/// Returns the divergence ∇·f = Σ ∂f_i/∂x_i estimated by finite differences at `state`.
+pub fn divergence_at<F>(state: &[f64], f: &F, eps: f64) -> f64
+where
+    F: Fn(&[f64]) -> Vec<f64>,
+{
+    let n = state.len();
+    let mut div = 0.0f64;
+    for i in 0..n {
+        let mut xp = state.to_vec();
+        xp[i] += eps;
+        let mut xm = state.to_vec();
+        xm[i] -= eps;
+        let fp = f(&xp);
+        let fm = f(&xm);
+        div += (fp[i] - fm[i]) / (2.0 * eps);
+    }
+    div
 }
