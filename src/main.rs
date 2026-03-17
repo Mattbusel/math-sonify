@@ -313,6 +313,10 @@ fn sim_thread(
     let mut state_save_timer: u64 = 0;
     const STATE_SAVE_INTERVAL: u64 = 120 * 120; // every 2 min at 120 Hz
 
+    // ── Lyapunov spectrum timer ───────────────────────────────────────────────
+    let mut lyap_timer: u64 = 0;
+    const LYAP_INTERVAL: u64 = 600; // every ~5s at 120 Hz
+
     // Macro random walk seed
     let mut walk_seed: u64 = 12345;
 
@@ -1708,6 +1712,20 @@ fn sim_thread(
                 // Best approach: just decay master_volume quickly
                 params.master_volume *= 0.992; // decay ~3s to silence at 120Hz
                 if params.master_volume < 0.01 { params.master_volume = 0.0; }
+            }
+        }
+
+        // ── Lyapunov spectrum computation (every ~5s) ─────────────────────────────
+        lyap_timer += 1;
+        if lyap_timer >= LYAP_INTERVAL {
+            lyap_timer = 0;
+            let dim = system.dimension().min(3);
+            if dim > 0 {
+                let state_snap = system.state().to_vec();
+                let lyap = crate::systems::lyapunov_spectrum(
+                    &state_snap, dim, dim, 300, config.system.dt, &|s| system.deriv_at(s),
+                );
+                shared.lock().lyapunov_spectrum = lyap;
             }
         }
 
