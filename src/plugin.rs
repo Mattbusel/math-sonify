@@ -268,7 +268,7 @@ impl PluginDsp {
             None
         };
 
-        let fr = params.freq_smooth_rate();
+        let fr = params.freq_smooth_rate(self.sample_rate);
         let gain = ap.gain;
         let mut l = 0.0f32;
         let mut r = 0.0f32;
@@ -354,9 +354,9 @@ impl PluginDsp {
 }
 
 impl MathSonifyParams {
-    fn freq_smooth_rate(&self) -> f32 {
+    fn freq_smooth_rate(&self, sample_rate: f32) -> f32 {
         let ms = self.portamento_ms.value();
-        (1.0_f32 / (ms * 0.001 * 44100.0)).clamp(0.001, 1.0)
+        (1.0_f32 / (ms * 0.001 * sample_rate)).clamp(0.001, 1.0)
     }
 }
 

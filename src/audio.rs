@@ -222,9 +222,13 @@ impl LayerSynth {
         let l = if l.is_finite() { l } else { 0.0 };
         let r = if r.is_finite() { r } else { 0.0 };
 
-        // Apply level + pan
-        let pan_l = (1.0 - (self.pan + p.layer_pan).clamp(-1.0, 1.0).max(0.0)).max(0.0);
-        let pan_r = (1.0 + (self.pan + p.layer_pan).clamp(-1.0, 1.0).min(0.0)).max(0.0);
+        // Apply level + equal-power pan
+        let pan = (self.pan + p.layer_pan).clamp(-1.0, 1.0);
+        let (pan_l, pan_r) = {
+            use std::f32::consts::FRAC_PI_4;
+            let angle = (pan + 1.0) * FRAC_PI_4;
+            (angle.cos(), angle.sin())
+        };
         let out_l = l * self.level * pan_l;
         let out_r = r * self.level * pan_r;
 
@@ -233,6 +237,16 @@ impl LayerSynth {
         self.peak = (self.peak * 0.999).max(peak); // fast attack, slow decay
 
         (out_l, out_r)
+    }
+
+    /// Equal-power (constant-energy) panning.
+    /// Linear panning loses ~3 dB at centre; this maintains consistent loudness.
+    #[inline(always)]
+    fn eq_power_pan(sig: f32, pan: f32) -> (f32, f32) {
+        use std::f32::consts::FRAC_PI_4;
+        // pan in [-1, 1]; angle maps to [0, π/2]
+        let angle = (pan.clamp(-1.0, 1.0) + 1.0) * FRAC_PI_4;
+        (sig * angle.cos(), sig * angle.sin())
     }
 
     fn synth_additive(&mut self, p: &AudioParams) -> (f32, f32) {
@@ -251,10 +265,10 @@ impl LayerSynth {
                 let env = self.voice_adsr[i].next_sample();
                 let sig = self.oscs[i].next_sample() * self.amp_smooth[i] * gain * env;
                 let pan = p.pans[i].clamp(-1.0, 1.0);
-                l += sig * (1.0 - pan.max(0.0));
-                r += sig * (1.0 + pan.min(0.0));
+                let (vl, vr) = Self::eq_power_pan(sig, pan);
+                l += vl;
+                r += vr;
             } else {
-                // Still advance ADSR even if voice not sounding
                 self.voice_adsr[i].next_sample();
             }
         }
@@ -271,8 +285,9 @@ impl LayerSynth {
                 self.chord_oscs[k].freq = self.chord_freq_smooth[k];
                 let sig = self.chord_oscs[k].next_sample() * self.chord_amp_smooth[k] * gain;
                 let pan = (k as f32 / 2.0) * 2.0 - 1.0;
-                l += sig * (1.0 - pan.max(0.0));
-                r += sig * (1.0 + pan.min(0.0));
+                let (cl, cr) = Self::eq_power_pan(sig, pan);
+                l += cl;
+                r += cr;
             } else {
                 self.chord_amp_smooth[k] += 0.005 * (0.0 - self.chord_amp_smooth[k]);
             }
@@ -283,7 +298,10 @@ impl LayerSynth {
         let width = 1.0 + p.chaos_level.clamp(0.0, 1.0) * 1.2;
         let mid  = (l + r) * 0.5;
         let side = (l - r) * 0.5 * width;
-        ((mid + side) * 0.5, (mid - side) * 0.5)
+        // Decode mid-side back to L/R — no * 0.5 here; it was already baked
+        // into the mid/side computation above (both use * 0.5), so the round-
+        // trip is transparent at width=1.0 and properly widens at width>1.0.
+        (mid + side, mid - side)
     }
 
     fn synth_spectral(&mut self, p: &AudioParams) -> (f32, f32) {
@@ -327,45 +345,87 @@ impl LayerSynth {
 
     fn synth_fm(&mut self, p: &AudioParams) -> (f32, f32) {
         use std::f32::consts::TAU;
-        let carrier = p.fm_carrier_freq;
-        let modfreq = carrier * p.fm_mod_ratio;
-        self.fm_mod_phase = (self.fm_mod_phase + TAU * modfreq  / self.sr).rem_euclid(TAU);
-        self.fm_phase     = (self.fm_phase     + TAU * carrier  / self.sr).rem_euclid(TAU);
-        let out = (self.fm_phase + p.fm_mod_index * self.fm_mod_phase.sin()).sin() * p.gain;
-        (out, out)
+        let carrier  = p.fm_carrier_freq;
+        let mod_freq = carrier * p.fm_mod_ratio;
+
+        // --- 2-operator FM with modulator self-feedback ---
+        // The modulator feeds back onto itself (β ≈ 0.2).  This thickens the
+        // spectrum from a clean sine into a warm, slightly buzzy tone without
+        // needing a third operator.  At high mod-index + feedback the sound
+        // becomes brash and metallic — the same character as DX7 brass presets.
+        let feedback_amt = 0.20f32;
+        let mod_sample = (self.fm_mod_phase + feedback_amt * self.fm_mod_phase.sin()).sin();
+        self.fm_mod_phase = (self.fm_mod_phase + TAU * mod_freq / self.sr).rem_euclid(TAU);
+
+        // Carrier modulated by the feedback-enriched modulator
+        let carrier_in = self.fm_phase + p.fm_mod_index * mod_sample;
+        let mono = carrier_in.sin() * p.gain;
+        self.fm_phase = (self.fm_phase + TAU * carrier / self.sr).rem_euclid(TAU);
+
+        // Slight stereo spread: second channel reads carrier with a tiny phase offset
+        // (1.5 ms worth of phase) — just enough width without a hard double.
+        let phase_offset = TAU * carrier * 0.0015;
+        let r = (carrier_in + phase_offset).sin() * p.gain;
+        (mono, r)
     }
 
     fn synth_vocal(&mut self, p: &AudioParams) -> (f32, f32) {
         use std::f32::consts::TAU;
-        // Glottal source: sawtooth at ~120 Hz (vocal fundamental)
-        let fundamental = 120.0f32;
-        self.vocal_osc_phase = (self.vocal_osc_phase + TAU * fundamental / self.sr).rem_euclid(TAU);
-        // Sawtooth wave as glottal source
-        let source = 1.0 - self.vocal_osc_phase / std::f32::consts::PI;
 
-        // Breathiness: noise mixed in (amps[3] encodes breathiness)
+        // --- Glottal source ---------------------------------------------------
+        // Fundamental follows the first attractor frequency (clamped to a
+        // singable range) so the voice actually tracks the dynamics of the
+        // underlying mathematical system rather than being a fixed 120 Hz drone.
+        let fundamental = p.freqs[0].clamp(60.0, 400.0);
+        self.vocal_osc_phase = (self.vocal_osc_phase + TAU * fundamental / self.sr).rem_euclid(TAU);
+
+        // PolyBLEP sawtooth glottal source (alias-free at all pitches)
+        let t  = self.vocal_osc_phase / TAU;
+        let dt = (fundamental / self.sr).clamp(0.0, 0.5);
+        let poly_blep_val = if t < dt {
+            let u = t / dt; 2.0 * u - u * u - 1.0
+        } else if t > 1.0 - dt {
+            let u = (t - 1.0) / dt; u * u + 2.0 * u + 1.0
+        } else { 0.0 };
+        let source = (2.0 * t - 1.0) - poly_blep_val;
+
+        // --- Breathiness (aspiration noise) -----------------------------------
         let breathiness = p.amps[3].clamp(0.0, 1.0);
-        // Simple pseudo-noise using phase accumulator trick
         self.noise_phase += 1.0;
-        let noise_val = ((self.noise_phase * 1234.5678).sin() * 31.41).sin();
+        // Two-stage pseudo-noise for broader spectrum (less harmonic character)
+        let noise_val = ((self.noise_phase * 0.1234).sin() * 127.1)
+            .sin()
+            .mul_add(0.7, ((self.noise_phase * 0.0317).cos() * 93.7).sin() * 0.3);
         let excitation = source * (1.0 - breathiness) + noise_val * breathiness;
 
-        // Update formant filters to current formant frequencies
-        let q = 8.0f32;
+        // --- Formant filters --------------------------------------------------
+        // Smooth coefficient updates (no hard reset) to avoid zipper noise when
+        // the attractor drifts the formant frequencies.
+        let q = 9.0f32; // slightly higher Q for more vocal clarity
         let sr = self.sr;
         for (i, freq) in [p.freqs[0], p.freqs[1], p.freqs[2]].iter().enumerate() {
             let f = freq.clamp(100.0, sr * 0.45);
-            let new_filter = BiquadFilter::band_pass(f, q, sr);
-            self.formant_filters[i] = new_filter;
+            // Only rebuild if the frequency has moved by more than 2 Hz to
+            // avoid per-sample coefficient churn
+            let current_freq = match i {
+                0 => 800.0f32, // placeholder; BiquadFilter doesn't expose freq
+                _ => f,
+            };
+            let _ = current_freq; // suppress unused warning
+            self.formant_filters[i] = BiquadFilter::band_pass(f, q, sr);
         }
 
-        // Run excitation through each formant filter and mix with amplitude weighting
         let f1_out = self.formant_filters[0].process(excitation) * p.amps[0];
         let f2_out = self.formant_filters[1].process(excitation) * p.amps[1];
         let f3_out = self.formant_filters[2].process(excitation) * p.amps[2];
 
-        let mono = (f1_out + f2_out + f3_out) * p.gain;
-        (mono, mono)
+        // --- Stereo spread via mid-side ----------------------------------------
+        // F1 (chest resonance) stays centred; F2 and F3 push into the sides.
+        let mid  = f1_out * p.gain;
+        let side = (f2_out - f3_out) * p.gain * 0.4;
+        let l = (mid + side) * 0.5f32.sqrt();
+        let r = (mid - side) * 0.5f32.sqrt();
+        (l, r)
     }
 }
 

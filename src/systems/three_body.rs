@@ -42,7 +42,10 @@ impl ThreeBody {
                 let (xj, yj) = pos(j);
                 let dx = xj - xi;
                 let dy = yj - yi;
-                let r = (dx * dx + dy * dy).sqrt().max(1e-6);
+                // Softening floor: 1e-3 prevents the 1/r³ term from blowing up
+                // to ~1e18 when two bodies pass within 1e-6 of each other, which
+                // causes the leapfrog integrator to diverge in a single step.
+                let r = (dx * dx + dy * dy).sqrt().max(1e-3);
                 let r3 = r * r * r;
                 ax[i] += g * masses[j] * dx / r3;
                 ay[i] += g * masses[j] * dy / r3;

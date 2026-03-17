@@ -124,7 +124,9 @@ pub fn scene_at(scenes: &[Scene], elapsed: f32) -> Option<(usize, bool, f32)> {
 
 fn lcg(seed: &mut u64) -> f64 {
     *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-    (*seed >> 33) as f64 / u32::MAX as f64
+    // >> 33 produces 31 bits of output; divide by 2^31 to get [0, 1).
+    // Previously divided by u32::MAX (≈ 2^32), which capped output at ~0.5.
+    (*seed >> 33) as f64 / (1u64 << 31) as f64
 }
 
 fn make_scene(name: &str, preset: &str, hold: f32, morph: f32, tweaks: impl FnOnce(&mut Config)) -> Scene {

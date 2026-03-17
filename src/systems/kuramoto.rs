@@ -17,8 +17,11 @@ impl Kuramoto {
         // Lorentzian natural frequencies centered at 1.0 with width 0.5
         let omega: Vec<f64> = (0..n).map(|i| {
             let u = (i as f64 + 0.5) / n as f64;
-            // Lorentzian quantile: tan(π(u-0.5))
-            1.0 + 0.5 * (std::f64::consts::PI * (u - 0.5)).tan()
+            // Lorentzian quantile: tan(π(u-0.5)).
+            // Clamp u away from 0 and 1 to avoid tan(±π/2) = ±∞, which would
+            // produce infinite natural frequencies and NaN state after one step.
+            let u_safe = u.clamp(1e-6, 1.0 - 1e-6);
+            1.0 + 0.5 * (std::f64::consts::PI * (u_safe - 0.5)).tan()
         }).collect();
         // Distribute initial phases uniformly
         let state: Vec<f64> = (0..n).map(|i| {

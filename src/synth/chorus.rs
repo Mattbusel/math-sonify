@@ -1,4 +1,8 @@
-/// Simple stereo chorus: 3 voices with LFO-modulated delay lines.
+/// Stereo chorus — 3 voices with LFO-modulated delay lines.
+///
+/// Linear interpolation on the delay-line read pointer is essential here:
+/// integer-sample snapping causes audible pitch quantisation that makes
+/// the modulation sound stepped and digital rather than smooth and liquid.
 pub struct Chorus {
     pub mix: f32,
     pub rate: f32,
@@ -12,7 +16,8 @@ pub struct Chorus {
 
 impl Chorus {
     pub fn new(sample_rate: f32) -> Self {
-        let max_delay_samples = (20.0 * 0.001 * sample_rate) as usize + 1;
+        // Max delay 25 ms (a little headroom above the deepest modulation)
+        let max_delay_samples = (25.0 * 0.001 * sample_rate) as usize + 2;
         Self {
             mix: 0.0,
             rate: 0.5,
@@ -20,34 +25,59 @@ impl Chorus {
             buf_l: vec![0.0; max_delay_samples],
             buf_r: vec![0.0; max_delay_samples],
             pos: 0,
-            lfo_phases: [0.0, 2.094, 4.189],
+            // Three LFOs 120° apart in phase for uniform stereo spreading
+            lfo_phases: [0.0, 2.094_395, 4.188_790],
             sample_rate,
         }
+    }
+
+    /// Linearly interpolate between two consecutive delay-buffer samples.
+    /// This removes the harmonic distortion caused by integer-index snapping.
+    #[inline(always)]
+    fn read_interp(buf: &[f32], write_pos: usize, delay_samples: f32) -> f32 {
+        let len = buf.len();
+        let delay_floor = delay_samples as usize;
+        let frac = delay_samples - delay_floor as f32;
+        let i0 = (write_pos + len - delay_floor.min(len - 1)) % len;
+        let i1 = (write_pos + len - (delay_floor + 1).min(len - 1)) % len;
+        buf[i0] * (1.0 - frac) + buf[i1] * frac
     }
 
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
         use std::f32::consts::TAU;
         if self.mix < 0.001 { return (l, r); }
-        let len = self.buf_l.len();
+
         self.buf_l[self.pos] = l;
         self.buf_r[self.pos] = r;
 
+        let omega = TAU * self.rate / self.sample_rate;
         let mut out_l = 0.0f32;
         let mut out_r = 0.0f32;
-        let omega = TAU * self.rate / self.sample_rate;
 
         for (i, phase) in self.lfo_phases.iter_mut().enumerate() {
             *phase = (*phase + omega).rem_euclid(TAU);
+            // Centre delay 7 ms, modulated ± depth ms
             let delay_ms = 7.0 + phase.sin() * self.depth;
-            let delay_samples = (delay_ms * 0.001 * self.sample_rate) as usize;
-            let read = (self.pos + len - delay_samples.min(len - 1)) % len;
-            if i % 2 == 0 { out_l += self.buf_l[read]; } else { out_l += self.buf_l[read] * 0.5; }
-            if i % 2 == 1 { out_r += self.buf_r[read]; } else { out_r += self.buf_r[read] * 0.5; }
+            let delay_samples = (delay_ms * 0.001 * self.sample_rate).max(0.0);
+
+            let dl = Self::read_interp(&self.buf_l, self.pos, delay_samples);
+            let dr = Self::read_interp(&self.buf_r, self.pos, delay_samples);
+
+            // Distribute voices: voice 0 and 2 feed left more, voice 1 feeds right more
+            if i % 2 == 0 {
+                out_l += dl;
+                out_r += dr * 0.5;
+            } else {
+                out_l += dl * 0.5;
+                out_r += dr;
+            }
         }
+        // Normalise 3-voice mix
         out_l /= 2.0;
         out_r /= 2.0;
 
-        self.pos = (self.pos + 1) % len;
+        self.pos = (self.pos + 1) % self.buf_l.len();
+
         let dry = 1.0 - self.mix;
         (l * dry + out_l * self.mix, r * dry + out_r * self.mix)
     }

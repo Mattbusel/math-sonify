@@ -382,46 +382,74 @@ fn lcg_rand(seed: &mut u64) -> f64 {
 fn apply_theme(ctx: &Context, theme: &str) {
     let mut visuals = ctx.style().visuals.clone();
     visuals.dark_mode = true;
+
+    // Global rounding — gives a polished, modern feel across all themes
+    let round_sm = egui::Rounding::same(5.0);
+    let round_md = egui::Rounding::same(8.0);
+    visuals.window_rounding = round_md;
+    visuals.menu_rounding = round_md;
+    visuals.widgets.noninteractive.rounding = round_sm;
+    visuals.widgets.inactive.rounding = round_sm;
+    visuals.widgets.hovered.rounding = round_sm;
+    visuals.widgets.active.rounding = round_sm;
+    visuals.widgets.open.rounding = round_sm;
+
     match theme {
         "vaporwave" => {
-            visuals.window_fill = Color32::from_rgb(20, 10, 30);
-            visuals.panel_fill = Color32::from_rgb(20, 10, 30);
-            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(35, 15, 50);
-            visuals.widgets.inactive.bg_fill = Color32::from_rgb(50, 20, 70);
-            visuals.widgets.hovered.bg_fill = Color32::from_rgb(80, 30, 100);
-            visuals.widgets.active.bg_fill = Color32::from_rgb(200, 50, 150);
+            visuals.window_fill = Color32::from_rgb(14, 7, 24);
+            visuals.panel_fill = Color32::from_rgb(14, 7, 24);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(30, 12, 46);
+            visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(70, 30, 100));
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(44, 18, 66);
+            visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(90, 40, 130));
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(70, 26, 100);
+            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(200, 80, 200));
+            visuals.widgets.active.bg_fill = Color32::from_rgb(210, 55, 160);
+            visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, Color32::from_rgb(255, 140, 230));
             visuals.selection.bg_fill = Color32::from_rgb(180, 40, 130);
-            visuals.override_text_color = Some(Color32::from_rgb(255, 180, 230));
+            visuals.override_text_color = Some(Color32::from_rgb(248, 190, 240));
         }
         "crt" => {
             visuals.window_fill = Color32::from_rgb(0, 0, 0);
             visuals.panel_fill = Color32::from_rgb(0, 0, 0);
-            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(0, 10, 0);
-            visuals.widgets.inactive.bg_fill = Color32::from_rgb(0, 20, 0);
-            visuals.widgets.hovered.bg_fill = Color32::from_rgb(0, 40, 0);
-            visuals.widgets.active.bg_fill = Color32::from_rgb(0, 150, 0);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(0, 8, 0);
+            visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(0, 40, 0));
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(0, 16, 0);
+            visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(0, 60, 0));
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(0, 32, 0);
+            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(0, 200, 60));
+            visuals.widgets.active.bg_fill = Color32::from_rgb(0, 160, 0);
+            visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, Color32::from_rgb(0, 255, 80));
             visuals.selection.bg_fill = Color32::from_rgb(0, 120, 0);
             visuals.override_text_color = Some(Color32::from_rgb(0, 255, 60));
         }
         "solar" => {
-            visuals.window_fill = Color32::from_rgb(20, 10, 0);
-            visuals.panel_fill = Color32::from_rgb(20, 10, 0);
-            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(35, 18, 0);
-            visuals.widgets.inactive.bg_fill = Color32::from_rgb(50, 28, 0);
-            visuals.widgets.hovered.bg_fill = Color32::from_rgb(80, 45, 0);
-            visuals.widgets.active.bg_fill = Color32::from_rgb(200, 120, 0);
+            visuals.window_fill = Color32::from_rgb(14, 7, 0);
+            visuals.panel_fill = Color32::from_rgb(14, 7, 0);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(28, 14, 0);
+            visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(60, 30, 0));
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(42, 22, 0);
+            visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(90, 46, 0));
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(70, 38, 0);
+            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
+            visuals.widgets.active.bg_fill = Color32::from_rgb(210, 125, 0);
+            visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, Color32::from_rgb(255, 200, 60));
             visuals.selection.bg_fill = Color32::from_rgb(180, 100, 0);
-            visuals.override_text_color = Some(Color32::from_rgb(255, 210, 100));
+            visuals.override_text_color = Some(Color32::from_rgb(255, 215, 110));
         }
-        _ => { // neon (default)
-            visuals.window_fill = Color32::from_rgb(12, 12, 20);
-            visuals.panel_fill = Color32::from_rgb(12, 12, 20);
-            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(20, 20, 35);
-            visuals.widgets.inactive.bg_fill = Color32::from_rgb(25, 25, 45);
-            visuals.widgets.hovered.bg_fill = Color32::from_rgb(30, 30, 60);
-            visuals.widgets.active.bg_fill = Color32::from_rgb(0, 120, 200);
-            visuals.selection.bg_fill = Color32::from_rgb(0, 100, 180);
-            visuals.override_text_color = Some(Color32::from_rgb(200, 210, 230));
+        _ => { // neon (default) — deep space blue
+            visuals.window_fill = Color32::from_rgb(7, 7, 15);
+            visuals.panel_fill = Color32::from_rgb(7, 7, 15);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(15, 15, 28);
+            visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(35, 40, 70));
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(20, 20, 40);
+            visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(45, 50, 85));
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(28, 32, 62);
+            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(60, 140, 230));
+            visuals.widgets.active.bg_fill = Color32::from_rgb(0, 125, 215);
+            visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, Color32::from_rgb(100, 190, 255));
+            visuals.selection.bg_fill = Color32::from_rgb(0, 100, 185);
+            visuals.override_text_color = Some(Color32::from_rgb(210, 220, 240));
         }
     }
     ctx.set_visuals(visuals);
@@ -491,19 +519,31 @@ fn mode_tooltip(mode: &str) -> &'static str {
     }
 }
 
-const CYAN: Color32 = Color32::from_rgb(100, 200, 255);
-const GRAY_HINT: Color32 = Color32::from_rgb(160, 160, 160);
-const AMBER: Color32 = Color32::from_rgb(220, 170, 60);
+const CYAN:      Color32 = Color32::from_rgb(100, 200, 255);
+const GRAY_HINT: Color32 = Color32::from_rgb(140, 145, 170);
+const AMBER:     Color32 = Color32::from_rgb(220, 175, 60);
+const GREEN_ACC: Color32 = Color32::from_rgb(50, 210, 130);
+const DIM_BG:    Color32 = Color32::from_rgb(18, 18, 34);
 
 fn collapsing_section(ui: &mut Ui, label: &str, default_open: bool, add_contents: impl FnOnce(&mut Ui)) {
-    CollapsingHeader::new(
-        RichText::new(label).size(13.0).color(CYAN).strong()
-    )
-    .default_open(default_open)
-    .show(ui, add_contents);
     ui.add_space(4.0);
-    ui.separator();
-    ui.add_space(2.0);
+    // Subtle full-width header background
+    let header_frame = egui::Frame::none()
+        .fill(Color32::from_rgb(18, 22, 42))
+        .inner_margin(egui::Margin::symmetric(6.0, 3.0))
+        .rounding(egui::Rounding::same(5.0));
+    header_frame.show(ui, |ui| {
+        CollapsingHeader::new(
+            RichText::new(label).size(12.5).color(CYAN).strong()
+        )
+        .default_open(default_open)
+        .show(ui, |ui| {
+            ui.add_space(4.0);
+            add_contents(ui);
+            ui.add_space(2.0);
+        });
+    });
+    ui.add_space(4.0);
 }
 
 /// Draw the full UI. Called each egui frame.
@@ -599,24 +639,103 @@ pub fn draw_ui(
         return;
     }
 
-    SidePanel::left("controls").min_width(300.0).max_width(340.0).show(ctx, |ui| {
+    SidePanel::left("controls").min_width(310.0).max_width(360.0).show(ctx, |ui| {
         ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(6.0);
+            ui.add_space(8.0);
 
-            // ---- Simple / Advanced toggle ----
+            // ── App identity header ────────────────────────────────────────────────
+            egui::Frame::none()
+                .fill(Color32::from_rgb(10, 12, 24))
+                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                .rounding(egui::Rounding::same(8.0))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(30, 50, 90)))
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.label(
+                        RichText::new("MATH SONIFY")
+                            .size(19.0)
+                            .color(CYAN)
+                            .strong(),
+                    );
+                    ui.label(
+                        RichText::new("strange attractors  →  sound")
+                            .size(10.5)
+                            .color(GRAY_HINT)
+                            .italics(),
+                    );
+                });
+            ui.add_space(8.0);
+
+            // ── Live chaos status bar ──────────────────────────────────────────────
+            {
+                let (chaos, paused) = {
+                    let st = state.lock();
+                    (st.chaos_level, st.paused)
+                };
+                let chaos_col = lerp_color(
+                    Color32::from_rgb(30, 110, 200),
+                    Color32::from_rgb(220, 70, 30),
+                    chaos,
+                );
+                ui.horizontal(|ui| {
+                    let status_text = if paused { "⏸  PAUSED" } else { "▶  LIVE" };
+                    let status_col = if paused { Color32::from_rgb(150, 150, 180) } else { Color32::from_rgb(80, 220, 120) };
+                    ui.label(RichText::new(status_text).size(10.0).color(status_col).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("{:.0}% chaos", chaos * 100.0)).size(10.0).color(chaos_col));
+                    });
+                });
+                let bar_w = ui.available_width();
+                let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(bar_w, 5.0), Sense::hover());
+                ui.painter().rect_filled(bar_rect, 2.5, Color32::from_rgb(15, 15, 30));
+                let fill_rect = egui::Rect::from_min_size(
+                    bar_rect.min,
+                    Vec2::new(bar_rect.width() * chaos.clamp(0.0, 1.0), bar_rect.height()),
+                );
+                ui.painter().rect_filled(fill_rect, 2.5, chaos_col);
+            }
+            ui.add_space(8.0);
+
+            // ── Simple / Advanced toggle ───────────────────────────────────────────
             let is_simple = {
                 let mut st = state.lock();
+                let half_w = (ui.available_width() - 6.0) / 2.0;
                 ui.horizontal(|ui| {
-                    let simple_label = if st.simple_mode { "◉ Simple" } else { "○ Simple" };
-                    let adv_label    = if st.simple_mode { "○ Advanced" } else { "◉ Advanced" };
-                    let simple_color = if st.simple_mode { Color32::from_rgb(0, 160, 80) } else { Color32::from_rgb(40, 40, 70) };
-                    let adv_color    = if st.simple_mode { Color32::from_rgb(40, 40, 70) } else { Color32::from_rgb(0, 100, 200) };
-                    if ui.add(Button::new(RichText::new(simple_label).color(Color32::WHITE).size(12.0))
-                        .fill(simple_color).min_size(Vec2::new(100.0, 26.0))).clicked() {
+                    let simple_active = st.simple_mode;
+                    let simple_fill = if simple_active {
+                        Color32::from_rgb(22, 140, 78)
+                    } else {
+                        Color32::from_rgb(18, 18, 36)
+                    };
+                    let adv_fill = if !simple_active {
+                        Color32::from_rgb(15, 105, 205)
+                    } else {
+                        Color32::from_rgb(18, 18, 36)
+                    };
+                    let simple_border = if simple_active {
+                        Color32::from_rgb(50, 200, 110)
+                    } else {
+                        Color32::from_rgb(40, 42, 70)
+                    };
+                    let adv_border = if !simple_active {
+                        Color32::from_rgb(60, 160, 255)
+                    } else {
+                        Color32::from_rgb(40, 42, 70)
+                    };
+                    if ui.add(
+                        Button::new(RichText::new("Simple").color(Color32::WHITE).size(13.0).strong())
+                            .fill(simple_fill)
+                            .stroke(egui::Stroke::new(if simple_active { 1.5 } else { 1.0 }, simple_border))
+                            .min_size(Vec2::new(half_w, 32.0)),
+                    ).clicked() {
                         st.simple_mode = true;
                     }
-                    if ui.add(Button::new(RichText::new(adv_label).color(Color32::WHITE).size(12.0))
-                        .fill(adv_color).min_size(Vec2::new(110.0, 26.0))).clicked() {
+                    if ui.add(
+                        Button::new(RichText::new("Advanced").color(Color32::WHITE).size(13.0).strong())
+                            .fill(adv_fill)
+                            .stroke(egui::Stroke::new(if !simple_active { 1.5 } else { 1.0 }, adv_border))
+                            .min_size(Vec2::new(half_w, 32.0)),
+                    ).clicked() {
                         st.simple_mode = false;
                     }
                 });
@@ -635,15 +754,37 @@ pub fn draw_ui(
     // ---- CENTRAL PANEL: Visualization ----
     CentralPanel::default().show(ctx, |ui| {
         // Tab bar row with theme switcher on the right
+        egui::Frame::none()
+            .fill(Color32::from_rgb(10, 10, 22))
+            .inner_margin(egui::Margin::symmetric(4.0, 4.0))
+            .show(ui, |ui| {
         ui.horizontal(|ui| {
-            let tabs = ["Phase Portrait", "MIXER", "ARRANGE", "Waveform", "Note Map", "Math View", "Bifurcation"];
+            let tabs = [
+                ("🌀", "Phase"),
+                ("🎚", "Mixer"),
+                ("🎬", "Arrange"),
+                ("〰", "Wave"),
+                ("🎵", "Notes"),
+                ("∑", "Math"),
+                ("∿", "Bifurc"),
+            ];
             let mut viz_tab = state.lock().viz_tab;
-            for (i, name) in tabs.iter().enumerate() {
+            for (i, (icon, name)) in tabs.iter().enumerate() {
                 let selected = viz_tab == i;
-                let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(60, 60, 90) };
-                let btn = Button::new(RichText::new(*name).color(Color32::WHITE))
-                    .fill(color)
-                    .min_size(Vec2::new(110.0, 26.0));
+                let (fill, text_col) = if selected {
+                    (Color32::from_rgb(0, 125, 215), Color32::WHITE)
+                } else {
+                    (Color32::from_rgb(20, 22, 42), Color32::from_rgb(160, 170, 200))
+                };
+                let btn = Button::new(
+                    RichText::new(format!("{} {}", icon, name)).color(text_col).size(11.5)
+                )
+                .fill(fill)
+                .stroke(egui::Stroke::new(
+                    if selected { 1.5 } else { 0.0 },
+                    Color32::from_rgb(60, 160, 255),
+                ))
+                .min_size(Vec2::new(74.0, 28.0));
                 if ui.add(btn).clicked() {
                     viz_tab = i;
                 }
@@ -653,24 +794,26 @@ pub fn draw_ui(
             // Theme switcher right-aligned
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let themes = [
-                    ("solar", Color32::from_rgb(180, 100, 10)),
-                    ("crt",   Color32::from_rgb(0, 160, 0)),
-                    ("vapor", Color32::from_rgb(160, 30, 120)),
-                    ("neon",  Color32::from_rgb(0, 120, 200)),
+                    ("☀", "solar",     Color32::from_rgb(195, 110, 10)),
+                    ("⎕", "crt",       Color32::from_rgb(0, 170, 0)),
+                    ("◈", "vaporwave", Color32::from_rgb(170, 35, 130)),
+                    ("◆", "neon",      Color32::from_rgb(0, 130, 215)),
                 ];
-                for (label, color) in themes.iter() {
-                    let theme_key = if *label == "vapor" { "vaporwave" } else { *label };
-                    let is_active = state.lock().theme == theme_key;
-                    let btn_color = if is_active { *color } else { Color32::from_rgb(35, 35, 50) };
+                for (icon, theme_key, color) in themes.iter() {
+                    let is_active = state.lock().theme == *theme_key;
+                    let btn_color = if is_active { *color } else { Color32::from_rgb(22, 22, 40) };
+                    let border = if is_active { *color } else { Color32::from_rgb(40, 42, 65) };
                     if ui.add(
-                        Button::new(RichText::new(*label).color(Color32::WHITE).size(11.0))
+                        Button::new(RichText::new(*icon).color(Color32::WHITE).size(13.0))
                             .fill(btn_color)
-                            .min_size(Vec2::new(44.0, 22.0))
-                    ).clicked() {
+                            .stroke(egui::Stroke::new(1.0, border))
+                            .min_size(Vec2::new(26.0, 26.0))
+                    ).on_hover_text(*theme_key).clicked() {
                         state.lock().theme = theme_key.to_string();
                     }
                 }
             });
+        });
         });
 
         let viz_tab = state.lock().viz_tab;
@@ -907,26 +1050,33 @@ fn draw_advanced_panel(
 
     let adv_vol = st.config.audio.master_volume;
     let adv_db_label = if adv_vol > 0.001 {
-        format!("Vol ({:.1} dB)", 20.0 * adv_vol.log10())
+        format!("{:.1} dB", 20.0 * adv_vol.log10())
     } else {
-        "Vol (-∞ dB)".to_string()
+        "-∞ dB".to_string()
     };
-    ui.label(RichText::new("VOLUME").color(Color32::WHITE).strong());
+
+    // Compact header bar: volume + pause side by side
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("🔊  Volume").color(Color32::WHITE).strong().size(12.0));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(RichText::new(&adv_db_label).color(AMBER).size(11.0));
+        });
+    });
     ui.add(
-        Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0)
-            .text(adv_db_label)
+        Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text("")
     ).on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
-    ui.add_space(6.0);
+    ui.add_space(4.0);
 
     // ---- Pause button ----
     let pause_label = if st.paused { "▶  RESUME" } else { "⏸  PAUSE" };
-    let pause_color = if st.paused {
-        Color32::from_rgb(0, 140, 50)
+    let (pause_fill, pause_stroke) = if st.paused {
+        (Color32::from_rgb(18, 135, 65), Color32::from_rgb(60, 220, 110))
     } else {
-        Color32::from_rgb(0, 90, 160)
+        (Color32::from_rgb(15, 90, 165), Color32::from_rgb(60, 160, 255))
     };
-    let btn = Button::new(RichText::new(pause_label).color(Color32::WHITE).strong())
-        .fill(pause_color)
+    let btn = Button::new(RichText::new(pause_label).color(Color32::WHITE).strong().size(13.0))
+        .fill(pause_fill)
+        .stroke(egui::Stroke::new(1.5, pause_stroke))
         .min_size(Vec2::new(ui.available_width(), 36.0));
     if ui.add(btn).on_hover_text("Pause or resume the simulation and audio. Shortcut: Space bar.").clicked() {
         st.paused = !st.paused;
@@ -936,15 +1086,25 @@ fn draw_advanced_panel(
     // ---- Chaos meter ----
     let chaos = st.chaos_level;
     let chaos_color = lerp_color(
-        Color32::from_rgb(0, 80, 180),
-        Color32::from_rgb(220, 40, 40),
+        Color32::from_rgb(0, 100, 200),
+        Color32::from_rgb(220, 50, 30),
         chaos,
     );
-    ui.add(
-        ProgressBar::new(chaos)
-            .text(format!("Chaos  {:.0}%", chaos * 100.0))
-            .fill(chaos_color)
-    ).on_hover_text("Real-time measure of the attractor's Lyapunov exponent — how quickly nearby trajectories diverge. Blue = ordered, red = fully chaotic.");
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Chaos").color(GRAY_HINT).size(11.0));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(RichText::new(format!("{:.0}%", chaos * 100.0)).color(chaos_color).size(11.0));
+        });
+    });
+    let bar_w = ui.available_width();
+    let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(bar_w, 7.0), Sense::hover());
+    ui.painter().rect_filled(bar_rect, 3.5, Color32::from_rgb(14, 14, 28));
+    let fill_rect = egui::Rect::from_min_size(
+        bar_rect.min,
+        Vec2::new(bar_rect.width() * chaos.clamp(0.0, 1.0), bar_rect.height()),
+    );
+    ui.painter().rect_filled(fill_rect, 3.5, chaos_color);
+    ui.add_space(2.0);
 
     ui.add_space(6.0);
     ui.separator();
@@ -961,27 +1121,48 @@ fn draw_advanced_panel(
             if preset.category != last_cat {
                 last_cat = preset.category;
                 ui.add_space(4.0);
-                ui.label(RichText::new(format!("— {} —", preset.category.to_uppercase()))
-                    .color(GRAY_HINT).size(10.0));
-                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("  {}", preset.category.to_uppercase()))
+                        .color(GRAY_HINT).size(10.0).strong());
+                    let avail = ui.available_width();
+                    let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(avail - 4.0, 1.0), Sense::hover());
+                    ui.painter().rect_filled(sep_rect, 0.0, Color32::from_rgb(35, 38, 65));
+                });
+                ui.add_space(3.0);
             }
             let is_selected = selected == preset.name;
             let pc = preset.color;
-            let (stroke_color, bg_color) = if is_selected {
-                (pc, Color32::from_rgba_premultiplied(pc.r()/4, pc.g()/4, pc.b()/4, 255))
+            let bg_color = if is_selected {
+                Color32::from_rgba_premultiplied(
+                    (pc.r() as u16 * 55 / 255) as u8,
+                    (pc.g() as u16 * 55 / 255) as u8,
+                    (pc.b() as u16 * 55 / 255) as u8,
+                    255,
+                )
             } else {
-                (Color32::from_rgb(50, 50, 80), Color32::from_rgb(20, 20, 35))
+                Color32::from_rgb(14, 14, 26)
             };
             let card = egui::Frame::none()
                 .fill(bg_color)
-                .stroke(Stroke::new(if is_selected { 2.0 } else { 1.0 }, stroke_color))
-                .inner_margin(egui::Margin::same(8.0))
-                .rounding(egui::Rounding::same(4.0));
+                .stroke(Stroke::new(if is_selected { 1.5 } else { 1.0 },
+                    if is_selected { pc } else { Color32::from_rgb(34, 36, 64) }))
+                .inner_margin(egui::Margin::symmetric(0.0, 5.0))
+                .rounding(egui::Rounding::same(6.0));
             let response = card.show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
-                ui.set_min_height(36.0);
-                ui.label(RichText::new(preset.name).strong().color(Color32::WHITE).size(13.0));
-                ui.label(RichText::new(preset.description).italics().color(GRAY_HINT).size(11.0));
+                ui.horizontal(|ui| {
+                    let (strip_rect, _) = ui.allocate_exact_size(Vec2::new(5.0, 34.0), Sense::hover());
+                    let strip_col = if is_selected { pc } else {
+                        Color32::from_rgba_premultiplied(pc.r()/3, pc.g()/3, pc.b()/3, 200)
+                    };
+                    ui.painter().rect_filled(strip_rect, egui::Rounding::same(3.0), strip_col);
+                    ui.add_space(7.0);
+                    ui.vertical(|ui| {
+                        let name_col = if is_selected { pc } else { Color32::WHITE };
+                        ui.label(RichText::new(preset.name).strong().color(name_col).size(12.5));
+                        ui.label(RichText::new(preset.description).italics().color(GRAY_HINT).size(10.5));
+                    });
+                });
             }).response;
             if response.interact(Sense::click()).clicked() {
                 st.selected_preset = preset.name.to_string();
@@ -1758,15 +1939,24 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
             let st = state.lock();
             (st.auto_mode, st.arr_mood.clone())
         };
-        let (auto_label, auto_color) = if auto_mode {
-            ("⏹ AUTO PLAYING — Click to Stop", Color32::from_rgb(180, 60, 20))
+        let (auto_label, auto_fill, auto_stroke) = if auto_mode {
+            (
+                "⏹  AUTO PLAYING  —  Click to Stop",
+                Color32::from_rgb(165, 50, 20),
+                Color32::from_rgb(255, 120, 60),
+            )
         } else {
-            ("▶ AUTO — Generate & Play", Color32::from_rgb(0, 140, 60))
+            (
+                "▶  AUTO  —  Generate & Play",
+                Color32::from_rgb(18, 135, 65),
+                Color32::from_rgb(60, 220, 110),
+            )
         };
         if ui.add(
-            Button::new(RichText::new(auto_label).color(Color32::WHITE).size(15.0).strong())
-                .fill(auto_color)
-                .min_size(Vec2::new(ui.available_width(), 48.0))
+            Button::new(RichText::new(auto_label).color(Color32::WHITE).size(16.0).strong())
+                .fill(auto_fill)
+                .stroke(egui::Stroke::new(2.0, auto_stroke))
+                .min_size(Vec2::new(ui.available_width(), 58.0))
         ).on_hover_text("Auto-generate a full arrangement from the selected mood and play it through continuously. Each run creates a unique sequence of morphing scenes.").clicked() {
             let mut st = state.lock();
             if st.auto_mode {
@@ -1824,9 +2014,10 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             if ui.add(
-                Button::new(RichText::new("▶ Play Demo").color(Color32::WHITE).size(12.0))
-                    .fill(Color32::from_rgb(80, 60, 140))
-                    .min_size(Vec2::new(110.0, 30.0))
+                Button::new(RichText::new("▶  Play Demo").color(Color32::WHITE).size(12.0))
+                    .fill(Color32::from_rgb(68, 50, 130))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(130, 100, 220)))
+                    .min_size(Vec2::new(108.0, 30.0))
             ).on_hover_text("Play a hardcoded 3-minute demo piece showcasing the best sounds.").clicked() {
                 let mut st = state.lock();
                 st.scenes = demo_arrangement();
@@ -1846,7 +2037,8 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
             };
             if ui.add(
                 Button::new(save_label)
-                    .fill(if save_pending { Color32::from_rgb(100, 20, 20) } else { Color32::from_rgb(30, 80, 60) })
+                    .fill(if save_pending { Color32::from_rgb(100, 20, 20) } else { Color32::from_rgb(25, 80, 55) })
+                    .stroke(egui::Stroke::new(1.0, if save_pending { Color32::from_rgb(255, 80, 80) } else { Color32::from_rgb(55, 180, 110) }))
                     .min_size(Vec2::new(90.0, 30.0))
             ).on_hover_text("Generate a fresh arrangement and record one full pass to a WAV file. Recording stops automatically when the arrangement ends.").clicked() && !save_pending {
                 let seed = std::time::SystemTime::now()
@@ -1899,40 +2091,52 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
         }
 
         // ---- Mood selector ----
-        ui.label(RichText::new("Arrangement Mood").color(CYAN).size(11.0));
-        ui.horizontal(|ui| {
-            for (mood_key, label) in &[("ambient", "🌙 Ambient"), ("rhythmic", "⚡ Rhythmic"), ("experimental", "🔬 Experimental")] {
-                let selected = arr_mood == *mood_key;
-                let col = if selected {
-                    match *mood_key {
-                        "ambient"      => Color32::from_rgb(0, 100, 180),
-                        "rhythmic"     => Color32::from_rgb(160, 120, 0),
-                        _              => Color32::from_rgb(100, 0, 160),
+        ui.label(RichText::new("ARRANGEMENT MOOD").color(CYAN).size(11.0).strong());
+        ui.add_space(4.0);
+        let mood_defs: &[(&str, &str, &str, Color32, Color32)] = &[
+            ("ambient",      "🌙  Ambient",      "Deep reverb · slow drift · harmonic pads",
+                Color32::from_rgb(0, 95, 175),  Color32::from_rgb(60, 150, 255)),
+            ("rhythmic",     "⚡  Rhythmic",     "Pulsing energy · granular · percussive",
+                Color32::from_rgb(155, 115, 0), Color32::from_rgb(240, 185, 30)),
+            ("experimental", "🔬  Experimental", "Glitch · microtonal · unexpected",
+                Color32::from_rgb(100, 0, 165), Color32::from_rgb(185, 80, 255)),
+        ];
+        for (mood_key, label, desc, active_fill, accent) in mood_defs.iter() {
+            let selected = arr_mood == *mood_key;
+            let fill = if selected { *active_fill } else { Color32::from_rgb(16, 16, 32) };
+            let border_col = if selected { *accent } else { Color32::from_rgb(38, 40, 68) };
+            let border_w = if selected { 1.5 } else { 1.0 };
+            let frame = egui::Frame::none()
+                .fill(fill)
+                .stroke(egui::Stroke::new(border_w, border_col))
+                .inner_margin(egui::Margin::symmetric(10.0, 7.0))
+                .rounding(egui::Rounding::same(7.0));
+            let resp = frame.show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(*label).color(Color32::WHITE).size(12.5).strong());
+                    if selected {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(RichText::new("●").color(*accent).size(10.0));
+                        });
                     }
-                } else {
-                    Color32::from_rgb(30, 30, 50)
-                };
-                let tooltip = match *mood_key {
-                    "ambient"      => "Slow drift, deep reverb, harmonic pads — peaceful and meditative",
-                    "rhythmic"     => "Pulsing, granular, FM — driven rhythmic energy and percussive textures",
-                    _              => "Glitch, spectral, microtonal — unexpected and experimental combinations",
-                };
-                if ui.add(Button::new(RichText::new(*label).color(Color32::WHITE).size(11.0))
-                    .fill(col).min_size(Vec2::new(88.0, 26.0))).on_hover_text(tooltip).clicked() {
-                    let mut st = state.lock();
-                    st.arr_mood = mood_key.to_string();
-                    // If AUTO is playing, regenerate immediately with new mood
-                    if st.auto_mode {
-                        let seed = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .subsec_nanos() as u64;
-                        st.scenes = generate_song(mood_key, seed);
-                        st.arr_elapsed = 0.0;
-                    }
+                });
+                ui.label(RichText::new(*desc).color(GRAY_HINT).size(10.0));
+            }).response;
+            if resp.interact(Sense::click()).clicked() {
+                let mut st = state.lock();
+                st.arr_mood = mood_key.to_string();
+                if st.auto_mode {
+                    let seed = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_nanos() as u64;
+                    st.scenes = generate_song(mood_key, seed);
+                    st.arr_elapsed = 0.0;
                 }
             }
-        });
+            ui.add_space(4.0);
+        }
     }
     ui.add_space(8.0);
     ui.separator();
@@ -1943,32 +2147,55 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
         let mut st = state.lock();
         let vol = st.config.audio.master_volume;
         let db_label = if vol > 0.001 {
-            format!("Vol ({:.1} dB)", 20.0 * vol.log10())
+            format!("{:.1} dB", 20.0 * vol.log10())
         } else {
-            "Vol (-∞ dB)".to_string()
+            "-∞ dB".to_string()
         };
-        ui.label(RichText::new("VOLUME").color(Color32::WHITE).strong());
-        ui.add(Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text(db_label))
-            .on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            let pause_label = if st.paused { "▶  RESUME" } else { "⏸  PAUSE" };
-            let pause_color = if st.paused { Color32::from_rgb(0, 140, 50) } else { Color32::from_rgb(0, 90, 160) };
-            if ui.add(Button::new(RichText::new(pause_label).color(Color32::WHITE).strong())
-                .fill(pause_color)
-                .min_size(Vec2::new(200.0, 36.0)))
-                .on_hover_text("Pause or resume audio and the simulation. Shortcut: Space bar.")
+        egui::Frame::none()
+            .fill(Color32::from_rgb(10, 12, 26))
+            .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+            .rounding(egui::Rounding::same(8.0))
+            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(28, 35, 65)))
+            .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("🔊  VOLUME").color(Color32::WHITE).strong().size(12.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(RichText::new(&db_label).color(AMBER).size(11.0));
+                });
+            });
+            ui.add(Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text(""))
+                .on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                let pause_label = if st.paused { "▶  RESUME" } else { "⏸  PAUSE" };
+                let (pause_fill, pause_stroke) = if st.paused {
+                    (Color32::from_rgb(18, 135, 65), Color32::from_rgb(60, 220, 110))
+                } else {
+                    (Color32::from_rgb(15, 90, 165), Color32::from_rgb(60, 160, 255))
+                };
+                let avail = ui.available_width();
+                if ui.add(
+                    Button::new(RichText::new(pause_label).color(Color32::WHITE).strong().size(13.0))
+                        .fill(pause_fill)
+                        .stroke(egui::Stroke::new(1.5, pause_stroke))
+                        .min_size(Vec2::new(avail - 60.0, 36.0)),
+                )
+                .on_hover_text("Pause or resume. Shortcut: Space bar.")
                 .clicked() {
-                st.paused = !st.paused;
-            }
-            let perf_color = if st.perf_mode { Color32::from_rgb(180, 80, 0) } else { Color32::from_rgb(40, 40, 70) };
-            if ui.add(Button::new(RichText::new("PERF").color(Color32::WHITE).strong())
-                .fill(perf_color)
-                .min_size(Vec2::new(60.0, 36.0)))
-                .on_hover_text("Performance mode: fullscreen phase portrait with no controls. Press F to toggle.")
+                    st.paused = !st.paused;
+                }
+                let perf_fill = if st.perf_mode { Color32::from_rgb(175, 80, 0) } else { Color32::from_rgb(24, 24, 44) };
+                if ui.add(
+                    Button::new(RichText::new("⛶").color(Color32::WHITE).size(16.0))
+                        .fill(perf_fill)
+                        .min_size(Vec2::new(50.0, 36.0)),
+                )
+                .on_hover_text("Performance mode: fullscreen phase portrait. Press F to toggle.")
                 .clicked() {
-                st.perf_mode = !st.perf_mode;
-            }
+                    st.perf_mode = !st.perf_mode;
+                }
+            });
         });
     }
     ui.add_space(8.0);
@@ -1976,26 +2203,51 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
     ui.add_space(4.0);
 
     // ---- MACROS ----
-    ui.label(RichText::new("MACROS").color(CYAN).strong().size(13.0));
-    ui.add_space(4.0);
-    {
-        let mut st = state.lock();
-        ui.add(Slider::new(&mut st.macro_chaos, 0.0..=1.0).text("Chaos"))
-            .on_hover_text("How unpredictable and wild the sound is. At max, the attractor is in a fully chaotic regime — pitch leaps are large and seemingly random. At zero, the system settles into a predictable cycle.");
-        ui.add(Slider::new(&mut st.macro_space, 0.0..=1.0).text("Space"))
-            .on_hover_text("Depth, reverb, and dimension. Max = vast cavernous room with long reverb tails. Zero = completely dry, close, and intimate — like you're right next to the source.");
-        ui.add(Slider::new(&mut st.macro_rhythm, 0.0..=1.0).text("Rhythm"))
-            .on_hover_text("Punchiness and attack. Zero = slow pad-like attack that fades in gently. Max = percussive, instant attack with tight, rhythmic energy.");
-        ui.add(Slider::new(&mut st.macro_warmth, 0.0..=1.0).text("Warmth"))
-            .on_hover_text("Tonal color. Zero = bright, clear, full bandwidth sound. Max = filtered, saturation-rich, low-frequency emphasis — dark and warm like analog tape.");
+    egui::Frame::none()
+        .fill(Color32::from_rgb(10, 12, 26))
+        .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+        .rounding(egui::Rounding::same(8.0))
+        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(28, 35, 65)))
+        .show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.label(RichText::new("MACROS").color(CYAN).strong().size(13.0));
+        ui.label(RichText::new("Adjust these four knobs — everything else follows").color(GRAY_HINT).size(10.0).italics());
         ui.add_space(6.0);
-        ui.checkbox(&mut st.macro_walk_enabled, RichText::new("Evolve (random walk macros)").color(Color32::WHITE))
-            .on_hover_text("Enable automatic Brownian-motion drift of all four macro knobs. The instrument slowly explores the parameter space on its own — leave it running and the sound will never be exactly the same twice.");
+        let mut st = state.lock();
+        // Chaos — orange/red
+        ui.label(RichText::new("🔥  Chaos").color(Color32::from_rgb(235, 110, 45)).size(11.5).strong());
+        ui.add(Slider::new(&mut st.macro_chaos, 0.0..=1.0).text(""))
+            .on_hover_text("How unpredictable and wild the sound is. At max, the attractor is fully chaotic — pitch leaps are large and seemingly random. At zero, it settles into a predictable cycle.");
+        ui.add_space(4.0);
+        // Space — blue
+        ui.label(RichText::new("🌌  Space").color(Color32::from_rgb(80, 160, 255)).size(11.5).strong());
+        ui.add(Slider::new(&mut st.macro_space, 0.0..=1.0).text(""))
+            .on_hover_text("Depth, reverb, and dimension. Max = vast cavernous room. Zero = completely dry and intimate.");
+        ui.add_space(4.0);
+        // Rhythm — green
+        ui.label(RichText::new("⚡  Rhythm").color(Color32::from_rgb(55, 210, 120)).size(11.5).strong());
+        ui.add(Slider::new(&mut st.macro_rhythm, 0.0..=1.0).text(""))
+            .on_hover_text("Punchiness and attack. Zero = slow pad-like fade in. Max = percussive, tight, rhythmic energy.");
+        ui.add_space(4.0);
+        // Warmth — amber
+        ui.label(RichText::new("🌅  Warmth").color(AMBER).size(11.5).strong());
+        ui.add(Slider::new(&mut st.macro_warmth, 0.0..=1.0).text(""))
+            .on_hover_text("Tonal color. Zero = bright, clear, full bandwidth. Max = filtered, saturated, dark and warm like analog tape.");
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(4.0);
+        let evolve_col = if st.macro_walk_enabled { GREEN_ACC } else { GRAY_HINT };
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut st.macro_walk_enabled, "");
+            ui.label(RichText::new("Evolve  (auto-drift macros)").color(evolve_col).size(11.5))
+                .on_hover_text("Brownian-motion drift of all four macros — leave it running and the sound slowly explores on its own.");
+        });
         if st.macro_walk_enabled {
-            ui.add(Slider::new(&mut st.macro_walk_rate, 0.01..=0.5).text("Walk speed"))
-                .on_hover_text("How quickly the macros drift. Low = glacial slow evolution over minutes. High = restless, rapid shifting every few seconds.");
+            ui.add_space(2.0);
+            ui.add(Slider::new(&mut st.macro_walk_rate, 0.01..=0.5).text("Speed"))
+                .on_hover_text("How quickly the macros drift. Low = glacial. High = restless, rapid shifting.");
         }
-    }
+    });
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(4.0);
@@ -2014,33 +2266,54 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
         for preset in PRESETS.iter().take(show_count) {
             if preset.category != last_cat {
                 last_cat = preset.category;
-                ui.add_space(2.0);
-                ui.label(RichText::new(format!("— {} —", preset.category.to_uppercase()))
-                    .color(GRAY_HINT).size(10.0));
-                ui.add_space(2.0);
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("  {}", preset.category.to_uppercase()))
+                        .color(GRAY_HINT).size(10.0).strong());
+                    let avail = ui.available_width();
+                    let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(avail - 4.0, 1.0), Sense::hover());
+                    ui.painter().rect_filled(sep_rect, 0.0, Color32::from_rgb(35, 38, 65));
+                });
+                ui.add_space(3.0);
             }
             let is_selected = selected == preset.name;
             let pc = preset.color;
-            let (stroke_color, bg_color, name_color) = if is_selected {
-                // Selected: visible tinted background, bright name, colored border
-                (pc, Color32::from_rgba_premultiplied(
-                    (pc.r() as u16 * 60 / 255) as u8,
-                    (pc.g() as u16 * 60 / 255) as u8,
-                    (pc.b() as u16 * 60 / 255) as u8,
-                    255
-                ), pc)
+            let bg_color = if is_selected {
+                Color32::from_rgba_premultiplied(
+                    (pc.r() as u16 * 55 / 255) as u8,
+                    (pc.g() as u16 * 55 / 255) as u8,
+                    (pc.b() as u16 * 55 / 255) as u8,
+                    255,
+                )
             } else {
-                (Color32::from_rgb(50, 50, 80), Color32::from_rgb(18, 18, 30), Color32::WHITE)
+                Color32::from_rgb(14, 14, 26)
             };
+            let border_w = if is_selected { 1.5 } else { 1.0 };
+            let border_col = if is_selected { pc } else { Color32::from_rgb(34, 36, 64) };
             let card = egui::Frame::none()
                 .fill(bg_color)
-                .stroke(Stroke::new(if is_selected { 2.0 } else { 1.0 }, stroke_color))
-                .inner_margin(egui::Margin::same(6.0))
-                .rounding(egui::Rounding::same(4.0));
+                .stroke(Stroke::new(border_w, border_col))
+                .inner_margin(egui::Margin::symmetric(0.0, 5.0))
+                .rounding(egui::Rounding::same(6.0));
             let response = card.show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
-                ui.label(RichText::new(preset.name).strong().color(name_color).size(12.0));
-                ui.label(RichText::new(preset.description).italics().color(GRAY_HINT).size(10.0));
+                ui.horizontal(|ui| {
+                    // Colored left accent strip
+                    let strip_h = 34.0;
+                    let (strip_rect, _) = ui.allocate_exact_size(Vec2::new(5.0, strip_h), Sense::hover());
+                    let strip_col = if is_selected {
+                        pc
+                    } else {
+                        Color32::from_rgba_premultiplied(pc.r() / 3, pc.g() / 3, pc.b() / 3, 200)
+                    };
+                    ui.painter().rect_filled(strip_rect, egui::Rounding::same(3.0), strip_col);
+                    ui.add_space(7.0);
+                    ui.vertical(|ui| {
+                        let name_col = if is_selected { pc } else { Color32::WHITE };
+                        ui.label(RichText::new(preset.name).strong().color(name_col).size(12.0));
+                        ui.label(RichText::new(preset.description).italics().color(GRAY_HINT).size(10.0));
+                    });
+                });
             }).response;
             if response.interact(Sense::click()).clicked() {
                 let mut st = state.lock();
@@ -2049,24 +2322,27 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
                 st.system_changed = true;
                 st.mode_changed = true;
             }
-            ui.add_space(2.0);
+            ui.add_space(3.0);
         }
 
         if !show_all {
             ui.add_space(4.0);
-            if ui.add(Button::new(RichText::new(format!("Show all {}...", PRESETS.len()))
-                .color(CYAN).size(11.0))
-                .fill(Color32::from_rgb(25, 25, 45))
-                .min_size(Vec2::new(ui.available_width(), 26.0))
+            if ui.add(
+                Button::new(RichText::new(format!("Show all {} presets ▾", PRESETS.len()))
+                    .color(CYAN).size(11.0))
+                    .fill(Color32::from_rgb(14, 18, 36))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(40, 60, 110)))
+                    .min_size(Vec2::new(ui.available_width(), 28.0)),
             ).clicked() {
                 state.lock().simple_show_all_presets = true;
             }
         } else {
             ui.add_space(4.0);
-            if ui.add(Button::new(RichText::new("Show less")
-                .color(GRAY_HINT).size(11.0))
-                .fill(Color32::from_rgb(25, 25, 45))
-                .min_size(Vec2::new(ui.available_width(), 26.0))
+            if ui.add(
+                Button::new(RichText::new("Show less ▴").color(GRAY_HINT).size(11.0))
+                    .fill(Color32::from_rgb(14, 18, 36))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(35, 38, 65)))
+                    .min_size(Vec2::new(ui.available_width(), 28.0)),
             ).clicked() {
                 state.lock().simple_show_all_presets = false;
             }
@@ -2790,30 +3066,37 @@ fn draw_phase_portrait(
         painter.circle_filled(pos, 5.0, Color32::WHITE);
     }
 
-    // Corner labels
+    // Corner info overlay — semi-transparent backdrop for readability
+    let info_bg = egui::Rect::from_min_size(
+        rect.left_top() + Vec2::new(6.0, 6.0),
+        Vec2::new(210.0, 56.0),
+    );
+    painter.rect_filled(info_bg, 6.0, Color32::from_rgba_premultiplied(8, 8, 20, 160));
+
+    let sys_display = system_display_name(system_name);
     painter.text(
-        rect.left_top() + Vec2::new(8.0, 8.0),
+        rect.left_top() + Vec2::new(12.0, 10.0),
         Align2::LEFT_TOP,
-        format!("System: {}", system_name),
-        FontId::proportional(12.0),
-        Color32::from_rgb(120, 140, 180),
+        sys_display,
+        FontId::proportional(12.5),
+        Color32::from_rgb(140, 195, 255),
     );
     painter.text(
-        rect.left_top() + Vec2::new(8.0, 24.0),
+        rect.left_top() + Vec2::new(12.0, 26.0),
         Align2::LEFT_TOP,
-        format!("Mode: {}", mode_name),
-        FontId::proportional(12.0),
-        Color32::from_rgb(100, 120, 160),
+        format!("mode: {}", mode_name),
+        FontId::proportional(11.0),
+        Color32::from_rgb(100, 160, 220),
     );
 
     // Projection label
-    let proj_label = match projection { 1 => "XZ Projection", 2 => "YZ Projection", _ => "XY Projection" };
+    let proj_label = match projection { 1 => "XZ  plane", 2 => "YZ  plane", _ => "XY  plane" };
     painter.text(
-        rect.left_top() + Vec2::new(8.0, 40.0),
+        rect.left_top() + Vec2::new(12.0, 42.0),
         Align2::LEFT_TOP,
         proj_label,
-        FontId::proportional(11.0),
-        Color32::from_rgb(80, 100, 160),
+        FontId::proportional(10.5),
+        Color32::from_rgb(70, 110, 175),
     );
 
     // Derivative arrow at current position
@@ -2839,13 +3122,19 @@ fn draw_phase_portrait(
         painter.text(eq_pos, Align2::LEFT_BOTTOM, eq_text, FontId::monospace(10.0), Color32::from_rgba_premultiplied(150, 180, 255, 180));
     }
 
-    // State values
+    // State values — right side with subtle background
     if !current_state.is_empty() {
         let var_names = dim_names(system_name);
-        for (i, (&val, name)) in current_state.iter().zip(var_names.iter()).enumerate().take(6) {
+        let n_vars = current_state.len().min(6);
+        let state_bg = egui::Rect::from_min_size(
+            rect.right_top() + Vec2::new(-120.0, 6.0),
+            Vec2::new(114.0, 8.0 + n_vars as f32 * 15.0),
+        );
+        painter.rect_filled(state_bg, 6.0, Color32::from_rgba_premultiplied(8, 8, 20, 150));
+        for (i, (&val, name)) in current_state.iter().zip(var_names.iter()).enumerate().take(n_vars) {
             let text = format!("{} = {:+.3}", name, val);
-            let pos = rect.right_top() + Vec2::new(-8.0, 8.0 + i as f32 * 14.0);
-            painter.text(pos, Align2::RIGHT_TOP, text, FontId::monospace(10.0), Color32::from_rgba_premultiplied(100, 200, 100, 200));
+            let pos = rect.right_top() + Vec2::new(-10.0, 12.0 + i as f32 * 15.0);
+            painter.text(pos, Align2::RIGHT_TOP, text, FontId::monospace(10.5), Color32::from_rgba_premultiplied(80, 210, 130, 220));
         }
     }
 }
@@ -3258,24 +3547,40 @@ fn draw_waveform(ui: &mut Ui, waveform: &Arc<Mutex<Vec<f32>>>) {
     }
 
     let cy = rect.center().y;
+
+    // Subtle grid lines
+    for i in 1..4 {
+        let frac = i as f32 / 4.0;
+        let gy = rect.top() + frac * rect.height();
+        painter.line_segment(
+            [Pos2::new(rect.left(), gy), Pos2::new(rect.right(), gy)],
+            Stroke::new(0.5, Color32::from_rgba_premultiplied(30, 45, 70, 60)),
+        );
+    }
+    // Zero line
     painter.line_segment(
         [Pos2::new(rect.left(), cy), Pos2::new(rect.right(), cy)],
-        Stroke::new(1.0, Color32::from_rgba_premultiplied(40, 60, 40, 100)),
+        Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 80, 130, 120)),
     );
 
     let n = samples.len();
     let w = rect.width();
 
-    let neon_green = Color32::from_rgb(0, 255, 100);
-
     let pts: Vec<Pos2> = samples.iter().enumerate().map(|(i, &s)| {
         let x = rect.left() + (i as f32 / n as f32) * w;
-        let y = cy - s.clamp(-1.0, 1.0) * (rect.height() * 0.45);
+        let y = cy - s.clamp(-1.0, 1.0) * (rect.height() * 0.42);
         Pos2::new(x, y)
     }).collect();
 
-    for w in pts.windows(2) {
-        painter.line_segment([w[0], w[1]], Stroke::new(1.5, neon_green));
+    // Glow pass (wide, dim)
+    for seg in pts.windows(2) {
+        painter.line_segment([seg[0], seg[1]], Stroke::new(4.0,
+            Color32::from_rgba_premultiplied(0, 200, 100, 30)));
+    }
+    // Core pass
+    let neon_green = Color32::from_rgb(0, 245, 115);
+    for seg in pts.windows(2) {
+        painter.line_segment([seg[0], seg[1]], Stroke::new(1.5, neon_green));
     }
 
     let rms = (samples.iter().map(|&s| s * s).sum::<f32>() / n as f32).sqrt();
@@ -3535,10 +3840,10 @@ fn draw_math_view(
     let x = rect.left() + 20.0;
 
     painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
-        format!("System: {}", system_name),
-        FontId::proportional(18.0),
-        Color32::from_rgb(100, 180, 255));
-    y += 30.0;
+        system_display_name(system_name),
+        FontId::proportional(20.0),
+        Color32::from_rgb(120, 195, 255));
+    y += 32.0;
 
     let eq_lines = equation_lines(system_name);
     painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
