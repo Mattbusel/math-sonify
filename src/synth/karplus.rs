@@ -55,7 +55,10 @@ impl KarplusStrong {
         for i in 0..len {
             rng = rng.wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1_442_695_040_888_963_407);
-            self.buf[i] = (rng >> 33) as f32 / u32::MAX as f32 * 2.0 - 1.0;
+            // >> 33 yields 31 bits; divide by 2^31 for unbiased [-1, 1) range.
+            // Dividing by u32::MAX (≈ 2^32) would cap the max at ~0.5, producing
+            // DC-biased initial excitation that clicks at note onset.
+            self.buf[i] = (rng >> 33) as f32 / (1u64 << 31) as f32 * 2.0 - 1.0;
         }
         for i in len..self.buf.len() { self.buf[i] = 0.0; }
         self.write = 0;

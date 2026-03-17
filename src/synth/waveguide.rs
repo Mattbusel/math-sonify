@@ -71,7 +71,8 @@ impl WaveguideString {
         self.noise_seed = self.noise_seed
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
-        (self.noise_seed >> 33) as f32 / u32::MAX as f32 * 2.0 - 1.0
+        // >> 33 yields 31 bits; divide by 2^31 for unbiased [-1, 1) range.
+        (self.noise_seed >> 33) as f32 / (1u64 << 31) as f32 * 2.0 - 1.0
     }
 
     /// Read from a circular delay buffer at a fractional position behind `write`.
