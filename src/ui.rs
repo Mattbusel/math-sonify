@@ -1298,11 +1298,6 @@ pub fn draw_ui(
     });
 }
 
-fn draw_studio_tab(ui: &mut egui::Ui, state: &SharedState) {
-    ui.label("Studio tab — coming soon");
-    let _ = state;
-}
-
 // ---------------------------------------------------------------------------
 // Advanced panel — all the old controls
 // ---------------------------------------------------------------------------
@@ -3089,6 +3084,340 @@ fn build_bifurc_system(
         ("kuramoto", "coupling") => Box::new(Kuramoto::new(kuramoto.n_oscillators, pval)),
         _ => Box::new(Lorenz::new(lorenz.sigma, pval.clamp(20.0, 50.0), lorenz.beta)),
     }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 📼 STUDIO TAB — snippet capture, library, and song sequencer
+// ────────────────────────────────────────────────────────────────────────────
+fn draw_studio_tab(ui: &mut Ui, state: &SharedState) {
+    let avail = ui.available_size();
+    let lib_w = 260.0_f32.min(avail.x * 0.38);
+    let grid_w = (avail.x - lib_w - 10.0).max(100.0);
+
+    ui.horizontal_top(|ui| {
+        // ── LEFT: LIBRARY ────────────────────────────────────────────────
+        egui::Frame::none()
+            .fill(Color32::from_rgb(10, 12, 26))
+            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(40, 50, 80)))
+            .rounding(egui::Rounding::same(6.0))
+            .inner_margin(egui::Margin::same(8.0))
+            .show(ui, |ui| {
+                ui.set_min_width(lib_w);
+                ui.set_max_width(lib_w);
+
+                ui.label(RichText::new("📼  LIBRARY").color(Color32::WHITE).strong().size(13.0));
+                ui.add_space(4.0);
+
+                // Capture duration selector
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Duration:").color(GRAY_HINT).size(11.0));
+                    let cur_secs = state.lock().snippet_capture_secs;
+                    for dur in [4.0_f32, 8.0, 16.0, 32.0] {
+                        let selected = (cur_secs - dur).abs() < 0.1;
+                        let fill = if selected { Color32::from_rgb(0, 100, 200) } else { Color32::from_rgb(25, 28, 50) };
+                        if ui.add(Button::new(RichText::new(format!("{}s", dur as u32)).size(11.0).color(Color32::WHITE))
+                            .fill(fill).min_size(Vec2::new(30.0, 22.0))).clicked() {
+                            state.lock().snippet_capture_secs = dur;
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+
+                // Capture button
+                let (cap_secs, sr, status) = {
+                    let st = state.lock();
+                    (st.snippet_capture_secs, st.sample_rate, st.snippet_status.clone())
+                };
+                let clip_buf = state.lock().clip_buffer.clone();
+                if ui.add(
+                    Button::new(RichText::new("⏺  Capture Snippet").color(Color32::WHITE).size(12.5))
+                        .fill(Color32::from_rgb(160, 25, 45))
+                        .min_size(Vec2::new(lib_w - 16.0, 36.0))
+                ).on_hover_text("Save the last N seconds of live audio as a snippet you can arrange into a song.")
+                .clicked() {
+                    match capture_snippet(&clip_buf, sr, cap_secs) {
+                        Ok((path, samples)) => {
+                            let n = state.lock().snippets.len() + 1;
+                            let snip = Snippet::from_samples(format!("Snippet {}", n), path, samples, sr);
+                            let mut st = state.lock();
+                            let idx = st.snippets.len();
+                            st.snippets.push(snip);
+                            st.snippet_selected = Some(idx);
+                            st.snippet_status = format!("✓ Captured {:.0}s snippet", cap_secs);
+                        }
+                        Err(e) => {
+                            state.lock().snippet_status = format!("✗ {}", e);
+                        }
+                    }
+                }
+                if !status.is_empty() {
+                    let col = if status.starts_with('✓') { Color32::from_rgb(80, 220, 120) } else { Color32::from_rgb(220, 80, 80) };
+                    ui.label(RichText::new(&status).size(10.0).color(col));
+                }
+
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // Snippet list
+                let n_snips = state.lock().snippets.len();
+                if n_snips == 0 {
+                    ui.label(RichText::new("No snippets yet.\nPlay some audio, then press\n⏺ Capture to save it.")
+                        .color(GRAY_HINT).size(11.0).italics());
+                } else {
+                    let selected_idx = state.lock().snippet_selected;
+                    egui::ScrollArea::vertical()
+                        .id_source("snippet_lib_scroll")
+                        .max_height(avail.y - 165.0)
+                        .show(ui, |ui| {
+                        let mut delete_idx: Option<usize> = None;
+                        for i in 0..n_snips {
+                            let (name, dur, cidx, thumb) = {
+                                let st = state.lock();
+                                let s = &st.snippets[i];
+                                (s.name.clone(), s.duration_secs, s.color_idx, s.thumb.clone())
+                            };
+                            let is_sel = selected_idx == Some(i);
+                            let accent = Snippet::color(cidx);
+                            let card_fill = if is_sel { Color32::from_rgb(20, 45, 80) } else { Color32::from_rgb(14, 16, 32) };
+
+                            let resp = egui::Frame::none()
+                                .fill(card_fill)
+                                .stroke(egui::Stroke::new(if is_sel { 1.5 } else { 0.5 },
+                                    if is_sel { accent } else { Color32::from_rgb(38, 42, 68) }))
+                                .rounding(egui::Rounding::same(5.0))
+                                .inner_margin(egui::Margin::symmetric(6.0, 4.0))
+                                .show(ui, |ui| {
+                                    ui.set_min_width(lib_w - 20.0);
+                                    ui.horizontal(|ui| {
+                                        let (strip, _) = ui.allocate_exact_size(Vec2::new(4.0, 38.0), Sense::hover());
+                                        ui.painter().rect_filled(strip, egui::Rounding::same(2.0), accent);
+                                        ui.add_space(4.0);
+                                        ui.vertical(|ui| {
+                                            let mut n2 = name.clone();
+                                            if ui.add(egui::TextEdit::singleline(&mut n2)
+                                                .font(egui::TextStyle::Small)
+                                                .desired_width(lib_w - 90.0)
+                                                .frame(false)).changed() {
+                                                state.lock().snippets[i].name = n2;
+                                            }
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new(format!("{:.1}s", dur)).color(GRAY_HINT).size(10.0));
+                                                let (wr, _) = ui.allocate_exact_size(Vec2::new(76.0, 14.0), Sense::hover());
+                                                let p = ui.painter();
+                                                p.rect_filled(wr, egui::Rounding::same(2.0), Color32::from_rgb(7, 9, 18));
+                                                for (ti, &peak) in thumb.iter().enumerate() {
+                                                    let x = wr.left() + ti as f32 * wr.width() / thumb.len() as f32;
+                                                    let h = peak.min(1.0) * wr.height() * 0.5;
+                                                    let cy = wr.center().y;
+                                                    p.line_segment(
+                                                        [Pos2::new(x, cy - h), Pos2::new(x, cy + h)],
+                                                        egui::Stroke::new(1.0, accent.linear_multiply(0.75)),
+                                                    );
+                                                }
+                                            });
+                                        });
+                                        if ui.add(Button::new(RichText::new("✕").size(10.0)
+                                            .color(Color32::from_rgb(150, 80, 80)))
+                                            .fill(Color32::TRANSPARENT).frame(false)
+                                            .min_size(Vec2::new(16.0, 16.0))).clicked() {
+                                            delete_idx = Some(i);
+                                        }
+                                    });
+                                });
+
+                            if resp.response.interact(Sense::click()).clicked() {
+                                state.lock().snippet_selected = Some(i);
+                            }
+                            ui.add_space(3.0);
+                        }
+
+                        // Handle deletion outside the loop
+                        if let Some(di) = delete_idx {
+                            let mut st = state.lock();
+                            st.snippets.remove(di);
+                            for slot in &mut st.snippet_slots {
+                                if let Some(idx) = *slot {
+                                    if idx == di { *slot = None; }
+                                    else if idx > di { *slot = Some(idx - 1); }
+                                }
+                            }
+                            if st.snippet_selected == Some(di) { st.snippet_selected = None; }
+                            else if let Some(sel) = st.snippet_selected {
+                                if sel > di { st.snippet_selected = Some(sel - 1); }
+                            }
+                        }
+                    });
+                }
+            }); // end library panel
+
+        ui.add_space(6.0);
+
+        // ── RIGHT: SONG GRID ─────────────────────────────────────────────
+        egui::Frame::none()
+            .fill(Color32::from_rgb(10, 12, 26))
+            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(40, 50, 80)))
+            .rounding(egui::Rounding::same(6.0))
+            .inner_margin(egui::Margin::same(8.0))
+            .show(ui, |ui| {
+                ui.set_min_width(grid_w);
+
+                ui.label(RichText::new("🎵  SONG GRID").color(Color32::WHITE).strong().size(13.0));
+                ui.add_space(4.0);
+
+                let (song_playing, song_loop, vol) = {
+                    let st = state.lock();
+                    (st.song_playing, st.song_loop, st.snippet_volume)
+                };
+
+                // Transport bar
+                ui.horizontal(|ui| {
+                    let play_label = if song_playing { "⏹  Stop" } else { "▶  Play Song" };
+                    let play_fill = if song_playing { Color32::from_rgb(160, 25, 25) } else { Color32::from_rgb(20, 140, 55) };
+                    if ui.add(Button::new(RichText::new(play_label).color(Color32::WHITE).size(12.0))
+                        .fill(play_fill)
+                        .min_size(Vec2::new(110.0, 30.0))).clicked() {
+                        let mut st = state.lock();
+                        if st.song_playing {
+                            st.song_playing = false;
+                            *st.snippet_pb.lock() = SnippetPlayback::idle();
+                        } else {
+                            let first = st.snippet_slots.iter().position(|s| s.is_some());
+                            if let Some(slot_i) = first {
+                                let snip_i = st.snippet_slots[slot_i].unwrap();
+                                if snip_i < st.snippets.len() {
+                                    let samples = (*st.snippets[snip_i].samples).clone();
+                                    let v = st.snippet_volume;
+                                    *st.snippet_pb.lock() = SnippetPlayback::play(samples, v);
+                                    st.song_play_slot = slot_i;
+                                    st.song_playing = true;
+                                }
+                            }
+                        }
+                    }
+                    let loop_fill = if song_loop { Color32::from_rgb(0, 90, 170) } else { Color32::from_rgb(25, 28, 50) };
+                    if ui.add(Button::new(RichText::new("↺").color(Color32::WHITE).size(12.0))
+                        .fill(loop_fill)
+                        .min_size(Vec2::new(32.0, 30.0))).on_hover_text("Loop the song").clicked() {
+                        state.lock().song_loop = !song_loop;
+                    }
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Vol").color(GRAY_HINT).size(11.0));
+                    let mut v = vol;
+                    if ui.add(Slider::new(&mut v, 0.0..=1.0).show_value(false).desired_width(70.0)).changed() {
+                        state.lock().snippet_volume = v;
+                    }
+                    ui.add_space(12.0);
+                    if ui.add(Button::new(RichText::new("Clear All").color(Color32::from_rgb(200,100,100)).size(11.0))
+                        .fill(Color32::from_rgb(22,14,14))
+                        .min_size(Vec2::new(70.0, 30.0))).clicked() {
+                        let mut st = state.lock();
+                        for s in &mut st.snippet_slots { *s = None; }
+                        st.song_playing = false;
+                        *st.snippet_pb.lock() = SnippetPlayback::idle();
+                    }
+                });
+
+                ui.add_space(3.0);
+                ui.label(RichText::new("Select a snippet in the library, then click a slot to place it. Right-click to clear a slot.")
+                    .size(10.0).color(GRAY_HINT).italics());
+                ui.add_space(6.0);
+
+                let (playing_slot, snip_sel) = {
+                    let st = state.lock();
+                    (if st.song_playing { Some(st.song_play_slot) } else { None }, st.snippet_selected)
+                };
+                let _ = snip_sel; // used below via state.lock()
+
+                egui::ScrollArea::vertical()
+                    .id_source("song_grid_scroll")
+                    .max_height(avail.y - 120.0)
+                    .show(ui, |ui| {
+                    let slot_w = (grid_w - 26.0) / 2.0;
+                    egui::Grid::new("song_grid")
+                        .num_columns(2)
+                        .spacing([6.0, 4.0])
+                        .show(ui, |ui| {
+                        for i in 0..32usize {
+                            let (slot_snip_opt, snip_name, snip_cidx, snip_thumb) = {
+                                let st = state.lock();
+                                if let Some(idx) = st.snippet_slots[i] {
+                                    if idx < st.snippets.len() {
+                                        let s = &st.snippets[idx];
+                                        (Some(idx), s.name.clone(), s.color_idx, s.thumb.clone())
+                                    } else { (None, String::new(), 0usize, Vec::new()) }
+                                } else { (None, String::new(), 0usize, Vec::new()) }
+                            };
+
+                            let is_playing = playing_slot == Some(i);
+                            let accent = if slot_snip_opt.is_some() { Snippet::color(snip_cidx) } else { Color32::from_rgb(40,44,70) };
+                            let fill = if is_playing { Color32::from_rgb(18, 80, 18) }
+                                       else if slot_snip_opt.is_some() { Color32::from_rgb(15, 19, 38) }
+                                       else { Color32::from_rgb(9, 10, 20) };
+                            let stroke_w = if is_playing { 2.0 } else { 0.8 };
+                            let stroke_col = if is_playing { Color32::from_rgb(50, 240, 90) }
+                                            else if slot_snip_opt.is_some() { accent }
+                                            else { Color32::from_rgb(28, 32, 52) };
+
+                            let resp = egui::Frame::none()
+                                .fill(fill)
+                                .stroke(egui::Stroke::new(stroke_w, stroke_col))
+                                .rounding(egui::Rounding::same(4.0))
+                                .inner_margin(egui::Margin::symmetric(5.0, 3.0))
+                                .show(ui, |ui| {
+                                    ui.set_min_width(slot_w);
+                                    ui.set_max_width(slot_w);
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(format!("{:02}", i + 1))
+                                            .color(if is_playing { Color32::from_rgb(50,240,90) } else { GRAY_HINT })
+                                            .size(10.0).monospace());
+                                        ui.add_space(3.0);
+                                        if slot_snip_opt.is_some() {
+                                            let (dot_r, _) = ui.allocate_exact_size(Vec2::new(7.0, 7.0), Sense::hover());
+                                            ui.painter().circle_filled(dot_r.center(), 3.0, accent);
+                                            ui.label(RichText::new(&snip_name).color(Color32::WHITE).size(10.5)
+                                                .truncate());
+                                            if !snip_thumb.is_empty() {
+                                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                    let (wr, _) = ui.allocate_exact_size(Vec2::new(44.0, 12.0), Sense::hover());
+                                                    ui.painter().rect_filled(wr, egui::Rounding::same(2.0), Color32::from_rgb(6,7,15));
+                                                    let np = snip_thumb.len();
+                                                    for (ti, &pk) in snip_thumb.iter().enumerate() {
+                                                        let x = wr.left() + ti as f32 * wr.width() / np as f32;
+                                                        let h = pk.min(1.0) * wr.height() * 0.45;
+                                                        let cy = wr.center().y;
+                                                        ui.painter().line_segment(
+                                                            [Pos2::new(x, cy-h), Pos2::new(x, cy+h)],
+                                                            egui::Stroke::new(1.0, accent.linear_multiply(0.6)));
+                                                    }
+                                                });
+                                            }
+                                        } else {
+                                            ui.label(RichText::new("— empty —").color(Color32::from_rgb(42,46,72)).size(10.0).italics());
+                                        }
+                                    });
+                                });
+
+                            // Left-click: assign selected snippet
+                            if resp.response.interact(Sense::click()).clicked() {
+                                let mut st = state.lock();
+                                if let Some(sel) = st.snippet_selected {
+                                    st.snippet_slots[i] = Some(sel);
+                                } else {
+                                    st.snippet_slots[i] = None;
+                                }
+                            }
+                            // Right-click: clear slot
+                            if resp.response.secondary_clicked() {
+                                state.lock().snippet_slots[i] = None;
+                            }
+
+                            if i % 2 == 1 { ui.end_row(); }
+                        }
+                    });
+                });
+            }); // end song grid panel
+    });
 }
 
 fn draw_bifurc_diagram(ui: &mut Ui, bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>, state: &SharedState) {
