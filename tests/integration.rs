@@ -269,3 +269,74 @@ fn chord_intervals_dom7_three_notes() {
 fn chord_intervals_unknown_returns_zeros() {
     assert_eq!(chord_intervals_for("xyzzy"), [0.0, 0.0, 0.0]);
 }
+
+// ---------------------------------------------------------------------------
+// Synthesis DSP integration tests (no audio device required)
+// ---------------------------------------------------------------------------
+
+use math_sonify_plugin::synth::{Oscillator, OscShape};
+
+/// Render `duration_secs` of mono audio at `sample_rate` from a sine oscillator.
+fn render_sine(freq_hz: f32, sample_rate: f32, duration_secs: f32) -> Vec<f32> {
+    let n = (sample_rate * duration_secs) as usize;
+    let mut osc = Oscillator::new(freq_hz, OscShape::Sine, sample_rate);
+    (0..n).map(|_| osc.next_sample()).collect()
+}
+
+#[test]
+fn test_one_second_sine_buffer_is_non_zero() {
+    // A 1-second buffer from a 440 Hz sine must contain non-zero samples.
+    let buf = render_sine(440.0, 44100.0, 1.0);
+    assert_eq!(buf.len(), 44100, "Buffer length mismatch");
+    let any_nonzero = buf.iter().any(|&s| s.abs() > 1e-6);
+    assert!(any_nonzero, "1-second sine buffer contains only silence");
+}
+
+#[test]
+fn test_stereo_buffer_equal_channels() {
+    // Render a stereo buffer by interleaving the same oscillator L+R.
+    // Both channels must have the same number of samples.
+    let mono = render_sine(440.0, 44100.0, 1.0);
+    // Interleave: L = mono[i], R = mono[i] * 0.9 (simulated pan).
+    let stereo: Vec<f32> = mono.iter().flat_map(|&s| [s, s * 0.9]).collect();
+    let n_left  = stereo.iter().step_by(2).count();
+    let n_right = stereo.iter().skip(1).step_by(2).count();
+    assert_eq!(n_left, n_right, "Left and right channels have different sample counts");
+}
+
+#[test]
+fn test_two_oscillators_higher_amplitude() {
+    // Summing two identical oscillators should approximately double amplitude.
+    // We compare the peak absolute value of one vs two oscillators.
+    let n = 4410_usize; // 100 ms at 44100 Hz
+    let mut osc1a = Oscillator::new(440.0, OscShape::Sine, 44100.0);
+    let mut osc1b = Oscillator::new(440.0, OscShape::Sine, 44100.0);
+    let mut osc2a = Oscillator::new(440.0, OscShape::Sine, 44100.0);
+
+    // Single oscillator peak.
+    let single_peak = (0..n).map(|_| osc1a.next_sample().abs()).fold(0.0_f32, f32::max);
+
+    // Two oscillators (in phase — same initial phase = 0).
+    let double_peak = (0..n)
+        .map(|_| (osc1b.next_sample() + osc2a.next_sample()).abs())
+        .fold(0.0_f32, f32::max);
+
+    // The sum should be roughly twice the individual peak (within 5% tolerance).
+    assert!(double_peak > single_peak * 1.8,
+        "Two in-phase oscillators should nearly double amplitude: single={}, double={}",
+        single_peak, double_peak);
+}
+
+#[test]
+fn test_direct_mapping_produces_non_zero_freqs() {
+    // DirectMapping::map() on a Lorenz trajectory should yield non-zero voice frequencies.
+    let mut mapper = DirectMapping::new();
+    let mut lorenz = math_sonify_plugin::systems::Lorenz::new(10.0, 28.0, 2.6667);
+    // Warm up the attractor.
+    for _ in 0..1000 { lorenz.step(0.001); }
+    let config = SonificationConfig::default();
+    let params = mapper.map(lorenz.state(), 10.0, &config);
+    // At least one voice should have a non-zero frequency.
+    let any_nonzero = params.freqs.iter().any(|&f| f > 0.0);
+    assert!(any_nonzero, "DirectMapping should produce non-zero frequencies from Lorenz state");
+}

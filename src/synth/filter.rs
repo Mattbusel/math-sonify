@@ -108,3 +108,82 @@ impl BiquadFilter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    /// Feed `n` samples of DC (value 1.0) through the filter and return the last output.
+    fn feed_dc(filt: &mut BiquadFilter, n: usize) -> f32 {
+        let mut out = 0.0;
+        for _ in 0..n { out = filt.process(1.0); }
+        out
+    }
+
+    /// Compute RMS of filter output for a pure sine at `freq_hz`.
+    fn sine_rms(filt: &mut BiquadFilter, freq_hz: f32, n: usize) -> f32 {
+        let mut sum_sq = 0.0f32;
+        let dt = std::f32::consts::TAU * freq_hz / SR;
+        for i in 0..n {
+            let x = (dt * i as f32).sin();
+            let y = filt.process(x);
+            sum_sq += y * y;
+        }
+        (sum_sq / n as f32).sqrt()
+    }
+
+    #[test]
+    fn test_low_pass_passes_dc() {
+        // A low-pass filter with a high cutoff should let DC through.
+        let mut filt = BiquadFilter::low_pass(10000.0, 0.707, SR);
+        let out = feed_dc(&mut filt, 8000);
+        assert!(out > 0.9, "Low-pass should pass DC (output near 1.0), got {}", out);
+    }
+
+    #[test]
+    fn test_low_pass_attenuates_high_freq() {
+        // A low-pass at 500 Hz should heavily attenuate a 10 kHz sine.
+        let mut filt = BiquadFilter::low_pass(500.0, 0.707, SR);
+        let rms = sine_rms(&mut filt, 10000.0, 8000);
+        assert!(rms < 0.1, "Low-pass at 500 Hz should attenuate 10 kHz, RMS={}", rms);
+    }
+
+    #[test]
+    fn test_band_pass_has_peak_at_center() {
+        // A band-pass filter should pass the center frequency better than far-off frequencies.
+        let center = 1000.0_f32;
+        let mut filt_center = BiquadFilter::band_pass(center, 2.0, SR);
+        let rms_center = sine_rms(&mut filt_center, center, 4000);
+
+        let mut filt_high = BiquadFilter::band_pass(center, 2.0, SR);
+        let rms_high = sine_rms(&mut filt_high, 10000.0, 4000);
+
+        assert!(rms_center > rms_high,
+            "Band-pass should pass center freq ({}) better than 10 kHz ({} vs {})",
+            center, rms_center, rms_high);
+    }
+
+    #[test]
+    fn test_filter_outputs_are_finite() {
+        // No input should ever produce NaN or Inf from a biquad filter.
+        let mut lp = BiquadFilter::low_pass(1000.0, 0.707, SR);
+        let mut bp = BiquadFilter::band_pass(1000.0, 2.0, SR);
+        for i in 0..8000 {
+            let x = (i as f32 * 0.1).sin() * 10.0; // intentionally large signal
+            assert!(lp.process(x).is_finite(), "LP output non-finite at sample {}", i);
+            assert!(bp.process(x).is_finite(), "BP output non-finite at sample {}", i);
+        }
+    }
+
+    #[test]
+    fn test_filter_nan_input_cleared() {
+        // A NaN input sample should not corrupt the filter permanently.
+        let mut filt = BiquadFilter::low_pass(1000.0, 0.707, SR);
+        let _ = filt.process(f32::NAN);
+        // After the NaN, normal input should produce finite output.
+        let out = filt.process(1.0);
+        assert!(out.is_finite(), "Filter should recover from NaN input, got {}", out);
+    }
+}

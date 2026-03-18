@@ -36,7 +36,10 @@ pub mod eq;
 
 pub use oscillator::{Oscillator, OscShape};
 pub use filter::BiquadFilter;
-// Freeverb is used by the plugin (src/plugin.rs) through this re-export.
+// Freeverb is used by the plugin lib (src/plugin.rs) via this re-export;
+// the standalone binary uses FdnReverb instead, so the compiler warns here
+// when building the binary target.
+#[allow(unused_imports)]
 pub use reverb::Freeverb;
 pub use fdn_reverb::FdnReverb;
 pub use delay::DelayLine;

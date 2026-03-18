@@ -36,6 +36,23 @@ impl DirectMapping {
     }
 }
 
+/// Map a normalized value `t ∈ [0,1]` to a frequency in the audible range [20, 20000] Hz.
+///
+/// Uses the configured scale and octave range. The returned value is guaranteed
+/// to be in `[base_frequency, base_frequency * 2^octave_range]`, which is always
+/// within [20 Hz, 20 000 Hz] for default config values.
+pub fn map_to_frequency(t: f32, base_hz: f32, octave_range: f32, scale: super::Scale) -> f32 {
+    super::quantize_to_scale(t.clamp(0.0, 1.0), base_hz, octave_range, scale)
+}
+
+/// Map a normalized state value to an amplitude in [0, 1].
+///
+/// Uses a linear mapping: `0.5 + 0.5 * t`, so the minimum amplitude is 0.5
+/// (always audible) and the maximum is 1.0. The result is clamped to [0, 1].
+pub fn map_to_amplitude(t: f32) -> f32 {
+    (0.5 + 0.5 * t).clamp(0.0, 1.0)
+}
+
 impl Sonification for DirectMapping {
     fn map(&mut self, state: &[f64], speed: f64, config: &SonificationConfig) -> AudioParams {
         let norm = self.normalize(state);
@@ -65,3 +82,66 @@ impl Sonification for DirectMapping {
         params
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sonification::Scale;
+
+    #[test]
+    fn test_map_to_frequency_in_audible_range() {
+        // For any t in [0, 1] the frequency must be in [20 Hz, 20 000 Hz].
+        let base = 220.0_f32;
+        let octave_range = 3.0_f32;
+        for i in 0..=100 {
+            let t = i as f32 / 100.0;
+            let f = map_to_frequency(t, base, octave_range, Scale::Pentatonic);
+            assert!(f >= 20.0 && f <= 20000.0,
+                "Frequency {} out of audible range at t={}", f, t);
+            assert!(f.is_finite(), "Frequency is non-finite at t={}", t);
+        }
+    }
+
+    #[test]
+    fn test_map_to_amplitude_in_unit_range() {
+        // map_to_amplitude must always return a value in [0, 1].
+        for i in 0..=100 {
+            let t = i as f32 / 100.0;
+            let a = map_to_amplitude(t);
+            assert!(a >= 0.0 && a <= 1.0, "Amplitude {} out of [0,1] at t={}", a, t);
+        }
+    }
+
+    #[test]
+    fn test_monotone_input_produces_monotone_frequency() {
+        // A strictly increasing sequence of normalized state values should yield
+        // a non-decreasing frequency sequence (scale quantization is monotone).
+        let base = 220.0_f32;
+        let octave_range = 3.0_f32;
+        let mut prev = 0.0_f32;
+        for i in 0..=20 {
+            let t = i as f32 / 20.0;
+            let f = map_to_frequency(t, base, octave_range, Scale::Pentatonic);
+            assert!(f >= prev, "Frequency not monotone: {} < {} at t={}", f, prev, t);
+            prev = f;
+        }
+    }
+
+    #[test]
+    fn test_direct_mapping_produces_valid_params() {
+        // Full DirectMapping::map() should return finite, non-negative frequencies.
+        let mut mapper = DirectMapping::new();
+        let state = vec![1.0_f64, 5.0, -3.0, 2.0];
+        let config = crate::config::SonificationConfig::default();
+        let params = mapper.map(&state, 10.0, &config);
+        for (i, &f) in params.freqs.iter().enumerate() {
+            assert!(f >= 0.0 && f.is_finite(),
+                "Voice {} frequency {} is invalid", i, f);
+        }
+        for (i, &a) in params.amps.iter().enumerate() {
+            assert!(a >= 0.0 && a <= 1.0,
+                "Voice {} amplitude {} out of [0,1]", i, a);
+        }
+    }
+}
+

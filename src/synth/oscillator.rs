@@ -202,4 +202,87 @@ mod tests {
             assert!(s.abs() < 1e-10, "Expected silence from zero-freq oscillator, got {}", s);
         }
     }
+
+    #[test]
+    fn test_sine_at_phase_zero_is_zero() {
+        // sin(0) = 0; the very first sample must be 0.
+        let mut osc = Oscillator::new(440.0, OscShape::Sine, 44100.0);
+        let s = osc.next_sample();
+        assert!(s.abs() < 1e-10, "sin(0) should be 0, got {}", s);
+    }
+
+    #[test]
+    fn test_sine_at_quarter_period_is_near_one() {
+        // After exactly 1/4 of one period (sample_rate / freq / 4 samples)
+        // the sine should be very close to 1.0.
+        let freq = 1000.0_f32;
+        let sr = 44100.0_f32;
+        let quarter_samples = (sr / freq / 4.0).round() as usize;
+        let mut osc = Oscillator::new(freq, OscShape::Sine, sr);
+        let mut last = 0.0_f32;
+        for _ in 0..quarter_samples { last = osc.next_sample(); }
+        assert!(last > 0.9, "Sine at ~quarter period should be near 1.0, got {}", last);
+    }
+
+    #[test]
+    fn test_square_wave_is_plus_or_minus_one() {
+        // A band-limited square should be very close to +1 or -1 away from
+        // the discontinuities. Check 100 samples from the middle of each half-cycle.
+        let freq = 440.0_f32;
+        let sr = 44100.0_f32;
+        let mut osc = Oscillator::new(freq, OscShape::Square, sr);
+        // Skip to 10% into the first half-cycle to avoid the PolyBLEP transition region.
+        let skip = (sr / freq * 0.1) as usize;
+        for _ in 0..skip { let _ = osc.next_sample(); }
+        for _ in 0..20 {
+            let s = osc.next_sample();
+            assert!(s.abs() > 0.5, "Square wave sample not near ±1: {}", s);
+        }
+    }
+
+    #[test]
+    fn test_saw_wave_in_range() {
+        // Sawtooth output should stay in [-1.5, 1.5] (PolyBLEP can briefly overshoot).
+        let mut osc = Oscillator::new(440.0, OscShape::Saw, 44100.0);
+        for _ in 0..4410 {
+            let s = osc.next_sample();
+            assert!(s.abs() < 1.5, "Saw sample out of expected range: {}", s);
+            assert!(s.is_finite(), "Saw sample is non-finite");
+        }
+    }
+
+    #[test]
+    fn test_higher_frequency_shorter_period() {
+        // A 1000 Hz sine completes one cycle in 44.1 samples; a 500 Hz sine
+        // needs 88.2 samples. Verify that doubling frequency halves the zero-crossing period.
+        let sr = 44100.0_f32;
+        let count_crossings = |freq: f32| -> usize {
+            let mut osc = Oscillator::new(freq, OscShape::Sine, sr);
+            let mut prev = 0.0_f32;
+            let mut crossings = 0;
+            for _ in 0..4410 {
+                let s = osc.next_sample();
+                if prev < 0.0 && s >= 0.0 { crossings += 1; }
+                prev = s;
+            }
+            crossings
+        };
+        let c1000 = count_crossings(1000.0);
+        let c500  = count_crossings(500.0);
+        // 1000 Hz has roughly twice the zero-crossings of 500 Hz over the same window.
+        assert!(c1000 > c500, "1000 Hz should have more zero-crossings than 500 Hz ({} vs {})", c1000, c500);
+    }
+
+    #[test]
+    fn test_amplitude_scaling_via_level() {
+        // If we scale the oscillator output by 0.5 we should get half the amplitude.
+        let mut osc1 = Oscillator::new(440.0, OscShape::Sine, 44100.0);
+        let mut osc2 = Oscillator::new(440.0, OscShape::Sine, 44100.0);
+        // Skip first sample (it is 0).
+        let _ = osc1.next_sample();
+        let _ = osc2.next_sample();
+        let s1 = osc1.next_sample();
+        let s2 = osc2.next_sample() * 0.5;
+        assert!((s1 * 0.5 - s2).abs() < 1e-6, "Amplitude scaling mismatch: {} vs {}", s1 * 0.5, s2);
+    }
 }

@@ -47,6 +47,14 @@ fn exp_coeff(time_ms: f32, sample_rate: f32) -> f32 {
     (-6.908 / samples).exp()  // ln(1000) ≈ 6.908
 }
 
+/// Helper: run the ADSR for `n` samples and return the last value.
+#[cfg(test)]
+fn run_for(env: &mut Adsr, n: usize) -> f32 {
+    let mut v = 0.0;
+    for _ in 0..n { v = env.next_sample(); }
+    v
+}
+
 impl Adsr {
     /// Create a new ADSR with the given timing parameters.
     ///
@@ -128,5 +136,86 @@ impl Adsr {
             }
         }
         self.level
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    #[test]
+    fn test_adsr_at_t0_output_is_zero() {
+        // Before triggering, the envelope should produce 0.0.
+        let mut env = Adsr::new(10.0, 100.0, 0.7, 200.0, SR);
+        let s = env.next_sample();
+        assert!(s.abs() < 1e-10, "Idle envelope should produce 0, got {}", s);
+    }
+
+    #[test]
+    fn test_adsr_attack_rises() {
+        let attack_ms = 50.0_f32;
+        let attack_samples = (attack_ms * 0.001 * SR) as usize;
+        let mut env = Adsr::new(attack_ms, 200.0, 0.7, 200.0, SR);
+        env.trigger();
+        // After a few samples the level should be rising from 0.
+        let early = run_for(&mut env, attack_samples / 4);
+        assert!(early > 0.0 && early < 1.0, "Level should be rising during attack, got {}", early);
+        let peak = run_for(&mut env, attack_samples);
+        assert!(peak >= 0.9, "Level should reach near 1.0 after attack, got {}", peak);
+    }
+
+    #[test]
+    fn test_adsr_decay_falls_to_sustain() {
+        let sustain = 0.5_f32;
+        let mut env = Adsr::new(1.0, 200.0, sustain, 500.0, SR);
+        env.trigger();
+        // Advance past attack (very short: 1 ms = 44 samples).
+        run_for(&mut env, 100);
+        // Now in decay; wait long enough to reach sustain.
+        let after_decay = run_for(&mut env, 20000);
+        assert!((after_decay - sustain).abs() < 0.01,
+            "After decay level should be at sustain {}, got {}", sustain, after_decay);
+    }
+
+    #[test]
+    fn test_adsr_sustain_is_constant() {
+        let sustain = 0.6_f32;
+        let mut env = Adsr::new(1.0, 50.0, sustain, 500.0, SR);
+        env.trigger();
+        // Fast-forward past attack + decay.
+        run_for(&mut env, 5000);
+        // Now the envelope should be in Sustain; level must be constant.
+        let s1 = env.next_sample();
+        let s2 = run_for(&mut env, 100);
+        assert!((s1 - s2).abs() < 0.005,
+            "Sustain level should be constant: {} vs {}", s1, s2);
+    }
+
+    #[test]
+    fn test_adsr_release_falls_to_zero() {
+        let mut env = Adsr::new(1.0, 50.0, 0.7, 200.0, SR);
+        env.trigger();
+        // Skip to sustain stage.
+        run_for(&mut env, 5000);
+        env.release();
+        // After enough release samples, the level must reach 0.
+        let after_release = run_for(&mut env, 20000);
+        assert!(after_release.abs() < 1e-5,
+            "Level should reach 0 after release, got {}", after_release);
+        assert!(env.is_idle(), "Envelope should be idle after release completes");
+    }
+
+    #[test]
+    fn test_adsr_zero_duration_stages_do_not_panic() {
+        // Zero-duration attack, decay, and release should not cause division by zero or panic.
+        let mut env = Adsr::new(0.0, 0.0, 0.5, 0.0, SR);
+        env.trigger();
+        for _ in 0..1000 { env.next_sample(); }
+        env.release();
+        for _ in 0..1000 { env.next_sample(); }
+        // Just check that we did not panic and the output is finite.
+        assert!(env.level().is_finite());
     }
 }

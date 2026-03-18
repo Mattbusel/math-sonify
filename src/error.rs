@@ -65,3 +65,49 @@ pub enum SonifyError {
 
 /// Convenience alias used throughout the codebase.
 pub type SonifyResult<T> = Result<T, SonifyError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_all_variants_display_non_empty() {
+        // Every error variant must produce a non-empty Display string.
+        let variants: &[SonifyError] = &[
+            SonifyError::AudioDeviceError("test".into()),
+            SonifyError::OdeIntegrationError("test".into()),
+            SonifyError::ConfigError("test".into()),
+            SonifyError::PluginError("test".into()),
+            SonifyError::RenderError("test".into()),
+        ];
+        for v in variants {
+            let s = v.to_string();
+            assert!(!s.is_empty(), "Error variant {:?} produced an empty Display string", v);
+        }
+    }
+
+    #[test]
+    fn test_io_error_from_impl() {
+        // The From<std::io::Error> impl must produce an IoError variant.
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let sonify_err: SonifyError = io_err.into();
+        match sonify_err {
+            SonifyError::IoError(_) => {}
+            other => panic!("Expected IoError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_error_display_contains_message() {
+        let err = SonifyError::AudioDeviceError("no output device".into());
+        assert!(err.to_string().contains("no output device"),
+            "Display should contain the original message, got: {}", err);
+    }
+
+    #[test]
+    fn test_config_error_display() {
+        let err = SonifyError::ConfigError("invalid sigma".into());
+        assert!(err.to_string().contains("invalid sigma"),
+            "ConfigError display should contain 'invalid sigma', got: {}", err);
+    }
+}
