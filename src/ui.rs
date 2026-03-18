@@ -390,6 +390,9 @@ pub struct AppState {
     pub lyapunov_history: std::collections::VecDeque<f32>,
     // ── Feature #8: Poincaré section ────────────────────────────────────────
     pub poincare_points: Vec<(f32, f32)>,
+    // poincare_z_prev is written by the sim thread for Poincaré section detection;
+    // reading happens on the same thread so the compiler sees no cross-function read.
+    #[allow(dead_code)]
     pub poincare_z_prev: f64,
     // ── Feature #10: Stochastic noise injection ──────────────────────────────
     pub noise_inject: f32,
@@ -842,6 +845,10 @@ fn system_display_name(s: &str) -> &'static str {
     }
 }
 
+// system_internal_name is called from the system-selector dropdown when the
+// user types a name into the search box (ui_timeline.rs path). The compiler
+// sees only a few call sites inside cfg(feature) blocks, triggering a false-positive.
+#[allow(dead_code)]
 fn system_internal_name(display: &str) -> &'static str {
     match display {
         "Lorenz Attractor" => "lorenz",

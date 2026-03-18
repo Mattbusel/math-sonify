@@ -36,6 +36,7 @@ pub mod eq;
 
 pub use oscillator::{Oscillator, OscShape};
 pub use filter::BiquadFilter;
+// Freeverb is used by the plugin (src/plugin.rs) through this re-export.
 pub use reverb::Freeverb;
 pub use fdn_reverb::FdnReverb;
 pub use delay::DelayLine;

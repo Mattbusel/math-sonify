@@ -19,10 +19,10 @@ mod patches;
 mod arrangement;
 
 use systems::*;
-use sonification::{AudioParams, Sonification, DirectMapping, chord_intervals_for};
+use sonification::{Sonification, DirectMapping};
 use synth::{Oscillator, OscShape, BiquadFilter, Freeverb, DelayLine, Limiter,
-            GrainEngine, Bitcrusher, KarplusStrong, Chorus, Waveshaper, Adsr};
-use config::{Config, LorenzConfig, SonificationConfig, AudioConfig};
+            KarplusStrong, Chorus, Waveshaper, Adsr};
+use config::SonificationConfig;
 
 // ---------------------------------------------------------------------------
 // Parameters
@@ -301,13 +301,21 @@ struct PluginDsp {
     mapper: DirectMapping,
     // Voice synthesis
     oscs: [Oscillator; 4],
+    // chord_oscs, chord_amp_smooth, chord_freq_smooth, freq_smooth_rate, and chord_intervals
+    // are reserved for the upcoming chord-mode implementation (v1.3). They are retained
+    // in the struct so that saved presets referencing them remain forward-compatible.
+    #[allow(dead_code)]
     chord_oscs: [Oscillator; 3],
     voice_adsr: [Adsr; 4],
     amp_smooth: [f32; 4],
     freq_smooth: [f32; 4],
+    #[allow(dead_code)]
     chord_amp_smooth: [f32; 3],
+    #[allow(dead_code)]
     chord_freq_smooth: [f32; 3],
+    #[allow(dead_code)]
     freq_smooth_rate: f32,
+    #[allow(dead_code)]
     chord_intervals: [f32; 3],
     // Effects
     filter: BiquadFilter,
@@ -361,7 +369,6 @@ impl PluginDsp {
     }
 
     fn next_sample(&mut self, params: &MathSonifyParams) -> (f32, f32) {
-        use std::f32::consts::TAU;
 
         // --- Rössler parameters (read every sample, smoothed) ---------------
         // Future version: add an enum parameter to select the attractor system

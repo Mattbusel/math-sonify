@@ -1457,7 +1457,7 @@ fn sim_thread(
             noise_rng ^= noise_rng << 13;
             noise_rng ^= noise_rng >> 7;
             noise_rng ^= noise_rng << 17;
-            let noise_val = (noise_rng as f64 / u64::MAX as f64 - 0.5) * 2.0 * noise_inject as f64;
+            let _noise_val = (noise_rng as f64 / u64::MAX as f64 - 0.5) * 2.0 * noise_inject as f64;
             let cur_state: Vec<f64> = system.state().to_vec();
             if !cur_state.is_empty() && cur_state.iter().all(|v| v.is_finite()) {
                 // Perturb first state variable (x) by noise, apply to all dims proportionally
