@@ -17,6 +17,32 @@ use crate::ui_tips::draw_tips_content;
 use crate::ui_timeline::draw_arrangement_timeline;
 use crate::ui_waveform::{draw_waveform, draw_note_map};
 
+/// Severity level for toast notifications.
+#[derive(Clone, PartialEq)]
+pub enum ToastKind { Info, Warning, Error }
+
+/// A transient notification displayed as an overlay for a few seconds.
+#[derive(Clone)]
+pub struct Toast {
+    pub message: String,
+    pub kind: ToastKind,
+    pub born: std::time::Instant,
+    /// How long to display before fading (seconds).
+    pub ttl_secs: f32,
+}
+
+impl Toast {
+    pub fn info(msg: impl Into<String>) -> Self {
+        Self { message: msg.into(), kind: ToastKind::Info, born: std::time::Instant::now(), ttl_secs: 4.0 }
+    }
+    pub fn warning(msg: impl Into<String>) -> Self {
+        Self { message: msg.into(), kind: ToastKind::Warning, born: std::time::Instant::now(), ttl_secs: 5.0 }
+    }
+    pub fn error(msg: impl Into<String>) -> Self {
+        Self { message: msg.into(), kind: ToastKind::Error, born: std::time::Instant::now(), ttl_secs: 6.0 }
+    }
+}
+
 /// A single looper layer (stereo interleaved samples).
 /// Fields are prepared for future looper playback implementation.
 #[allow(dead_code)]
@@ -31,8 +57,10 @@ pub struct LooperLayer {
 #[derive(Clone)]
 pub struct Snippet {
     pub name: String,
+    #[allow(dead_code)]
     pub path: String,         // stored for future disk-reload and export features
     pub duration_secs: f32,
+    #[allow(dead_code)]
     pub sample_rate: u32,     // stored for rate-conversion during export
     /// ~128-point peak envelope for waveform thumbnail display.
     pub thumb: Vec<f32>,
@@ -355,6 +383,8 @@ pub struct AppState {
     pub midi_cc_learn_last_cc: u8,       // previous midi_in_last_cc for change detection
     // Modulation matrix: routes attractor state variables to synthesis parameters
     pub mod_matrix: Vec<ModRoute>,
+    /// Transient notifications shown as bottom-right overlays for a few seconds.
+    pub toast_queue: Vec<Toast>,
 }
 
 /// Periodic session log entry (written by sim thread every ~60s).
@@ -572,6 +602,7 @@ impl AppState {
             midi_cc_map: Vec::new(),
             midi_cc_learn_last_cc: 0,
             mod_matrix: Vec::new(),
+            toast_queue: Vec::new(),
         }
     }
 
@@ -1452,6 +1483,43 @@ pub fn draw_ui(
             _ => {}
         }
     });
+
+    // ── Toast notification overlay ───────────────────────────────────────────
+    // Expire stale toasts, then render remaining ones in the bottom-right corner.
+    {
+        let now = std::time::Instant::now();
+        let mut st = state.lock();
+        st.toast_queue.retain(|t| now.duration_since(t.born).as_secs_f32() < t.ttl_secs);
+        let toasts: Vec<Toast> = st.toast_queue.clone();
+        drop(st);
+        if !toasts.is_empty() {
+            let screen_rect = ctx.screen_rect();
+            let mut y_offset = screen_rect.max.y - 16.0;
+            for toast in toasts.iter().rev() {
+                let age = now.duration_since(toast.born).as_secs_f32();
+                let fade = if age < toast.ttl_secs - 0.5 { 1.0f32 } else { ((toast.ttl_secs - age) / 0.5).clamp(0.0, 1.0) };
+                let (bg_col, icon) = match toast.kind {
+                    ToastKind::Info    => (Color32::from_rgba_unmultiplied(40, 120, 200, (200.0 * fade) as u8), "ℹ"),
+                    ToastKind::Warning => (Color32::from_rgba_unmultiplied(180, 130, 0,  (200.0 * fade) as u8), "⚠"),
+                    ToastKind::Error   => (Color32::from_rgba_unmultiplied(180, 40,  40,  (220.0 * fade) as u8), "✕"),
+                };
+                let text = format!("{} {}", icon, toast.message);
+                let galley = ctx.fonts(|f| f.layout_no_wrap(text.clone(), FontId::proportional(13.0), Color32::WHITE));
+                let w = galley.rect.width() + 24.0;
+                let h = galley.rect.height() + 12.0;
+                y_offset -= h + 6.0;
+                let rect = Rect::from_min_size(
+                    Pos2::new(screen_rect.max.x - w - 12.0, y_offset),
+                    Vec2::new(w, h),
+                );
+                let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("toast_overlay")));
+                painter.rect_filled(rect, 6.0, bg_col);
+                painter.text(rect.min + Vec2::new(12.0, 6.0), Align2::LEFT_TOP, text, FontId::proportional(13.0),
+                    Color32::from_rgba_unmultiplied(255, 255, 255, (255.0 * fade) as u8));
+            }
+            ctx.request_repaint();
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2058,6 +2126,9 @@ fn draw_advanced_panel(
                     if !name.is_empty() {
                         save_patch(&name, &st.config);
                         st.patch_list = list_patches();
+                        st.toast_queue.push(Toast::info(format!("Patch '{}' saved", name)));
+                    } else {
+                        st.toast_queue.push(Toast::warning("Enter a patch name first"));
                     }
                 }
             });
@@ -2069,9 +2140,14 @@ fn draw_advanced_panel(
                 for patch_name in &patches {
                     if ui.button(patch_name).clicked() {
                         if let Some(cfg) = load_patch_file(patch_name) {
+                            let loaded_name = patch_name.clone();
                             st.config = cfg;
                             st.system_changed = true;
                             st.mode_changed = true;
+                            st.toast_queue.push(Toast::info(format!("Loaded '{}'", loaded_name)));
+                        } else {
+                            let failed_name = patch_name.clone();
+                            st.toast_queue.push(Toast::error(format!("Failed to load '{}'", failed_name)));
                         }
                     }
                 }
@@ -2323,8 +2399,10 @@ fn draw_advanced_panel(
                     st.push_undo();
                     st.config.system.name = "custom".into();
                     st.system_changed = true;
+                    st.toast_queue.push(Toast::info("Custom ODE applied"));
                 }
                 Err(e) => {
+                    st.toast_queue.push(Toast::error(format!("ODE error: {}", e)));
                     st.custom_ode_error = e;
                 }
             }
@@ -3537,7 +3615,10 @@ fn draw_studio_tab(ui: &mut Ui, state: &SharedState) {
                             st.snippet_status = format!("✓ Captured {:.0}s snippet", cap_secs);
                         }
                         Err(e) => {
-                            state.lock().snippet_status = format!("✗ {}", e);
+                            let msg = format!("✗ {}", e);
+                            let mut st = state.lock();
+                            st.snippet_status = msg.clone();
+                            st.toast_queue.push(Toast::error(format!("Snippet capture failed: {}", e)));
                         }
                     }
                 }
