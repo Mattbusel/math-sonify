@@ -1190,4 +1190,208 @@ mod tests {
         assert!((loaded.mackey_glass.tau - orig.mackey_glass.tau).abs() < 1e-9);
         assert!((loaded.lorenz96.f - orig.lorenz96.f).abs() < 1e-9);
     }
+
+    // -----------------------------------------------------------------------
+    // Lorenz attractor: trajectory confinement (canonical 50 000-step test)
+    // -----------------------------------------------------------------------
+
+    /// The canonical test referenced in README `cargo test -- lorenz_stays_on_attractor`.
+    /// With sigma=10, rho=28, beta=8/3 the RK4 trajectory must stay within
+    /// the known strange attractor bounding box: |x| < 30, |y| < 30, 0 < z < 60.
+    #[test]
+    fn lorenz_stays_on_attractor() {
+        let mut sys = Lorenz::new(10.0, 28.0, 2.6667);
+        for _ in 0..50_000 {
+            sys.step(0.001);
+        }
+        let s = sys.state();
+        assert!(all_finite(s), "Lorenz state non-finite: {:?}", s);
+        assert!(s[0].abs() < 30.0, "Lorenz x outside attractor bounds: {}", s[0]);
+        assert!(s[1].abs() < 30.0, "Lorenz y outside attractor bounds: {}", s[1]);
+        assert!(s[2] > 0.0 && s[2] < 60.0, "Lorenz z outside attractor bounds: {}", s[2]);
+    }
+
+    /// z remains strictly positive on the Lorenz attractor after burn-in.
+    #[test]
+    fn lorenz_z_stays_positive() {
+        let mut sys = Lorenz::new(10.0, 28.0, 2.6667);
+        for _ in 0..5_000 { sys.step(0.001); }
+        for _ in 0..20_000 {
+            sys.step(0.001);
+            assert!(sys.state()[2] > 0.0,
+                "Lorenz z became non-positive: {}", sys.state()[2]);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Rossler: boundedness (periodicity verification)
+    // -----------------------------------------------------------------------
+
+    /// Rossler trajectory must stay within |x|,|y| < 15, 0 < z < 25.
+    #[test]
+    fn rossler_stays_bounded_30000_steps() {
+        let mut sys = Rossler::new(0.2, 0.2, 5.7);
+        for _ in 0..30_000 { sys.step(0.001); }
+        let s = sys.state();
+        assert!(all_finite(s), "Rossler non-finite: {:?}", s);
+        assert!(s[0].abs() < 15.0, "Rossler x out of bounds: {}", s[0]);
+        assert!(s[1].abs() < 15.0, "Rossler y out of bounds: {}", s[1]);
+        assert!(s[2] > 0.0 && s[2] < 25.0, "Rossler z out of bounds: {}", s[2]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Double pendulum: energy conservation at small angles
+    // -----------------------------------------------------------------------
+
+    /// At small angles (0.1 rad) the Yoshida 4th-order symplectic integrator
+    /// must conserve the Hamiltonian to within 1% over 10 000 steps.
+    #[test]
+    fn double_pendulum_energy_conserved_small_angles() {
+        use crate::systems::DoublePendulum;
+        let (m1, m2, l1, l2, g) = (1.0_f64, 1.0, 1.0, 1.0, 9.81);
+        let mut sys = DoublePendulum::new(m1, m2, l1, l2);
+        sys.set_state(&[0.1_f64, 0.1, 0.0, 0.0]);
+
+        let hamiltonian = |s: &[f64]| -> f64 {
+            let (th1, th2, p1, p2) = (s[0], s[1], s[2], s[3]);
+            let delta = th2 - th1;
+            let denom = (m1 + m2 - m2 * delta.cos().powi(2)).max(1e-12);
+            let t = (
+                (m1 + m2) * l2.powi(2) * p1.powi(2)
+                + m2 * l1.powi(2) * p2.powi(2)
+                - 2.0 * m2 * l1 * l2 * p1 * p2 * delta.cos()
+            ) / (2.0 * m1 * m2 * l1.powi(2) * l2.powi(2) * denom);
+            let v = -(m1 + m2) * g * l1 * th1.cos() - m2 * g * l2 * th2.cos();
+            t + v
+        };
+
+        let e0 = hamiltonian(sys.state());
+        for _ in 0..10_000 { sys.step(0.001); }
+        let e1 = hamiltonian(sys.state());
+        let rel = ((e1 - e0) / e0.abs()).abs();
+        assert!(rel < 0.01,
+            "Energy drift too large: e0={:.6} e1={:.6} rel={:.4}", e0, e1, rel);
+    }
+
+    /// At small angles (0.05 rad) the pendulum must stay bounded near the equilibrium.
+    #[test]
+    fn double_pendulum_small_angle_stays_near_equilibrium() {
+        use crate::systems::DoublePendulum;
+        let mut sys = DoublePendulum::new(1.0, 1.0, 1.0, 1.0);
+        sys.set_state(&[0.05_f64, 0.05, 0.0, 0.0]);
+        for _ in 0..10_000 {
+            sys.step(0.001);
+            let s = sys.state();
+            assert!(all_finite(s), "DP state non-finite: {:?}", s);
+            assert!(s[0].abs() < 0.5, "theta1 escaped small-angle regime: {}", s[0]);
+            assert!(s[1].abs() < 0.5, "theta2 escaped small-angle regime: {}", s[1]);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Kuramoto: resonance / synchronization transition
+    // -----------------------------------------------------------------------
+
+    /// K_c = 2*gamma = 1.0 for a Lorentzian with half-width gamma=0.5.
+    /// Below K_c the order parameter r must remain < 0.5 (incoherent).
+    #[test]
+    fn kuramoto_below_critical_coupling_incoherent() {
+        let mut sys = Kuramoto::new(16, 0.1);
+        for _ in 0..20_000 { sys.step(0.01); }
+        assert!(sys.order_parameter() < 0.5,
+            "Expected incoherence below K_c, got r={:.4}", sys.order_parameter());
+    }
+
+    /// Well above K_c the order parameter must exceed 0.5 (synchronized).
+    #[test]
+    fn kuramoto_above_critical_coupling_synchronizes() {
+        let mut sys = Kuramoto::new(16, 5.0);
+        for _ in 0..50_000 { sys.step(0.01); }
+        assert!(sys.order_parameter() > 0.5,
+            "Expected synchronization above K_c, got r={:.4}", sys.order_parameter());
+    }
+
+    /// The order parameter must always lie in [0, 1].
+    #[test]
+    fn kuramoto_order_parameter_in_unit_interval() {
+        for &k in &[0.0_f64, 0.5, 1.0, 2.0, 10.0] {
+            let mut sys = Kuramoto::new(8, k);
+            for _ in 0..5_000 { sys.step(0.01); }
+            let r = sys.order_parameter();
+            assert!(r >= 0.0 && r <= 1.0 + 1e-9,
+                "Order parameter out of [0,1] at K={}: {}", k, r);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Three-Body: Hamiltonian energy conservation
+    // -----------------------------------------------------------------------
+
+    /// The three-body leapfrog integrator must conserve energy to < 1%
+    /// over 10 000 steps at dt=0.001.
+    #[test]
+    fn three_body_energy_conserved() {
+        use crate::systems::ThreeBody;
+        let mut sys = ThreeBody::new([1.0, 1.0, 1.0]);
+        for _ in 0..10_000 { sys.step(0.001); }
+        let err = sys.energy_error;
+        assert!(err < 0.01, "Three-body energy error > 1%: {:.4}", err);
+    }
+
+    // -----------------------------------------------------------------------
+    // Audio mapping: valid MIDI range
+    // -----------------------------------------------------------------------
+
+    /// All quantized frequencies must map to MIDI notes in [0, 127].
+    #[test]
+    fn scale_quantization_produces_valid_midi_notes() {
+        let base = 110.0_f32; // A2
+        let oct  = 3.0_f32;
+        for &scale in &[Scale::Pentatonic, Scale::Chromatic, Scale::Lydian, Scale::Phrygian] {
+            for i in 0..=100 {
+                let t = i as f32 / 100.0;
+                let f = quantize_to_scale(t, base, oct, scale);
+                let midi = 69.0_f32 + 12.0 * (f / 440.0).log2();
+                assert!(midi >= 0.0 && midi <= 127.0,
+                    "Scale {:?} t={:.3}: freq {:.2} -> MIDI {:.1} out of [0,127]",
+                    scale, t, f, midi);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Polyphony limits
+    // -----------------------------------------------------------------------
+
+    /// AudioParams has exactly 4 voice slots; voices beyond the state
+    /// dimension must be zero-amplitude.
+    #[test]
+    fn polyphony_limit_four_voices_max() {
+        use crate::sonification::{DirectMapping, Sonification};
+        use crate::config::SonificationConfig;
+        let mut mapper = DirectMapping::new();
+        let cfg = SonificationConfig::default();
+
+        // 3D state — voice 3 must be zero
+        let params = mapper.map(&[1.0_f64, -2.0, 0.5], 5.0, &cfg);
+        assert_eq!(params.freqs.len(), 4, "Must have exactly 4 frequency slots");
+        assert_eq!(params.amps.len(),  4, "Must have exactly 4 amplitude slots");
+        assert_eq!(params.amps[3], 0.0, "Voice 3 amp should be 0 for 3-D state: {}", params.amps[3]);
+
+        // 1D state — voices 1-3 must all be zero
+        let p1 = mapper.map(&[0.5_f64], 1.0, &cfg);
+        for i in 1..4 {
+            assert_eq!(p1.amps[i], 0.0, "Voice {} amp not 0 for 1-D state: {}", i, p1.amps[i]);
+        }
+    }
+
+    /// Default voice_levels must be in descending order (louder to quieter).
+    #[test]
+    fn polyphony_default_voice_levels_descending() {
+        use crate::config::SonificationConfig;
+        let vl = SonificationConfig::default().voice_levels;
+        assert!(vl[0] >= vl[1], "voice_levels[0] < [1]");
+        assert!(vl[1] >= vl[2], "voice_levels[1] < [2]");
+        assert!(vl[2] >= vl[3], "voice_levels[2] < [3]");
+    }
 }
