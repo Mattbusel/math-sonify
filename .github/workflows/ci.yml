@@ -12,36 +12,6 @@ env:
   RUST_LOG: warn
 
 jobs:
-  # Minimal job matching the production-ready spec: check + lib tests + clippy + fmt.
-  # Uses --lib to avoid any audio device dependency on the CI runner.
-  test-lib:
-    name: test --lib (spec)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install Linux audio and GUI dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y \
-            libasound2-dev libdbus-1-dev libpulse-dev libudev-dev \
-            libwayland-dev libxkbcommon-dev pkg-config \
-            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
-            libxcb-xfixes0-dev libssl-dev
-      - run: cargo check
-      - run: cargo test --lib
-      - run: cargo clippy -- -D warnings
-      - run: cargo fmt --check
-
   fmt:
     name: Rustfmt check
     runs-on: ubuntu-latest
