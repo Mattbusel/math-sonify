@@ -2,8 +2,8 @@
 //!
 //! Contains the collapsible tips shown in the Simple panel's "SOUND DESIGN TIPS" section.
 
-use egui::{CollapsingHeader, RichText, Ui};
 use crate::ui::{AMBER, GRAY_HINT};
+use egui::{CollapsingHeader, RichText, Ui};
 
 pub(crate) fn draw_tips_content(ui: &mut Ui) {
     let tips: &[(&str, &str)] = &[

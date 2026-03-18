@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use crate::config::{Config, load_config};
-    use crate::systems::{DynamicalSystem, Lorenz, Rossler, Duffing, Kuramoto};
-    use crate::sonification::{Scale, quantize_to_scale, chord_intervals_for};
-    use crate::synth::oscillator::{Oscillator, OscShape};
+    use crate::config::{load_config, Config};
+    use crate::sonification::{chord_intervals_for, quantize_to_scale, Scale};
+    use crate::synth::oscillator::{OscShape, Oscillator};
+    use crate::systems::{Duffing, DynamicalSystem, Kuramoto, Lorenz, Rossler};
 
     // -------------------------------------------------------------------------
     // Dynamical system integration tests
@@ -19,7 +19,11 @@ mod tests {
         for _ in 0..1000 {
             sys.step(0.001);
         }
-        assert!(all_finite(sys.state()), "Lorenz state contains NaN/Inf: {:?}", sys.state());
+        assert!(
+            all_finite(sys.state()),
+            "Lorenz state contains NaN/Inf: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
@@ -28,7 +32,11 @@ mod tests {
         for _ in 0..1000 {
             sys.step(0.001);
         }
-        assert!(all_finite(sys.state()), "Rossler state contains NaN/Inf: {:?}", sys.state());
+        assert!(
+            all_finite(sys.state()),
+            "Rossler state contains NaN/Inf: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
@@ -37,7 +45,11 @@ mod tests {
         for _ in 0..1000 {
             sys.step(0.001);
         }
-        assert!(all_finite(sys.state()), "Duffing state contains NaN/Inf: {:?}", sys.state());
+        assert!(
+            all_finite(sys.state()),
+            "Duffing state contains NaN/Inf: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
@@ -46,7 +58,11 @@ mod tests {
         for _ in 0..1000 {
             sys.step(0.001);
         }
-        assert!(all_finite(sys.state()), "Kuramoto state contains NaN/Inf: {:?}", sys.state());
+        assert!(
+            all_finite(sys.state()),
+            "Kuramoto state contains NaN/Inf: {:?}",
+            sys.state()
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -60,12 +76,22 @@ mod tests {
         for i in 0..=20 {
             let t = i as f32 / 20.0;
             let freq = quantize_to_scale(t, base, octave_range, Scale::Pentatonic);
-            assert!(freq.is_finite() && freq > 0.0,
-                "Pentatonic quantize produced invalid freq {} at t={}", freq, t);
+            assert!(
+                freq.is_finite() && freq > 0.0,
+                "Pentatonic quantize produced invalid freq {} at t={}",
+                freq,
+                t
+            );
             // Should be within the expected octave range above base
             let max_freq = base * 2.0_f32.powf(octave_range);
-            assert!(freq >= base * 0.99 && freq <= max_freq * 1.01,
-                "Pentatonic freq {} out of expected range [{}, {}] at t={}", freq, base, max_freq, t);
+            assert!(
+                freq >= base * 0.99 && freq <= max_freq * 1.01,
+                "Pentatonic freq {} out of expected range [{}, {}] at t={}",
+                freq,
+                base,
+                max_freq,
+                t
+            );
         }
     }
 
@@ -76,8 +102,12 @@ mod tests {
         for i in 0..=10 {
             let t = i as f32 / 10.0;
             let freq = quantize_to_scale(t, base, octave_range, Scale::Chromatic);
-            assert!(freq.is_finite() && freq > 0.0,
-                "Chromatic quantize produced invalid freq {} at t={}", freq, t);
+            assert!(
+                freq.is_finite() && freq > 0.0,
+                "Chromatic quantize produced invalid freq {} at t={}",
+                freq,
+                t
+            );
         }
     }
 
@@ -86,13 +116,26 @@ mod tests {
         // t=0.0 should return base frequency
         let base = 220.0_f32;
         let f0 = quantize_to_scale(0.0, base, 3.0, Scale::Pentatonic);
-        assert!((f0 - base).abs() < 0.01, "t=0 should return base freq {}, got {}", base, f0);
+        assert!(
+            (f0 - base).abs() < 0.01,
+            "t=0 should return base freq {}, got {}",
+            base,
+            f0
+        );
 
         // t < 0 and t > 1 should be clamped (no panic, finite result)
         let f_neg = quantize_to_scale(-1.0, base, 3.0, Scale::Pentatonic);
         let f_over = quantize_to_scale(2.0, base, 3.0, Scale::Pentatonic);
-        assert!(f_neg.is_finite(), "t<0 should produce finite freq, got {}", f_neg);
-        assert!(f_over.is_finite(), "t>1 should produce finite freq, got {}", f_over);
+        assert!(
+            f_neg.is_finite(),
+            "t<0 should produce finite freq, got {}",
+            f_neg
+        );
+        assert!(
+            f_over.is_finite(),
+            "t>1 should produce finite freq, got {}",
+            f_over
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -102,20 +145,30 @@ mod tests {
     #[test]
     fn config_default_roundtrips_toml() {
         let original = Config::default();
-        let serialized = toml::to_string(&original).expect("Config::default() should serialize to TOML");
+        let serialized =
+            toml::to_string(&original).expect("Config::default() should serialize to TOML");
         let deserialized: Config = toml::from_str(&serialized)
             .expect("Serialized default config should parse back without errors");
 
         // Spot-check a few fields
         assert_eq!(deserialized.lorenz.sigma, original.lorenz.sigma);
-        assert_eq!(deserialized.lorenz.rho,   original.lorenz.rho);
-        assert_eq!(deserialized.lorenz.beta,  original.lorenz.beta);
-        assert_eq!(deserialized.audio.sample_rate,   original.audio.sample_rate);
-        assert_eq!(deserialized.audio.master_volume, original.audio.master_volume);
-        assert_eq!(deserialized.system.dt,    original.system.dt);
-        assert_eq!(deserialized.rossler.a,    original.rossler.a);
-        assert_eq!(deserialized.sonification.base_frequency, original.sonification.base_frequency);
-        assert_eq!(deserialized.sonification.octave_range,   original.sonification.octave_range);
+        assert_eq!(deserialized.lorenz.rho, original.lorenz.rho);
+        assert_eq!(deserialized.lorenz.beta, original.lorenz.beta);
+        assert_eq!(deserialized.audio.sample_rate, original.audio.sample_rate);
+        assert_eq!(
+            deserialized.audio.master_volume,
+            original.audio.master_volume
+        );
+        assert_eq!(deserialized.system.dt, original.system.dt);
+        assert_eq!(deserialized.rossler.a, original.rossler.a);
+        assert_eq!(
+            deserialized.sonification.base_frequency,
+            original.sonification.base_frequency
+        );
+        assert_eq!(
+            deserialized.sonification.octave_range,
+            original.sonification.octave_range
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -127,57 +180,105 @@ mod tests {
         let mut cfg = Config::default();
 
         // Push values well outside bounds
-        cfg.system.dt            = -1.0;
-        cfg.system.speed         = 9999.0;
-        cfg.lorenz.sigma         = 0.0;
-        cfg.lorenz.rho           = 500.0;
-        cfg.lorenz.beta          = -5.0;
-        cfg.rossler.a            = 999.0;
-        cfg.rossler.b            = -1.0;
-        cfg.rossler.c            = 999.0;
-        cfg.audio.reverb_wet     = 5.0;
-        cfg.audio.delay_ms       = 0.0;
+        cfg.system.dt = -1.0;
+        cfg.system.speed = 9999.0;
+        cfg.lorenz.sigma = 0.0;
+        cfg.lorenz.rho = 500.0;
+        cfg.lorenz.beta = -5.0;
+        cfg.rossler.a = 999.0;
+        cfg.rossler.b = -1.0;
+        cfg.rossler.c = 999.0;
+        cfg.audio.reverb_wet = 5.0;
+        cfg.audio.delay_ms = 0.0;
         cfg.audio.delay_feedback = 2.0;
-        cfg.audio.master_volume  = -0.5;
-        cfg.audio.sample_rate    = 22050; // unsupported rate
+        cfg.audio.master_volume = -0.5;
+        cfg.audio.sample_rate = 22050; // unsupported rate
         cfg.sonification.base_frequency = 0.0;
-        cfg.sonification.octave_range   = 100.0;
-        cfg.sonification.portamento_ms  = -100.0;
+        cfg.sonification.octave_range = 100.0;
+        cfg.sonification.portamento_ms = -100.0;
 
         cfg.validate();
 
-        assert!(cfg.system.dt >= 0.0001 && cfg.system.dt <= 0.1,
-            "dt not clamped: {}", cfg.system.dt);
-        assert!(cfg.system.speed >= 0.0 && cfg.system.speed <= 100.0,
-            "speed not clamped: {}", cfg.system.speed);
-        assert!(cfg.lorenz.sigma >= 0.1 && cfg.lorenz.sigma <= 100.0,
-            "lorenz.sigma not clamped: {}", cfg.lorenz.sigma);
-        assert!(cfg.lorenz.rho >= 0.1 && cfg.lorenz.rho <= 200.0,
-            "lorenz.rho not clamped: {}", cfg.lorenz.rho);
-        assert!(cfg.lorenz.beta >= 0.01 && cfg.lorenz.beta <= 20.0,
-            "lorenz.beta not clamped: {}", cfg.lorenz.beta);
-        assert!(cfg.rossler.a >= 0.0 && cfg.rossler.a <= 20.0,
-            "rossler.a not clamped: {}", cfg.rossler.a);
-        assert!(cfg.rossler.b >= 0.0 && cfg.rossler.b <= 20.0,
-            "rossler.b not clamped: {}", cfg.rossler.b);
-        assert!(cfg.rossler.c >= 0.0 && cfg.rossler.c <= 20.0,
-            "rossler.c not clamped: {}", cfg.rossler.c);
-        assert!(cfg.audio.reverb_wet >= 0.0 && cfg.audio.reverb_wet <= 1.0,
-            "reverb_wet not clamped: {}", cfg.audio.reverb_wet);
-        assert!(cfg.audio.delay_ms >= 1.0 && cfg.audio.delay_ms <= 5000.0,
-            "delay_ms not clamped: {}", cfg.audio.delay_ms);
-        assert!(cfg.audio.delay_feedback >= 0.0 && cfg.audio.delay_feedback <= 0.99,
-            "delay_feedback not clamped: {}", cfg.audio.delay_feedback);
-        assert!(cfg.audio.master_volume >= 0.0 && cfg.audio.master_volume <= 1.0,
-            "master_volume not clamped: {}", cfg.audio.master_volume);
-        assert!(cfg.audio.sample_rate == 44100 || cfg.audio.sample_rate == 48000,
-            "invalid sample_rate not reset: {}", cfg.audio.sample_rate);
-        assert!(cfg.sonification.base_frequency >= 20.0 && cfg.sonification.base_frequency <= 2000.0,
-            "base_frequency not clamped: {}", cfg.sonification.base_frequency);
-        assert!(cfg.sonification.octave_range >= 0.1 && cfg.sonification.octave_range <= 8.0,
-            "octave_range not clamped: {}", cfg.sonification.octave_range);
-        assert!(cfg.sonification.portamento_ms >= 1.0 && cfg.sonification.portamento_ms <= 5000.0,
-            "portamento_ms not clamped: {}", cfg.sonification.portamento_ms);
+        assert!(
+            cfg.system.dt >= 0.0001 && cfg.system.dt <= 0.1,
+            "dt not clamped: {}",
+            cfg.system.dt
+        );
+        assert!(
+            cfg.system.speed >= 0.0 && cfg.system.speed <= 100.0,
+            "speed not clamped: {}",
+            cfg.system.speed
+        );
+        assert!(
+            cfg.lorenz.sigma >= 0.1 && cfg.lorenz.sigma <= 100.0,
+            "lorenz.sigma not clamped: {}",
+            cfg.lorenz.sigma
+        );
+        assert!(
+            cfg.lorenz.rho >= 0.1 && cfg.lorenz.rho <= 200.0,
+            "lorenz.rho not clamped: {}",
+            cfg.lorenz.rho
+        );
+        assert!(
+            cfg.lorenz.beta >= 0.01 && cfg.lorenz.beta <= 20.0,
+            "lorenz.beta not clamped: {}",
+            cfg.lorenz.beta
+        );
+        assert!(
+            cfg.rossler.a >= 0.0 && cfg.rossler.a <= 20.0,
+            "rossler.a not clamped: {}",
+            cfg.rossler.a
+        );
+        assert!(
+            cfg.rossler.b >= 0.0 && cfg.rossler.b <= 20.0,
+            "rossler.b not clamped: {}",
+            cfg.rossler.b
+        );
+        assert!(
+            cfg.rossler.c >= 0.0 && cfg.rossler.c <= 20.0,
+            "rossler.c not clamped: {}",
+            cfg.rossler.c
+        );
+        assert!(
+            cfg.audio.reverb_wet >= 0.0 && cfg.audio.reverb_wet <= 1.0,
+            "reverb_wet not clamped: {}",
+            cfg.audio.reverb_wet
+        );
+        assert!(
+            cfg.audio.delay_ms >= 1.0 && cfg.audio.delay_ms <= 5000.0,
+            "delay_ms not clamped: {}",
+            cfg.audio.delay_ms
+        );
+        assert!(
+            cfg.audio.delay_feedback >= 0.0 && cfg.audio.delay_feedback <= 0.99,
+            "delay_feedback not clamped: {}",
+            cfg.audio.delay_feedback
+        );
+        assert!(
+            cfg.audio.master_volume >= 0.0 && cfg.audio.master_volume <= 1.0,
+            "master_volume not clamped: {}",
+            cfg.audio.master_volume
+        );
+        assert!(
+            cfg.audio.sample_rate == 44100 || cfg.audio.sample_rate == 48000,
+            "invalid sample_rate not reset: {}",
+            cfg.audio.sample_rate
+        );
+        assert!(
+            cfg.sonification.base_frequency >= 20.0 && cfg.sonification.base_frequency <= 2000.0,
+            "base_frequency not clamped: {}",
+            cfg.sonification.base_frequency
+        );
+        assert!(
+            cfg.sonification.octave_range >= 0.1 && cfg.sonification.octave_range <= 8.0,
+            "octave_range not clamped: {}",
+            cfg.sonification.octave_range
+        );
+        assert!(
+            cfg.sonification.portamento_ms >= 1.0 && cfg.sonification.portamento_ms <= 5000.0,
+            "portamento_ms not clamped: {}",
+            cfg.sonification.portamento_ms
+        );
     }
 
     #[test]
@@ -188,8 +289,8 @@ mod tests {
 
         // Defaults are within bounds — they should be unchanged
         assert_eq!(cfg.lorenz.sigma, original.lorenz.sigma);
-        assert_eq!(cfg.lorenz.rho,   original.lorenz.rho);
-        assert_eq!(cfg.lorenz.beta,  original.lorenz.beta);
+        assert_eq!(cfg.lorenz.rho, original.lorenz.rho);
+        assert_eq!(cfg.lorenz.beta, original.lorenz.beta);
         assert_eq!(cfg.audio.sample_rate, original.audio.sample_rate);
         assert_eq!(cfg.system.dt, original.system.dt);
     }
@@ -223,7 +324,7 @@ mod tests {
         let cfg = load_config(path);
         let defaults = Config::default();
         assert_eq!(cfg.lorenz.sigma, defaults.lorenz.sigma);
-        assert_eq!(cfg.system.dt,    defaults.system.dt);
+        assert_eq!(cfg.system.dt, defaults.system.dt);
     }
 
     // -------------------------------------------------------------------------
@@ -276,10 +377,16 @@ mod tests {
 
         let result = lerp_config(&a, &b, 0.5);
         // master_volume: midpoint of 0.4 and 0.8 = 0.6, clamped to >= 0.45 -> 0.6
-        assert!((result.audio.master_volume - 0.6).abs() < 1e-5,
-            "Expected ~0.6, got {}", result.audio.master_volume);
-        assert!((result.lorenz.sigma - 15.0).abs() < 1e-9,
-            "Expected sigma=15.0, got {}", result.lorenz.sigma);
+        assert!(
+            (result.audio.master_volume - 0.6).abs() < 1e-5,
+            "Expected ~0.6, got {}",
+            result.audio.master_volume
+        );
+        assert!(
+            (result.lorenz.sigma - 15.0).abs() < 1e-9,
+            "Expected sigma=15.0, got {}",
+            result.lorenz.sigma
+        );
     }
 
     #[test]
@@ -291,8 +398,11 @@ mod tests {
         a.audio.master_volume = 0.3;
         b.audio.master_volume = 0.3;
         let result = lerp_config(&a, &b, 0.5);
-        assert!(result.audio.master_volume >= 0.45,
-            "Volume below floor: {}", result.audio.master_volume);
+        assert!(
+            result.audio.master_volume >= 0.45,
+            "Volume below floor: {}",
+            result.audio.master_volume
+        );
     }
 
     #[test]
@@ -329,14 +439,19 @@ mod tests {
 
     #[test]
     fn total_duration_sums_active_scenes() {
-        use crate::arrangement::{Scene, total_duration};
+        use crate::arrangement::{total_duration, Scene};
         let mut s1 = Scene::empty(0);
-        s1.active = true; s1.hold_secs = 20.0; s1.morph_secs = 0.0; // first scene: no morph
+        s1.active = true;
+        s1.hold_secs = 20.0;
+        s1.morph_secs = 0.0; // first scene: no morph
         let mut s2 = Scene::empty(1);
-        s2.active = true; s2.hold_secs = 15.0; s2.morph_secs = 10.0;
+        s2.active = true;
+        s2.hold_secs = 15.0;
+        s2.morph_secs = 10.0;
         let mut s3 = Scene::empty(2);
         s3.active = false; // inactive — should not contribute
-        s3.hold_secs = 100.0; s3.morph_secs = 50.0;
+        s3.hold_secs = 100.0;
+        s3.morph_secs = 50.0;
 
         let scenes = vec![s1, s2, s3];
         let dur = total_duration(&scenes);
@@ -346,11 +461,15 @@ mod tests {
 
     #[test]
     fn scene_at_returns_correct_phase() {
-        use crate::arrangement::{Scene, scene_at};
+        use crate::arrangement::{scene_at, Scene};
         let mut s1 = Scene::empty(0);
-        s1.active = true; s1.hold_secs = 10.0; s1.morph_secs = 0.0;
+        s1.active = true;
+        s1.hold_secs = 10.0;
+        s1.morph_secs = 0.0;
         let mut s2 = Scene::empty(1);
-        s2.active = true; s2.hold_secs = 20.0; s2.morph_secs = 5.0;
+        s2.active = true;
+        s2.hold_secs = 20.0;
+        s2.morph_secs = 5.0;
 
         let scenes = vec![s1, s2];
 
@@ -380,7 +499,10 @@ mod tests {
         }
 
         // t=36 (past end) should return None
-        assert!(scene_at(&scenes, 36.0).is_none(), "Should return None past end");
+        assert!(
+            scene_at(&scenes, 36.0).is_none(),
+            "Should return None past end"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -422,14 +544,22 @@ mod tests {
     fn ode_parser_cos_at_zero() {
         use crate::systems::custom_ode::eval_expr;
         let result = eval_expr("cos(x)", 0.0, 0.0, 0.0, 0.0);
-        assert!((result - 1.0).abs() < 1e-12, "cos(0) should be 1, got {}", result);
+        assert!(
+            (result - 1.0).abs() < 1e-12,
+            "cos(0) should be 1, got {}",
+            result
+        );
     }
 
     #[test]
     fn ode_parser_exp_at_zero() {
         use crate::systems::custom_ode::eval_expr;
         let result = eval_expr("exp(x)", 0.0, 0.0, 0.0, 0.0);
-        assert!((result - 1.0).abs() < 1e-12, "exp(0) should be 1, got {}", result);
+        assert!(
+            (result - 1.0).abs() < 1e-12,
+            "exp(0) should be 1, got {}",
+            result
+        );
     }
 
     #[test]
@@ -437,7 +567,11 @@ mod tests {
         use crate::systems::custom_ode::eval_expr;
         // The parser guards division by near-zero values
         let result = eval_expr("1.0 / 0.0", 0.0, 0.0, 0.0, 0.0);
-        assert!(result.is_finite(), "Division by zero should return finite value, got {}", result);
+        assert!(
+            result.is_finite(),
+            "Division by zero should return finite value, got {}",
+            result
+        );
         assert_eq!(result, 0.0);
     }
 
@@ -446,7 +580,11 @@ mod tests {
         use crate::systems::custom_ode::eval_expr;
         // Lorenz: dy/dt = x*(28.0 - z) - y   at (1,1,1) => 1*(27)-1 = 26
         let result = eval_expr("x * (28.0 - z) - y", 1.0, 1.0, 1.0, 0.0);
-        assert!((result - 26.0).abs() < 1e-12, "Expected 26.0, got {}", result);
+        assert!(
+            (result - 26.0).abs() < 1e-12,
+            "Expected 26.0, got {}",
+            result
+        );
     }
 
     #[test]
@@ -474,7 +612,7 @@ mod tests {
 
     #[test]
     fn ode_custom_ode_integration_stays_finite() {
-        use crate::systems::{DynamicalSystem, custom_ode::CustomOde};
+        use crate::systems::{custom_ode::CustomOde, DynamicalSystem};
         let mut sys = CustomOde::new(
             "10.0*(y-x)".into(),
             "x*(28.0-z)-y".into(),
@@ -483,8 +621,11 @@ mod tests {
         for _ in 0..100 {
             sys.step(0.001);
         }
-        assert!(sys.state().iter().all(|v| v.is_finite()),
-            "Custom ODE state went non-finite: {:?}", sys.state());
+        assert!(
+            sys.state().iter().all(|v| v.is_finite()),
+            "Custom ODE state went non-finite: {:?}",
+            sys.state()
+        );
         let mag = sys.state().iter().map(|v| v * v).sum::<f64>().sqrt();
         assert!(mag < 1000.0, "Custom ODE magnitude too large: {}", mag);
     }
@@ -497,14 +638,26 @@ mod tests {
     fn scale_quantization_t0_returns_base() {
         // t=0 always maps to the root (base frequency)
         for &scale in &[
-            Scale::Pentatonic, Scale::Chromatic, Scale::JustIntonation, Scale::Microtonal,
-            Scale::Edo19, Scale::Edo31, Scale::Edo24,
-            Scale::WholeTone, Scale::Phrygian, Scale::Lydian,
+            Scale::Pentatonic,
+            Scale::Chromatic,
+            Scale::JustIntonation,
+            Scale::Microtonal,
+            Scale::Edo19,
+            Scale::Edo31,
+            Scale::Edo24,
+            Scale::WholeTone,
+            Scale::Phrygian,
+            Scale::Lydian,
         ] {
             let base = 220.0_f32;
             let f = quantize_to_scale(0.0, base, 3.0, scale);
-            assert!((f - base).abs() < 0.01,
-                "t=0 with {:?} should return base {}, got {}", scale, base, f);
+            assert!(
+                (f - base).abs() < 0.01,
+                "t=0 with {:?} should return base {}, got {}",
+                scale,
+                base,
+                f
+            );
         }
     }
 
@@ -518,18 +671,33 @@ mod tests {
         let t = 1.0 / 13.0;
         let f = quantize_to_scale(t, base, 1.0, Scale::Microtonal);
         let expected = base * 2.0_f32.powf(0.75 / 12.0);
-        assert!((f - expected).abs() < 0.5,
-            "Microtonal second degree: expected {:.2} Hz, got {:.2} Hz", expected, f);
+        assert!(
+            (f - expected).abs() < 0.5,
+            "Microtonal second degree: expected {:.2} Hz, got {:.2} Hz",
+            expected,
+            f
+        );
     }
 
     #[test]
     fn scale_quantization_never_below_base() {
         // For all scales and valid t values, frequency should never be below base
-        for &scale in &[Scale::Pentatonic, Scale::Chromatic, Scale::JustIntonation, Scale::Microtonal] {
+        for &scale in &[
+            Scale::Pentatonic,
+            Scale::Chromatic,
+            Scale::JustIntonation,
+            Scale::Microtonal,
+        ] {
             for i in 0..=100 {
                 let t = i as f32 / 100.0;
                 let f = quantize_to_scale(t, 220.0, 2.0, scale);
-                assert!(f >= 219.9, "Freq below base at t={} with {:?}: {}", t, scale, f);
+                assert!(
+                    f >= 219.9,
+                    "Freq below base at t={} with {:?}: {}",
+                    t,
+                    scale,
+                    f
+                );
             }
         }
     }
@@ -540,7 +708,12 @@ mod tests {
     fn edo19_t0_returns_base() {
         let base = 440.0_f32;
         let f = quantize_to_scale(0.0, base, 1.0, Scale::Edo19);
-        assert!((f - base).abs() < 0.01, "Edo19 t=0 expected base {}, got {}", base, f);
+        assert!(
+            (f - base).abs() < 0.01,
+            "Edo19 t=0 expected base {}, got {}",
+            base,
+            f
+        );
     }
 
     #[test]
@@ -548,7 +721,12 @@ mod tests {
         for i in 0..=100 {
             let t = i as f32 / 100.0;
             let f = quantize_to_scale(t, 220.0, 2.0, Scale::Edo19);
-            assert!(f.is_finite() && f >= 219.9, "Edo19 invalid freq {} at t={}", f, t);
+            assert!(
+                f.is_finite() && f >= 219.9,
+                "Edo19 invalid freq {} at t={}",
+                f,
+                t
+            );
         }
     }
 
@@ -558,8 +736,12 @@ mod tests {
         let expected_semitones = 12.0_f32 / 31.0;
         let expected_freq = base * 2.0_f32.powf(expected_semitones / 12.0);
         let f = quantize_to_scale(1.0 / 31.0, base, 1.0, Scale::Edo31);
-        assert!((f - expected_freq).abs() < 0.5,
-            "Edo31 second degree: expected {:.2} Hz, got {:.2} Hz", expected_freq, f);
+        assert!(
+            (f - expected_freq).abs() < 0.5,
+            "Edo31 second degree: expected {:.2} Hz, got {:.2} Hz",
+            expected_freq,
+            f
+        );
     }
 
     #[test]
@@ -567,8 +749,12 @@ mod tests {
         let base = 440.0_f32;
         let expected = base * 2.0_f32.powf(0.5 / 12.0);
         let f = quantize_to_scale(1.0 / 24.0, base, 1.0, Scale::Edo24);
-        assert!((f - expected).abs() < 0.5,
-            "Edo24 quarter-tone: expected {:.2} Hz, got {:.2} Hz", expected, f);
+        assert!(
+            (f - expected).abs() < 0.5,
+            "Edo24 quarter-tone: expected {:.2} Hz, got {:.2} Hz",
+            expected,
+            f
+        );
     }
 
     #[test]
@@ -576,8 +762,12 @@ mod tests {
         let base = 220.0_f32;
         let expected_4th = base * 2.0_f32.powf(6.0 / 12.0);
         let f = quantize_to_scale(3.0 / 6.0, base, 1.0, Scale::WholeTone);
-        assert!((f - expected_4th).abs() < 0.5,
-            "WholeTone 4th degree: expected {:.2} Hz, got {:.2} Hz", expected_4th, f);
+        assert!(
+            (f - expected_4th).abs() < 0.5,
+            "WholeTone 4th degree: expected {:.2} Hz, got {:.2} Hz",
+            expected_4th,
+            f
+        );
     }
 
     #[test]
@@ -585,8 +775,12 @@ mod tests {
         let base = 220.0_f32;
         let expected = base * 2.0_f32.powf(1.0 / 12.0);
         let f = quantize_to_scale(1.0 / 7.0, base, 1.0, Scale::Phrygian);
-        assert!((f - expected).abs() < 0.5,
-            "Phrygian second degree: expected {:.2} Hz, got {:.2} Hz", expected, f);
+        assert!(
+            (f - expected).abs() < 0.5,
+            "Phrygian second degree: expected {:.2} Hz, got {:.2} Hz",
+            expected,
+            f
+        );
     }
 
     #[test]
@@ -594,20 +788,24 @@ mod tests {
         let base = 220.0_f32;
         let expected = base * 2.0_f32.powf(6.0 / 12.0);
         let f = quantize_to_scale(3.0 / 7.0, base, 1.0, Scale::Lydian);
-        assert!((f - expected).abs() < 0.5,
-            "Lydian tritone: expected {:.2} Hz, got {:.2} Hz", expected, f);
+        assert!(
+            (f - expected).abs() < 0.5,
+            "Lydian tritone: expected {:.2} Hz, got {:.2} Hz",
+            expected,
+            f
+        );
     }
 
     #[test]
     fn scale_from_str_new_variants() {
         use crate::sonification::Scale;
-        assert_eq!(Scale::from("edo19"),      Scale::Edo19);
-        assert_eq!(Scale::from("edo31"),      Scale::Edo31);
-        assert_eq!(Scale::from("edo24"),      Scale::Edo24);
+        assert_eq!(Scale::from("edo19"), Scale::Edo19);
+        assert_eq!(Scale::from("edo31"), Scale::Edo31);
+        assert_eq!(Scale::from("edo24"), Scale::Edo24);
         assert_eq!(Scale::from("whole_tone"), Scale::WholeTone);
-        assert_eq!(Scale::from("phrygian"),   Scale::Phrygian);
-        assert_eq!(Scale::from("lydian"),     Scale::Lydian);
-        assert_eq!(Scale::from("unknown"),    Scale::Pentatonic);
+        assert_eq!(Scale::from("phrygian"), Scale::Phrygian);
+        assert_eq!(Scale::from("lydian"), Scale::Lydian);
+        assert_eq!(Scale::from("unknown"), Scale::Pentatonic);
     }
 
     #[test]
@@ -646,21 +844,32 @@ mod tests {
     #[test]
     fn golden_sine_440hz_first_sample() {
         let samples = run_osc(440.0, OscShape::Sine, 1);
-        assert!(samples[0].abs() < 1e-6, "First sine sample should be 0.0, got {}", samples[0]);
+        assert!(
+            samples[0].abs() < 1e-6,
+            "First sine sample should be 0.0, got {}",
+            samples[0]
+        );
     }
 
     #[test]
     fn golden_sine_440hz_quarter_period() {
         let samples = run_osc(440.0, OscShape::Sine, 26);
         let peak = samples[25];
-        assert!(peak > 0.9, "Sine quarter-period sample should be near +1, got {}", peak);
+        assert!(
+            peak > 0.9,
+            "Sine quarter-period sample should be near +1, got {}",
+            peak
+        );
     }
 
     #[test]
     fn golden_saw_first_sample_in_range() {
         let samples = run_osc(440.0, OscShape::Saw, 1);
-        assert!(samples[0].is_finite() && samples[0].abs() <= 1.01,
-            "Saw first sample out of range: {}", samples[0]);
+        assert!(
+            samples[0].is_finite() && samples[0].abs() <= 1.01,
+            "Saw first sample out of range: {}",
+            samples[0]
+        );
     }
 
     #[test]
@@ -668,15 +877,27 @@ mod tests {
         let samples = run_osc(220.0, OscShape::Triangle, 4410);
         let max_amp = samples.iter().cloned().fold(0.0f32, f32::max);
         let min_amp = samples.iter().cloned().fold(0.0f32, f32::min);
-        assert!(max_amp <= 1.2, "Triangle amplitude exceeded +1.2: {}", max_amp);
-        assert!(min_amp >= -1.2, "Triangle amplitude exceeded -1.2: {}", min_amp);
+        assert!(
+            max_amp <= 1.2,
+            "Triangle amplitude exceeded +1.2: {}",
+            max_amp
+        );
+        assert!(
+            min_amp >= -1.2,
+            "Triangle amplitude exceeded -1.2: {}",
+            min_amp
+        );
     }
 
     #[test]
     fn golden_square_amplitude_bounded() {
         let samples = run_osc(440.0, OscShape::Square, 4410);
         let max_amp = samples[1000..].iter().cloned().fold(0.0f32, f32::max);
-        assert!(max_amp <= 1.1, "Square amplitude exceeded +1.1: {}", max_amp);
+        assert!(
+            max_amp <= 1.1,
+            "Square amplitude exceeded +1.1: {}",
+            max_amp
+        );
     }
 
     #[test]
@@ -693,8 +914,14 @@ mod tests {
         let a = run_osc(330.0, OscShape::Sine, 64);
         let b = run_osc(330.0, OscShape::Sine, 64);
         for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
-            assert_eq!(x.to_bits(), y.to_bits(),
-                "Sine output not deterministic at sample {}: {} != {}", i, x, y);
+            assert_eq!(
+                x.to_bits(),
+                y.to_bits(),
+                "Sine output not deterministic at sample {}: {} != {}",
+                i,
+                x,
+                y
+            );
         }
     }
 
@@ -702,9 +929,16 @@ mod tests {
     fn golden_lorenz_trajectory_deterministic() {
         let mut s1 = Lorenz::new(10.0, 28.0, 2.6667);
         let mut s2 = Lorenz::new(10.0, 28.0, 2.6667);
-        for _ in 0..500 { s1.step(0.001); s2.step(0.001); }
+        for _ in 0..500 {
+            s1.step(0.001);
+            s2.step(0.001);
+        }
         for (a, b) in s1.state().iter().zip(s2.state().iter()) {
-            assert_eq!(a.to_bits(), b.to_bits(), "Lorenz trajectory not deterministic");
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "Lorenz trajectory not deterministic"
+            );
         }
     }
 
@@ -720,17 +954,26 @@ mod tests {
         cfg1.lorenz.sigma = 12.5;
         std::fs::write(&path, toml::to_string(&cfg1).expect("serialize")).expect("write");
         let loaded1 = load_config(&path);
-        assert!((loaded1.lorenz.sigma - 12.5).abs() < 1e-9,
-            "Initial load should see sigma=12.5, got {}", loaded1.lorenz.sigma);
+        assert!(
+            (loaded1.lorenz.sigma - 12.5).abs() < 1e-9,
+            "Initial load should see sigma=12.5, got {}",
+            loaded1.lorenz.sigma
+        );
         let mut cfg2 = Config::default();
         cfg2.lorenz.sigma = 18.0;
         cfg2.audio.reverb_wet = 0.7;
         std::fs::write(&path, toml::to_string(&cfg2).expect("serialize")).expect("overwrite");
         let loaded2 = load_config(&path);
-        assert!((loaded2.lorenz.sigma - 18.0).abs() < 1e-9,
-            "After hot-reload should see sigma=18.0, got {}", loaded2.lorenz.sigma);
-        assert!((loaded2.audio.reverb_wet - 0.7).abs() < 1e-5,
-            "After hot-reload should see reverb_wet=0.7, got {}", loaded2.audio.reverb_wet);
+        assert!(
+            (loaded2.lorenz.sigma - 18.0).abs() < 1e-9,
+            "After hot-reload should see sigma=18.0, got {}",
+            loaded2.lorenz.sigma
+        );
+        assert!(
+            (loaded2.audio.reverb_wet - 0.7).abs() < 1e-5,
+            "After hot-reload should see reverb_wet=0.7, got {}",
+            loaded2.audio.reverb_wet
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -742,8 +985,11 @@ mod tests {
         cfg.audio.reverb_wet = 5.0;
         std::fs::write(&path, toml::to_string(&cfg).expect("serialize")).expect("write");
         let loaded = load_config(&path);
-        assert!(loaded.audio.reverb_wet <= 1.0,
-            "reverb_wet should be clamped to <=1.0, got {}", loaded.audio.reverb_wet);
+        assert!(
+            loaded.audio.reverb_wet <= 1.0,
+            "reverb_wet should be clamped to <=1.0, got {}",
+            loaded.audio.reverb_wet
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -770,12 +1016,22 @@ mod tests {
     fn oscillator_finite_output_low_frequency() {
         use crate::synth::oscillator::OscShape;
         let sr = 44100.0_f32;
-        for shape in [OscShape::Sine, OscShape::Saw, OscShape::Square, OscShape::Triangle, OscShape::Noise] {
+        for shape in [
+            OscShape::Sine,
+            OscShape::Saw,
+            OscShape::Square,
+            OscShape::Triangle,
+            OscShape::Noise,
+        ] {
             let mut osc = Oscillator::new(0.001, shape, sr);
             for _ in 0..128 {
                 let s = osc.next_sample();
-                assert!(s.is_finite(),
-                    "Oscillator {:?} at 0.001 Hz produced non-finite: {}", shape, s);
+                assert!(
+                    s.is_finite(),
+                    "Oscillator {:?} at 0.001 Hz produced non-finite: {}",
+                    shape,
+                    s
+                );
             }
         }
     }
@@ -786,8 +1042,11 @@ mod tests {
         let mut osc = Oscillator::new(0.0, OscShape::Sine, 44100.0);
         for _ in 0..64 {
             let s = osc.next_sample();
-            assert!(s.is_finite(),
-                "Zero-frequency sine produced non-finite: {}", s);
+            assert!(
+                s.is_finite(),
+                "Zero-frequency sine produced non-finite: {}",
+                s
+            );
         }
     }
 
@@ -799,8 +1058,12 @@ mod tests {
             let mut osc = Oscillator::new(sr * 0.499, shape, sr);
             for _ in 0..256 {
                 let s = osc.next_sample();
-                assert!(s.is_finite(),
-                    "Near-Nyquist {:?} produced non-finite: {}", shape, s);
+                assert!(
+                    s.is_finite(),
+                    "Near-Nyquist {:?} produced non-finite: {}",
+                    shape,
+                    s
+                );
             }
         }
     }
@@ -812,8 +1075,11 @@ mod tests {
         let mut f = BiquadFilter::low_pass(1000.0, 0.707, 44100.0);
         let _ = f.process(f32::NAN);
         let out = f.process(0.5);
-        assert!(out.is_finite(),
-            "BiquadFilter did not recover after NaN input: {}", out);
+        assert!(
+            out.is_finite(),
+            "BiquadFilter did not recover after NaN input: {}",
+            out
+        );
     }
 
     /// BiquadFilter at extreme cutoff values must not produce NaN.
@@ -824,13 +1090,21 @@ mod tests {
         let mut f_low = BiquadFilter::low_pass(20.0, 0.707, sr);
         for _ in 0..64 {
             let out = f_low.process(0.5);
-            assert!(out.is_finite(), "Low-cutoff filter produced non-finite: {}", out);
+            assert!(
+                out.is_finite(),
+                "Low-cutoff filter produced non-finite: {}",
+                out
+            );
         }
         // High Q (near instability)
         let mut f_hq = BiquadFilter::low_pass(440.0, 20.0, sr);
         for _ in 0..64 {
             let out = f_hq.process(0.1);
-            assert!(out.is_finite(), "High-Q filter produced non-finite: {}", out);
+            assert!(
+                out.is_finite(),
+                "High-Q filter produced non-finite: {}",
+                out
+            );
         }
     }
 
@@ -843,14 +1117,20 @@ mod tests {
         env.trigger();
         for _ in 0..(sr as usize / 2) {
             let l = env.next_sample();
-            assert!(l >= 0.0 && l <= 1.0 + 1e-4,
-                "ADSR level out of [0,1] during hold: {}", l);
+            assert!(
+                l >= 0.0 && l <= 1.0 + 1e-4,
+                "ADSR level out of [0,1] during hold: {}",
+                l
+            );
         }
         env.release();
         for _ in 0..(sr as usize / 4) {
             let l = env.next_sample();
-            assert!(l >= 0.0 && l <= 1.0 + 1e-4,
-                "ADSR level out of [0,1] during release: {}", l);
+            assert!(
+                l >= 0.0 && l <= 1.0 + 1e-4,
+                "ADSR level out of [0,1] during release: {}",
+                l
+            );
         }
     }
 
@@ -864,8 +1144,12 @@ mod tests {
         bc.dither = false;
         for &val in &[-1.0_f32, -0.5, 0.0, 0.5, 1.0] {
             let out = bc.process(val);
-            assert!((out - val).abs() < 1e-4,
-                "Bitcrusher bypass changed {} to {}", val, out);
+            assert!(
+                (out - val).abs() < 1e-4,
+                "Bitcrusher bypass changed {} to {}",
+                val,
+                out
+            );
         }
     }
 
@@ -883,8 +1167,11 @@ mod tests {
                 (out * 100.0).round() as i32
             })
             .collect();
-        assert!(levels.len() <= 2,
-            "1-bit bitcrusher should produce at most 2 levels, got: {:?}", levels);
+        assert!(
+            levels.len() <= 2,
+            "1-bit bitcrusher should produce at most 2 levels, got: {:?}",
+            levels
+        );
     }
 
     /// DelayLine with all-zero input must produce finite output.
@@ -894,8 +1181,12 @@ mod tests {
         let mut d = DelayLine::new(500.0, 44100.0);
         for _ in 0..4096 {
             let (l, r) = d.process(0.0, 0.0);
-            assert!(l.is_finite() && r.is_finite(),
-                "DelayLine zero-input produced non-finite: ({}, {})", l, r);
+            assert!(
+                l.is_finite() && r.is_finite(),
+                "DelayLine zero-input produced non-finite: ({}, {})",
+                l,
+                r
+            );
         }
     }
 
@@ -905,12 +1196,18 @@ mod tests {
         use crate::synth::reverb::Freeverb;
         let mut rv = Freeverb::new(44100.0);
         rv.wet = 0.5;
-        for _ in 0..256 { rv.process(0.1, -0.1); }
+        for _ in 0..256 {
+            rv.process(0.1, -0.1);
+        }
         let _ = rv.process(f32::NAN, f32::NAN);
         for _ in 0..32 {
             let (l, r) = rv.process(0.0, 0.0);
-            assert!(l.is_finite() && r.is_finite(),
-                "Freeverb did not recover from NaN: ({}, {})", l, r);
+            assert!(
+                l.is_finite() && r.is_finite(),
+                "Freeverb did not recover from NaN: ({}, {})",
+                l,
+                r
+            );
         }
     }
 
@@ -923,8 +1220,11 @@ mod tests {
         ks.trigger(4000.0, sr);
         for _ in 0..256 {
             let s = ks.next_sample();
-            assert!(s.is_finite(),
-                "KarplusStrong 4000 Hz produced non-finite: {}", s);
+            assert!(
+                s.is_finite(),
+                "KarplusStrong 4000 Hz produced non-finite: {}",
+                s
+            );
         }
     }
 
@@ -937,8 +1237,11 @@ mod tests {
         ks.trigger(20.0, sr);
         for _ in 0..512 {
             let s = ks.next_sample();
-            assert!(s.is_finite(),
-                "KarplusStrong 20 Hz produced non-finite: {}", s);
+            assert!(
+                s.is_finite(),
+                "KarplusStrong 20 Hz produced non-finite: {}",
+                s
+            );
         }
     }
 
@@ -947,24 +1250,45 @@ mod tests {
     fn quantize_to_scale_t_one_bounded() {
         let base = 220.0_f32;
         let oct = 3.0_f32;
-        for scale in [Scale::Pentatonic, Scale::Chromatic, Scale::WholeTone, Scale::Phrygian, Scale::Lydian] {
+        for scale in [
+            Scale::Pentatonic,
+            Scale::Chromatic,
+            Scale::WholeTone,
+            Scale::Phrygian,
+            Scale::Lydian,
+        ] {
             let f = quantize_to_scale(1.0, base, oct, scale);
-            assert!(f.is_finite() && f > 0.0,
-                "quantize_to_scale(1.0, {:?}) is not positive-finite: {}", scale, f);
+            assert!(
+                f.is_finite() && f > 0.0,
+                "quantize_to_scale(1.0, {:?}) is not positive-finite: {}",
+                scale,
+                f
+            );
             let max = base * 2.0_f32.powf(oct);
-            assert!(f <= max * 1.01,
-                "quantize_to_scale(1.0, {:?}) exceeds max {}: got {}", scale, max, f);
+            assert!(
+                f <= max * 1.01,
+                "quantize_to_scale(1.0, {:?}) exceeds max {}: got {}",
+                scale,
+                max,
+                f
+            );
         }
     }
 
     /// chord_intervals_for must return non-negative finite semitone offsets for all modes.
     #[test]
     fn chord_intervals_all_modes_valid() {
-        for mode in ["major", "minor", "power", "sus2", "octave", "dom7", "none", "unknown"] {
+        for mode in [
+            "major", "minor", "power", "sus2", "octave", "dom7", "none", "unknown",
+        ] {
             let ivs = chord_intervals_for(mode);
             for iv in ivs {
-                assert!(iv.is_finite() && iv >= 0.0,
-                    "chord_intervals_for({}) contains invalid value: {}", mode, iv);
+                assert!(
+                    iv.is_finite() && iv >= 0.0,
+                    "chord_intervals_for({}) contains invalid value: {}",
+                    mode,
+                    iv
+                );
             }
         }
     }
@@ -977,96 +1301,168 @@ mod tests {
     fn double_pendulum_stays_finite_after_1000_steps() {
         use crate::systems::DoublePendulum;
         let mut sys = DoublePendulum::new(1.0, 1.0, 1.0, 1.0);
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "DoublePendulum non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "DoublePendulum non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn van_der_pol_stays_finite_after_1000_steps() {
         use crate::systems::VanDerPol;
         let mut sys = VanDerPol::new();
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "VanDerPol non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "VanDerPol non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn halvorsen_stays_finite_after_1000_steps() {
         use crate::systems::Halvorsen;
         let mut sys = Halvorsen::new();
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "Halvorsen non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "Halvorsen non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn aizawa_stays_finite_after_1000_steps() {
         use crate::systems::Aizawa;
         let mut sys = Aizawa::new();
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "Aizawa non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "Aizawa non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn chua_stays_finite_after_1000_steps() {
         use crate::systems::Chua;
         let mut sys = Chua::new();
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "Chua non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "Chua non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn henon_map_stays_finite_after_1000_steps() {
         use crate::systems::HenonMap;
         let mut sys = HenonMap::new();
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "HenonMap non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "HenonMap non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn geodesic_torus_stays_finite_after_1000_steps() {
         use crate::systems::GeodesicTorus;
         let mut sys = GeodesicTorus::new(3.0, 1.0);
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "GeodesicTorus non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "GeodesicTorus non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn nose_hoover_stays_finite_after_1000_steps() {
         use crate::systems::NoseHoover;
         let mut sys = NoseHoover::new();
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "NoseHoover non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "NoseHoover non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn mackey_glass_stays_finite_after_1000_steps() {
         use crate::systems::MackeyGlass;
         let mut sys = MackeyGlass::new();
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "MackeyGlass non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "MackeyGlass non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn lorenz96_stays_finite_after_1000_steps() {
         use crate::systems::Lorenz96;
         let mut sys = Lorenz96::new();
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "Lorenz96 non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "Lorenz96 non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn coupled_map_lattice_stays_finite_after_1000_steps() {
         use crate::systems::CoupledMapLattice;
         let mut sys = CoupledMapLattice::new(3.9, 0.35);
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "CoupledMapLattice non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "CoupledMapLattice non-finite: {:?}",
+            sys.state()
+        );
     }
 
     #[test]
     fn hindmarsh_rose_stays_finite_after_1000_steps() {
         use crate::systems::HindmarshRose;
         let mut sys = HindmarshRose::new(3.0, 0.006);
-        for _ in 0..1000 { sys.step(0.001); }
-        assert!(all_finite(sys.state()), "HindmarshRose non-finite: {:?}", sys.state());
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            all_finite(sys.state()),
+            "HindmarshRose non-finite: {:?}",
+            sys.state()
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1075,31 +1471,41 @@ mod tests {
 
     #[test]
     fn direct_mapping_freqs_are_finite_and_positive() {
-        use crate::sonification::{DirectMapping, Sonification};
         use crate::config::SonificationConfig;
+        use crate::sonification::{DirectMapping, Sonification};
         let mut mapper = DirectMapping::new();
         let state = vec![1.0, -2.0, 0.5, 3.0];
         let cfg = SonificationConfig::default();
         let mut params = mapper.map(&state, 10.0, &cfg);
-        for _ in 0..20 { params = mapper.map(&state, 10.0, &cfg); }
+        for _ in 0..20 {
+            params = mapper.map(&state, 10.0, &cfg);
+        }
         for (i, &f) in params.freqs.iter().enumerate() {
-            assert!(f.is_finite() && f > 0.0,
-                "DirectMapping voice {} freq not positive-finite: {}", i, f);
+            assert!(
+                f.is_finite() && f > 0.0,
+                "DirectMapping voice {} freq not positive-finite: {}",
+                i,
+                f
+            );
         }
     }
 
     #[test]
     fn direct_mapping_amps_in_unit_interval() {
-        use crate::sonification::{DirectMapping, Sonification};
         use crate::config::SonificationConfig;
+        use crate::sonification::{DirectMapping, Sonification};
         let mut mapper = DirectMapping::new();
         let state = vec![1.0, -2.0, 0.5];
         let cfg = SonificationConfig::default();
         for _ in 0..30 {
             let params = mapper.map(&state, 5.0, &cfg);
             for (i, &a) in params.amps.iter().enumerate() {
-                assert!(a.is_finite() && a >= 0.0 && a <= 1.01,
-                    "DirectMapping amp[{}] out of [0,1]: {}", i, a);
+                assert!(
+                    a.is_finite() && a >= 0.0 && a <= 1.01,
+                    "DirectMapping amp[{}] out of [0,1]: {}",
+                    i,
+                    a
+                );
             }
         }
     }
@@ -1138,24 +1544,39 @@ mod tests {
 
     #[test]
     fn oscillator_zero_frequency_does_not_panic() {
-        use crate::synth::oscillator::{Oscillator, OscShape};
-        for &shape in &[OscShape::Sine, OscShape::Saw, OscShape::Square, OscShape::Triangle] {
+        use crate::synth::oscillator::{OscShape, Oscillator};
+        for &shape in &[
+            OscShape::Sine,
+            OscShape::Saw,
+            OscShape::Square,
+            OscShape::Triangle,
+        ] {
             let mut osc = Oscillator::new(0.0, shape, 44100.0);
             for _ in 0..100 {
                 let s = osc.next_sample();
-                assert!(s.is_finite(), "Shape {:?} at freq=0 produced non-finite: {}", shape, s);
+                assert!(
+                    s.is_finite(),
+                    "Shape {:?} at freq=0 produced non-finite: {}",
+                    shape,
+                    s
+                );
             }
         }
     }
 
     #[test]
     fn oscillator_nyquist_frequency_does_not_panic() {
-        use crate::synth::oscillator::{Oscillator, OscShape};
+        use crate::synth::oscillator::{OscShape, Oscillator};
         for &shape in &[OscShape::Sine, OscShape::Saw, OscShape::Square] {
             let mut osc = Oscillator::new(22050.0, shape, 44100.0);
             for _ in 0..100 {
                 let s = osc.next_sample();
-                assert!(s.is_finite(), "Shape {:?} at Nyquist produced non-finite: {}", shape, s);
+                assert!(
+                    s.is_finite(),
+                    "Shape {:?} at Nyquist produced non-finite: {}",
+                    shape,
+                    s
+                );
             }
         }
     }
@@ -1167,7 +1588,8 @@ mod tests {
     #[test]
     fn config_all_system_configs_roundtrip_toml() {
         let mut orig = Config::default();
-        orig.lorenz.sigma = 12.5; orig.lorenz.rho = 32.0;
+        orig.lorenz.sigma = 12.5;
+        orig.lorenz.rho = 32.0;
         orig.rossler.c = 7.5;
         orig.double_pendulum.m1 = 2.0;
         orig.duffing.omega = 1.3;
@@ -1206,20 +1628,37 @@ mod tests {
         }
         let s = sys.state();
         assert!(all_finite(s), "Lorenz state non-finite: {:?}", s);
-        assert!(s[0].abs() < 30.0, "Lorenz x outside attractor bounds: {}", s[0]);
-        assert!(s[1].abs() < 30.0, "Lorenz y outside attractor bounds: {}", s[1]);
-        assert!(s[2] > 0.0 && s[2] < 60.0, "Lorenz z outside attractor bounds: {}", s[2]);
+        assert!(
+            s[0].abs() < 30.0,
+            "Lorenz x outside attractor bounds: {}",
+            s[0]
+        );
+        assert!(
+            s[1].abs() < 30.0,
+            "Lorenz y outside attractor bounds: {}",
+            s[1]
+        );
+        assert!(
+            s[2] > 0.0 && s[2] < 60.0,
+            "Lorenz z outside attractor bounds: {}",
+            s[2]
+        );
     }
 
     /// z remains strictly positive on the Lorenz attractor after burn-in.
     #[test]
     fn lorenz_z_stays_positive() {
         let mut sys = Lorenz::new(10.0, 28.0, 2.6667);
-        for _ in 0..5_000 { sys.step(0.001); }
+        for _ in 0..5_000 {
+            sys.step(0.001);
+        }
         for _ in 0..20_000 {
             sys.step(0.001);
-            assert!(sys.state()[2] > 0.0,
-                "Lorenz z became non-positive: {}", sys.state()[2]);
+            assert!(
+                sys.state()[2] > 0.0,
+                "Lorenz z became non-positive: {}",
+                sys.state()[2]
+            );
         }
     }
 
@@ -1231,12 +1670,18 @@ mod tests {
     #[test]
     fn rossler_stays_bounded_30000_steps() {
         let mut sys = Rossler::new(0.2, 0.2, 5.7);
-        for _ in 0..30_000 { sys.step(0.001); }
+        for _ in 0..30_000 {
+            sys.step(0.001);
+        }
         let s = sys.state();
         assert!(all_finite(s), "Rossler non-finite: {:?}", s);
         assert!(s[0].abs() < 15.0, "Rossler x out of bounds: {}", s[0]);
         assert!(s[1].abs() < 15.0, "Rossler y out of bounds: {}", s[1]);
-        assert!(s[2] > 0.0 && s[2] < 25.0, "Rossler z out of bounds: {}", s[2]);
+        assert!(
+            s[2] > 0.0 && s[2] < 25.0,
+            "Rossler z out of bounds: {}",
+            s[2]
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1260,21 +1705,26 @@ mod tests {
             let (th1, th2, p1, p2) = (s[0], s[1], s[2], s[3]);
             let delta = th2 - th1;
             let denom = (m1 + m2 - m2 * delta.cos().powi(2)).max(1e-12);
-            let t = (
-                (m1 + m2) * l2.powi(2) * p1.powi(2)
-                + m2 * l1.powi(2) * p2.powi(2)
-                - 2.0 * m2 * l1 * l2 * p1 * p2 * delta.cos()
-            ) / (2.0 * m1 * m2 * l1.powi(2) * l2.powi(2) * denom);
+            let t = ((m1 + m2) * l2.powi(2) * p1.powi(2) + m2 * l1.powi(2) * p2.powi(2)
+                - 2.0 * m2 * l1 * l2 * p1 * p2 * delta.cos())
+                / (2.0 * m1 * m2 * l1.powi(2) * l2.powi(2) * denom);
             let v = -(m1 + m2) * g * l1 * th1.cos() - m2 * g * l2 * th2.cos();
             t + v
         };
 
         let e0 = hamiltonian(sys.state());
-        for _ in 0..10_000 { sys.step(0.001); }
+        for _ in 0..10_000 {
+            sys.step(0.001);
+        }
         let e1 = hamiltonian(sys.state());
         let rel = ((e1 - e0) / e0.abs()).abs();
-        assert!(rel < 0.02,
-            "Energy drift too large: e0={:.6} e1={:.6} rel={:.4}", e0, e1, rel);
+        assert!(
+            rel < 0.02,
+            "Energy drift too large: e0={:.6} e1={:.6} rel={:.4}",
+            e0,
+            e1,
+            rel
+        );
     }
 
     /// The double pendulum state must remain finite and within realistic
@@ -1303,18 +1753,28 @@ mod tests {
     #[test]
     fn kuramoto_below_critical_coupling_incoherent() {
         let mut sys = Kuramoto::new(16, 0.1);
-        for _ in 0..20_000 { sys.step(0.01); }
-        assert!(sys.order_parameter() < 0.5,
-            "Expected incoherence below K_c, got r={:.4}", sys.order_parameter());
+        for _ in 0..20_000 {
+            sys.step(0.01);
+        }
+        assert!(
+            sys.order_parameter() < 0.5,
+            "Expected incoherence below K_c, got r={:.4}",
+            sys.order_parameter()
+        );
     }
 
     /// Well above K_c the order parameter must exceed 0.5 (synchronized).
     #[test]
     fn kuramoto_above_critical_coupling_synchronizes() {
         let mut sys = Kuramoto::new(16, 5.0);
-        for _ in 0..50_000 { sys.step(0.01); }
-        assert!(sys.order_parameter() > 0.5,
-            "Expected synchronization above K_c, got r={:.4}", sys.order_parameter());
+        for _ in 0..50_000 {
+            sys.step(0.01);
+        }
+        assert!(
+            sys.order_parameter() > 0.5,
+            "Expected synchronization above K_c, got r={:.4}",
+            sys.order_parameter()
+        );
     }
 
     /// The order parameter must always lie in [0, 1].
@@ -1322,10 +1782,16 @@ mod tests {
     fn kuramoto_order_parameter_in_unit_interval() {
         for &k in &[0.0_f64, 0.5, 1.0, 2.0, 10.0] {
             let mut sys = Kuramoto::new(8, k);
-            for _ in 0..5_000 { sys.step(0.01); }
+            for _ in 0..5_000 {
+                sys.step(0.01);
+            }
             let r = sys.order_parameter();
-            assert!(r >= 0.0 && r <= 1.0 + 1e-9,
-                "Order parameter out of [0,1] at K={}: {}", k, r);
+            assert!(
+                r >= 0.0 && r <= 1.0 + 1e-9,
+                "Order parameter out of [0,1] at K={}: {}",
+                k,
+                r
+            );
         }
     }
 
@@ -1339,7 +1805,9 @@ mod tests {
     fn three_body_energy_conserved() {
         use crate::systems::ThreeBody;
         let mut sys = ThreeBody::new([1.0, 1.0, 1.0]);
-        for _ in 0..10_000 { sys.step(0.001); }
+        for _ in 0..10_000 {
+            sys.step(0.001);
+        }
         let err = sys.energy_error;
         assert!(err < 0.01, "Three-body energy error > 1%: {:.4}", err);
     }
@@ -1352,15 +1820,25 @@ mod tests {
     #[test]
     fn scale_quantization_produces_valid_midi_notes() {
         let base = 110.0_f32; // A2
-        let oct  = 3.0_f32;
-        for &scale in &[Scale::Pentatonic, Scale::Chromatic, Scale::Lydian, Scale::Phrygian] {
+        let oct = 3.0_f32;
+        for &scale in &[
+            Scale::Pentatonic,
+            Scale::Chromatic,
+            Scale::Lydian,
+            Scale::Phrygian,
+        ] {
             for i in 0..=100 {
                 let t = i as f32 / 100.0;
                 let f = quantize_to_scale(t, base, oct, scale);
                 let midi = 69.0_f32 + 12.0 * (f / 440.0).log2();
-                assert!(midi >= 0.0 && midi <= 127.0,
+                assert!(
+                    midi >= 0.0 && midi <= 127.0,
                     "Scale {:?} t={:.3}: freq {:.2} -> MIDI {:.1} out of [0,127]",
-                    scale, t, f, midi);
+                    scale,
+                    t,
+                    f,
+                    midi
+                );
             }
         }
     }
@@ -1373,21 +1851,29 @@ mod tests {
     /// dimension must be zero-amplitude.
     #[test]
     fn polyphony_limit_four_voices_max() {
-        use crate::sonification::{DirectMapping, Sonification};
         use crate::config::SonificationConfig;
+        use crate::sonification::{DirectMapping, Sonification};
         let mut mapper = DirectMapping::new();
         let cfg = SonificationConfig::default();
 
         // 3D state — voice 3 must be zero
         let params = mapper.map(&[1.0_f64, -2.0, 0.5], 5.0, &cfg);
         assert_eq!(params.freqs.len(), 4, "Must have exactly 4 frequency slots");
-        assert_eq!(params.amps.len(),  4, "Must have exactly 4 amplitude slots");
-        assert_eq!(params.amps[3], 0.0, "Voice 3 amp should be 0 for 3-D state: {}", params.amps[3]);
+        assert_eq!(params.amps.len(), 4, "Must have exactly 4 amplitude slots");
+        assert_eq!(
+            params.amps[3], 0.0,
+            "Voice 3 amp should be 0 for 3-D state: {}",
+            params.amps[3]
+        );
 
         // 1D state — voices 1-3 must all be zero
         let p1 = mapper.map(&[0.5_f64], 1.0, &cfg);
         for i in 1..4 {
-            assert_eq!(p1.amps[i], 0.0, "Voice {} amp not 0 for 1-D state: {}", i, p1.amps[i]);
+            assert_eq!(
+                p1.amps[i], 0.0,
+                "Voice {} amp not 0 for 1-D state: {}",
+                i, p1.amps[i]
+            );
         }
     }
 
@@ -1408,8 +1894,8 @@ mod tests {
 
 #[cfg(test)]
 mod ode_property_tests {
-    use crate::systems::{DynamicalSystem, Lorenz};
     use crate::systems::duffing::Duffing;
+    use crate::systems::{DynamicalSystem, Lorenz};
 
     /// Lorenz attractor bounds test.
     ///
@@ -1429,7 +1915,11 @@ mod ode_property_tests {
             assert!(s[0].abs() < 35.0, "x out of bounds: {}", s[0]);
             assert!(s[1].abs() < 35.0, "y out of bounds: {}", s[1]);
             assert!(s[2] > -5.0 && s[2] < 70.0, "z out of bounds: {}", s[2]);
-            assert!(s.iter().all(|v| v.is_finite()), "NaN/Inf in Lorenz state: {:?}", s);
+            assert!(
+                s.iter().all(|v| v.is_finite()),
+                "NaN/Inf in Lorenz state: {:?}",
+                s
+            );
         }
     }
 
@@ -1447,8 +1937,11 @@ mod ode_property_tests {
         let s = sys.state();
         // State must be finite and in the known attractor region
         assert!(s.iter().all(|v| v.is_finite()), "Non-finite state: {:?}", s);
-        assert!(s[0].abs() < 30.0 && s[1].abs() < 30.0 && s[2] > 0.0 && s[2] < 60.0,
-            "State outside attractor after 100 steps: {:?}", s);
+        assert!(
+            s[0].abs() < 30.0 && s[1].abs() < 30.0 && s[2] > 0.0 && s[2] < 60.0,
+            "State outside attractor after 100 steps: {:?}",
+            s
+        );
         // Second identical run must produce the exact same result (determinism)
         let mut sys2 = Lorenz::new(10.0, 28.0, 2.6667);
         for _ in 0..100 {
@@ -1487,13 +1980,22 @@ mod ode_property_tests {
             sys.step(dt);
         }
         let s = sys.state();
-        assert!(s.iter().all(|v| v.is_finite()), "Duffing state contains NaN/Inf: {:?}", s);
+        assert!(
+            s.iter().all(|v| v.is_finite()),
+            "Duffing state contains NaN/Inf: {:?}",
+            s
+        );
         let h_final = hamiltonian(s);
         // For the driven/damped system, energy is not strictly conserved, but the
         // deviation should remain bounded (< 100) — catastrophic growth signals a bug.
         let delta_h = (h_final - h0).abs();
-        assert!(delta_h < 100.0,
+        assert!(
+            delta_h < 100.0,
             "|ΔH| = {} too large after {} steps (h0={}, h_final={})",
-            delta_h, n_steps, h0, h_final);
+            delta_h,
+            n_steps,
+            h0,
+            h_final
+        );
     }
 }

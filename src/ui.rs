@@ -1,26 +1,36 @@
 use egui::*;
 use parking_lot::Mutex;
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
-use std::collections::HashSet;
 
+use crate::arrangement::{demo_arrangement, generate_song, scene_at, total_duration, Scene};
+use crate::audio::{
+    capture_snippet, save_clip, save_clip_wav_32bit, save_portrait_png, save_portrait_svg,
+    ClipBuffer, LoopExportPending, SharedSnippetPlayback, SidechainLevel, SnippetPlayback,
+    StereoWidth, VuMeter, WavRecorder, XrunCounter,
+};
 use crate::config::Config;
+use crate::patches::{
+    list_backups, list_patches, load_backup, load_patch_file, load_preset, save_patch, PRESETS,
+};
 use crate::sonification::chord_intervals_for;
-use crate::patches::{PRESETS, load_preset, save_patch, list_patches, load_patch_file, list_backups, load_backup};
-use crate::audio::{WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer, SharedSnippetPlayback, SnippetPlayback, XrunCounter, StereoWidth, save_clip, save_clip_wav_32bit, save_portrait_png, save_portrait_svg, capture_snippet};
 use crate::systems::{self, *};
-use crate::arrangement::{Scene, total_duration, scene_at, generate_song, demo_arrangement};
 use hound;
 
 // Extracted sub-modules for large, self-contained drawing functions.
-use crate::ui_tips::draw_tips_content;
 use crate::ui_timeline::draw_arrangement_timeline;
-use crate::ui_waveform::{draw_waveform, draw_note_map};
+use crate::ui_tips::draw_tips_content;
+use crate::ui_waveform::{draw_note_map, draw_waveform};
 
 /// Severity level for toast notifications.
 #[derive(Clone, PartialEq)]
-pub enum ToastKind { Info, Warning, Error }
+pub enum ToastKind {
+    Info,
+    Warning,
+    Error,
+}
 
 /// A transient notification displayed as an overlay for a few seconds.
 #[derive(Clone)]
@@ -34,13 +44,28 @@ pub struct Toast {
 
 impl Toast {
     pub fn info(msg: impl Into<String>) -> Self {
-        Self { message: msg.into(), kind: ToastKind::Info, born: std::time::Instant::now(), ttl_secs: 4.0 }
+        Self {
+            message: msg.into(),
+            kind: ToastKind::Info,
+            born: std::time::Instant::now(),
+            ttl_secs: 4.0,
+        }
     }
     pub fn warning(msg: impl Into<String>) -> Self {
-        Self { message: msg.into(), kind: ToastKind::Warning, born: std::time::Instant::now(), ttl_secs: 5.0 }
+        Self {
+            message: msg.into(),
+            kind: ToastKind::Warning,
+            born: std::time::Instant::now(),
+            ttl_secs: 5.0,
+        }
     }
     pub fn error(msg: impl Into<String>) -> Self {
-        Self { message: msg.into(), kind: ToastKind::Error, born: std::time::Instant::now(), ttl_secs: 6.0 }
+        Self {
+            message: msg.into(),
+            kind: ToastKind::Error,
+            born: std::time::Instant::now(),
+            ttl_secs: 6.0,
+        }
     }
 }
 
@@ -59,10 +84,10 @@ pub struct LooperLayer {
 pub struct Snippet {
     pub name: String,
     #[allow(dead_code)]
-    pub path: String,         // stored for future disk-reload and export features
+    pub path: String, // stored for future disk-reload and export features
     pub duration_secs: f32,
     #[allow(dead_code)]
-    pub sample_rate: u32,     // stored for rate-conversion during export
+    pub sample_rate: u32, // stored for rate-conversion during export
     /// ~128-point peak envelope for waveform thumbnail display.
     pub thumb: Vec<f32>,
     /// Color index 0..8 for visual identity.
@@ -75,24 +100,40 @@ impl Snippet {
     pub fn from_samples(name: String, path: String, samples: Vec<f32>, sample_rate: u32) -> Self {
         let duration_secs = samples.len() as f32 / (sample_rate as f32 * 2.0);
         let thumb = Self::make_thumb(&samples, 128);
-        static COLOR_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        static COLOR_COUNTER: std::sync::atomic::AtomicUsize =
+            std::sync::atomic::AtomicUsize::new(0);
         let color_idx = COLOR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 8;
-        Self { name, path, duration_secs, sample_rate, thumb, color_idx, samples: Arc::new(samples) }
+        Self {
+            name,
+            path,
+            duration_secs,
+            sample_rate,
+            thumb,
+            color_idx,
+            samples: Arc::new(samples),
+        }
     }
 
     fn make_thumb(samples: &[f32], points: usize) -> Vec<f32> {
-        if samples.is_empty() { return vec![0.0; points]; }
+        if samples.is_empty() {
+            return vec![0.0; points];
+        }
         let chunk = (samples.len() / points).max(2) & !1; // even for stereo
-        (0..points).map(|i| {
-            let start = (i * samples.len() / points) & !1;
-            let end = (start + chunk).min(samples.len());
-            samples[start..end].iter().map(|s| s.abs()).fold(0.0f32, f32::max)
-        }).collect()
+        (0..points)
+            .map(|i| {
+                let start = (i * samples.len() / points) & !1;
+                let end = (start + chunk).min(samples.len());
+                samples[start..end]
+                    .iter()
+                    .map(|s| s.abs())
+                    .fold(0.0f32, f32::max)
+            })
+            .collect()
     }
 
     /// 8 distinct colors for snippet identity.
     pub fn color(idx: usize) -> egui::Color32 {
-        const COLORS: [(u8,u8,u8); 8] = [
+        const COLORS: [(u8, u8, u8); 8] = [
             (0, 190, 255),   // cyan
             (255, 80, 120),  // pink
             (80, 255, 140),  // green
@@ -102,8 +143,8 @@ impl Snippet {
             (40, 220, 220),  // teal
             (200, 255, 60),  // lime
         ];
-        let (r,g,b) = COLORS[idx % 8];
-        egui::Color32::from_rgb(r,g,b)
+        let (r, g, b) = COLORS[idx % 8];
+        egui::Color32::from_rgb(r, g, b)
     }
 }
 
@@ -153,8 +194,8 @@ pub struct AppState {
     pub paused: bool,
     pub system_changed: bool,
     pub mode_changed: bool,
-    pub viz_projection: usize,  // 0=XY, 1=XZ, 2=YZ
-    pub viz_tab: usize,         // 0=Phase, 1=Waveform, 2=Notes, 3=Math View, 4=Bifurcation, 5=Basin
+    pub viz_projection: usize, // 0=XY, 1=XZ, 2=YZ
+    pub viz_tab: usize,        // 0=Phase, 1=Waveform, 2=Notes, 3=Math View, 4=Bifurcation, 5=Basin
     pub selected_preset: String,
     pub chaos_level: f32,
     pub current_state: Vec<f64>,
@@ -256,7 +297,7 @@ pub struct AppState {
     pub coupled_source: String,
     pub coupled_strength: f32,
     pub coupled_target: String,
-    pub coupled_x_out: f32,   // live display: main system x output (normalized)
+    pub coupled_x_out: f32, // live display: main system x output (normalized)
     pub coupled_src_x_out: f32, // live display: source system x output (normalized)
     pub coupled_bidirectional: bool,
     pub sync_error: f32,
@@ -329,11 +370,11 @@ pub struct AppState {
     /// True while we're recording a single-pass render of the generated arrangement
     pub save_gen_pending: bool,
     // Invisible behavioral fields (new batch)
-    pub scars: Vec<(f32, f32)>,       // SCARRING: near-divergence marks
-    pub shutdown_fading: bool,         // DYING GRACEFULLY: audio fade on close
-    pub startup_ramp_t: f32,           // DYING GRACEFULLY: startup volume ramp
-    pub time_of_day_f: f32,            // PHOTOTROPISM: 0=midnight 1=noon
-    pub wounded: bool,                 // WOUND HEALING: crashed last session
+    pub scars: Vec<(f32, f32)>, // SCARRING: near-divergence marks
+    pub shutdown_fading: bool,  // DYING GRACEFULLY: audio fade on close
+    pub startup_ramp_t: f32,    // DYING GRACEFULLY: startup volume ramp
+    pub time_of_day_f: f32,     // PHOTOTROPISM: 0=midnight 1=noon
+    pub wounded: bool,          // WOUND HEALING: crashed last session
     // Lyapunov exponent spectrum (computed every ~5s in sim thread, largest-first)
     pub lyapunov_spectrum: Vec<f64>,
     pub attractor_type: String,
@@ -376,12 +417,12 @@ pub struct AppState {
     // When this matches the current bifurcation settings, recomputation is skipped.
     pub bifurc_cache_key: Option<(String, String, String, bool)>,
     // Arranger morph diff display
-    pub arr_morph_diff: Vec<(String, f32, f32)>,  // (param_name, from_val, to_val)
+    pub arr_morph_diff: Vec<(String, f32, f32)>, // (param_name, from_val, to_val)
     // MIDI CC Learn Mode
     pub midi_cc_learn_active: bool,
     pub midi_cc_learn_target: String,
-    pub midi_cc_map: Vec<(u8, String)>,  // (CC number, param_name) mappings
-    pub midi_cc_learn_last_cc: u8,       // previous midi_in_last_cc for change detection
+    pub midi_cc_map: Vec<(u8, String)>, // (CC number, param_name) mappings
+    pub midi_cc_learn_last_cc: u8,      // previous midi_in_last_cc for change detection
     // Modulation matrix: routes attractor state variables to synthesis parameters
     pub mod_matrix: Vec<ModRoute>,
     /// Transient notifications shown as bottom-right overlays for a few seconds.
@@ -401,12 +442,12 @@ pub struct AppState {
     pub interp_t: f32,
     pub interp_enabled: bool,
     // ── Feature #6: Attractor basin visualization ────────────────────────────
-    pub basin_data: Arc<Mutex<Vec<(f32, f32, f32)>>>,  // (x, y, lyapunov_proxy) grid points
+    pub basin_data: Arc<Mutex<Vec<(f32, f32, f32)>>>, // (x, y, lyapunov_proxy) grid points
     pub basin_computing: bool,
-    pub basin_resolution: usize,  // default 80 (80×80 grid = 6400 points)
-    pub basin_xlim: (f32, f32),   // default (-25.0, 25.0) for Lorenz
-    pub basin_ylim: (f32, f32),   // default (-35.0, 35.0)
-    pub basin_z_slice: f32,        // z-slice for initial conditions, default 27.0
+    pub basin_resolution: usize, // default 80 (80×80 grid = 6400 points)
+    pub basin_xlim: (f32, f32),  // default (-25.0, 25.0) for Lorenz
+    pub basin_ylim: (f32, f32),  // default (-35.0, 35.0)
+    pub basin_z_slice: f32,      // z-slice for initial conditions, default 27.0
     // ── #16: OSC Output ──────────────────────────────────────────────────────
     pub osc_enabled: bool,
     pub osc_host: String,
@@ -690,7 +731,9 @@ impl AppState {
                 if let Ok(txt) = std::fs::read_to_string("favorites.txt") {
                     for line in txt.lines() {
                         let name = line.trim().to_string();
-                        if !name.is_empty() { set.insert(name); }
+                        if !name.is_empty() {
+                            set.insert(name);
+                        }
                     }
                 }
                 set
@@ -714,7 +757,9 @@ impl AppState {
     /// Push the current config onto the undo stack (max 20 entries, O(1) with VecDeque).
     /// Must be called from the UI thread only.
     pub fn push_undo(&mut self) {
-        if self.undo_stack.len() >= 20 { self.undo_stack.pop_front(); }
+        if self.undo_stack.len() >= 20 {
+            self.undo_stack.pop_front();
+        }
         self.undo_stack.push_back(self.config.clone());
         self.redo_stack.clear();
     }
@@ -739,7 +784,9 @@ impl AppState {
 pub type SharedState = Arc<Mutex<AppState>>;
 
 fn lcg_rand(seed: &mut u64) -> f64 {
-    *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *seed = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     (*seed >> 33) as f64 / u32::MAX as f64
 }
 
@@ -763,13 +810,17 @@ fn apply_theme(ctx: &Context, theme: &str) {
             visuals.window_fill = Color32::from_rgb(14, 7, 24);
             visuals.panel_fill = Color32::from_rgb(14, 7, 24);
             visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(30, 12, 46);
-            visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(70, 30, 100));
+            visuals.widgets.noninteractive.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(70, 30, 100));
             visuals.widgets.inactive.bg_fill = Color32::from_rgb(44, 18, 66);
-            visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(90, 40, 130));
+            visuals.widgets.inactive.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(90, 40, 130));
             visuals.widgets.hovered.bg_fill = Color32::from_rgb(70, 26, 100);
-            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(200, 80, 200));
+            visuals.widgets.hovered.bg_stroke =
+                egui::Stroke::new(1.5, Color32::from_rgb(200, 80, 200));
             visuals.widgets.active.bg_fill = Color32::from_rgb(210, 55, 160);
-            visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, Color32::from_rgb(255, 140, 230));
+            visuals.widgets.active.bg_stroke =
+                egui::Stroke::new(2.0, Color32::from_rgb(255, 140, 230));
             visuals.selection.bg_fill = Color32::from_rgb(180, 40, 130);
             visuals.override_text_color = Some(Color32::from_rgb(248, 190, 240));
         }
@@ -777,13 +828,17 @@ fn apply_theme(ctx: &Context, theme: &str) {
             visuals.window_fill = Color32::from_rgb(0, 0, 0);
             visuals.panel_fill = Color32::from_rgb(0, 0, 0);
             visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(0, 8, 0);
-            visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(0, 40, 0));
+            visuals.widgets.noninteractive.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(0, 40, 0));
             visuals.widgets.inactive.bg_fill = Color32::from_rgb(0, 16, 0);
-            visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(0, 60, 0));
+            visuals.widgets.inactive.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(0, 60, 0));
             visuals.widgets.hovered.bg_fill = Color32::from_rgb(0, 32, 0);
-            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(0, 200, 60));
+            visuals.widgets.hovered.bg_stroke =
+                egui::Stroke::new(1.5, Color32::from_rgb(0, 200, 60));
             visuals.widgets.active.bg_fill = Color32::from_rgb(0, 160, 0);
-            visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, Color32::from_rgb(0, 255, 80));
+            visuals.widgets.active.bg_stroke =
+                egui::Stroke::new(2.0, Color32::from_rgb(0, 255, 80));
             visuals.selection.bg_fill = Color32::from_rgb(0, 120, 0);
             visuals.override_text_color = Some(Color32::from_rgb(0, 255, 60));
         }
@@ -791,27 +846,36 @@ fn apply_theme(ctx: &Context, theme: &str) {
             visuals.window_fill = Color32::from_rgb(14, 7, 0);
             visuals.panel_fill = Color32::from_rgb(14, 7, 0);
             visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(28, 14, 0);
-            visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(60, 30, 0));
+            visuals.widgets.noninteractive.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(60, 30, 0));
             visuals.widgets.inactive.bg_fill = Color32::from_rgb(42, 22, 0);
-            visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(90, 46, 0));
+            visuals.widgets.inactive.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(90, 46, 0));
             visuals.widgets.hovered.bg_fill = Color32::from_rgb(70, 38, 0);
-            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
+            visuals.widgets.hovered.bg_stroke =
+                egui::Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
             visuals.widgets.active.bg_fill = Color32::from_rgb(210, 125, 0);
-            visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, Color32::from_rgb(255, 200, 60));
+            visuals.widgets.active.bg_stroke =
+                egui::Stroke::new(2.0, Color32::from_rgb(255, 200, 60));
             visuals.selection.bg_fill = Color32::from_rgb(180, 100, 0);
             visuals.override_text_color = Some(Color32::from_rgb(255, 215, 110));
         }
-        _ => { // neon (default) — deep space blue
+        _ => {
+            // neon (default) — deep space blue
             visuals.window_fill = Color32::from_rgb(7, 7, 15);
             visuals.panel_fill = Color32::from_rgb(7, 7, 15);
             visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(15, 15, 28);
-            visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(35, 40, 70));
+            visuals.widgets.noninteractive.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(35, 40, 70));
             visuals.widgets.inactive.bg_fill = Color32::from_rgb(20, 20, 40);
-            visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(45, 50, 85));
+            visuals.widgets.inactive.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(45, 50, 85));
             visuals.widgets.hovered.bg_fill = Color32::from_rgb(28, 32, 62);
-            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5, Color32::from_rgb(60, 140, 230));
+            visuals.widgets.hovered.bg_stroke =
+                egui::Stroke::new(1.5, Color32::from_rgb(60, 140, 230));
             visuals.widgets.active.bg_fill = Color32::from_rgb(0, 125, 215);
-            visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, Color32::from_rgb(100, 190, 255));
+            visuals.widgets.active.bg_stroke =
+                egui::Stroke::new(2.0, Color32::from_rgb(100, 190, 255));
             visuals.selection.bg_fill = Color32::from_rgb(0, 100, 185);
             visuals.override_text_color = Some(Color32::from_rgb(210, 220, 240));
         }
@@ -877,16 +941,16 @@ fn system_internal_name(display: &str) -> &'static str {
 
 fn scale_description(scale: &str) -> &'static str {
     match scale {
-        "pentatonic"      => "5 notes — always sounds musical",
-        "chromatic"       => "All 12 semitones — more dissonant",
+        "pentatonic" => "5 notes — always sounds musical",
+        "chromatic" => "All 12 semitones — more dissonant",
         "just_intonation" => "Pure harmonic ratios — warm and consonant",
-        "microtonal"      => "Quarter-tones — alien and otherworldly",
-        "edo19"           => "19-EDO: 19 equal divisions of the octave (~0.632 semitones per step)",
-        "edo31"           => "31-EDO: 31 equal divisions — rich microtonality (~0.387 semitones per step)",
-        "edo24"           => "24-EDO: quarter-tones — half a semitone per step",
-        "whole_tone"      => "6-note whole-tone scale — dreamy, symmetric, no leading tone",
-        "phrygian"        => "E Phrygian: dark and tense — flamenco and metal favourite",
-        "lydian"          => "F Lydian: bright and ethereal — raised 4th creates tension",
+        "microtonal" => "Quarter-tones — alien and otherworldly",
+        "edo19" => "19-EDO: 19 equal divisions of the octave (~0.632 semitones per step)",
+        "edo31" => "31-EDO: 31 equal divisions — rich microtonality (~0.387 semitones per step)",
+        "edo24" => "24-EDO: quarter-tones — half a semitone per step",
+        "whole_tone" => "6-note whole-tone scale — dreamy, symmetric, no leading tone",
+        "phrygian" => "E Phrygian: dark and tense — flamenco and metal favourite",
+        "lydian" => "F Lydian: bright and ethereal — raised 4th creates tension",
         _ => "",
     }
 }
@@ -903,14 +967,19 @@ fn mode_tooltip(mode: &str) -> &'static str {
     }
 }
 
-pub(crate) const CYAN:      Color32 = Color32::from_rgb(100, 200, 255);
+pub(crate) const CYAN: Color32 = Color32::from_rgb(100, 200, 255);
 pub(crate) const GRAY_HINT: Color32 = Color32::from_rgb(140, 145, 170);
-pub(crate) const AMBER:     Color32 = Color32::from_rgb(220, 175, 60);
+pub(crate) const AMBER: Color32 = Color32::from_rgb(220, 175, 60);
 const GREEN_ACC: Color32 = Color32::from_rgb(50, 210, 130);
 #[allow(dead_code)]
-const DIM_BG:    Color32 = Color32::from_rgb(18, 18, 34);
+const DIM_BG: Color32 = Color32::from_rgb(18, 18, 34);
 
-fn collapsing_section(ui: &mut Ui, label: &str, default_open: bool, add_contents: impl FnOnce(&mut Ui)) {
+fn collapsing_section(
+    ui: &mut Ui,
+    label: &str,
+    default_open: bool,
+    add_contents: impl FnOnce(&mut Ui),
+) {
     ui.add_space(4.0);
     // Subtle full-width header background
     let header_frame = egui::Frame::none()
@@ -918,15 +987,13 @@ fn collapsing_section(ui: &mut Ui, label: &str, default_open: bool, add_contents
         .inner_margin(egui::Margin::symmetric(6.0, 3.0))
         .rounding(egui::Rounding::same(5.0));
     header_frame.show(ui, |ui| {
-        CollapsingHeader::new(
-            RichText::new(label).size(12.5).color(CYAN).strong()
-        )
-        .default_open(default_open)
-        .show(ui, |ui| {
-            ui.add_space(4.0);
-            add_contents(ui);
-            ui.add_space(2.0);
-        });
+        CollapsingHeader::new(RichText::new(label).size(12.5).color(CYAN).strong())
+            .default_open(default_open)
+            .show(ui, |ui| {
+                ui.add_space(4.0);
+                add_contents(ui);
+                ui.add_space(2.0);
+            });
     });
     ui.add_space(4.0);
 }
@@ -934,13 +1001,13 @@ fn collapsing_section(ui: &mut Ui, label: &str, default_open: bool, add_contents
 /// #12: Get a named parameter value from Config.
 fn get_param_value(config: &crate::config::Config, key: &str) -> f64 {
     match key {
-        "lorenz.sigma"    => config.lorenz.sigma,
-        "lorenz.rho"      => config.lorenz.rho,
-        "lorenz.beta"     => config.lorenz.beta,
-        "system.speed"    => config.system.speed,
-        "audio.reverb_wet"   => config.audio.reverb_wet as f64,
-        "audio.delay_ms"     => config.audio.delay_ms as f64,
-        "audio.master_volume"=> config.audio.master_volume as f64,
+        "lorenz.sigma" => config.lorenz.sigma,
+        "lorenz.rho" => config.lorenz.rho,
+        "lorenz.beta" => config.lorenz.beta,
+        "system.speed" => config.system.speed,
+        "audio.reverb_wet" => config.audio.reverb_wet as f64,
+        "audio.delay_ms" => config.audio.delay_ms as f64,
+        "audio.master_volume" => config.audio.master_volume as f64,
         _ => 0.0,
     }
 }
@@ -948,13 +1015,13 @@ fn get_param_value(config: &crate::config::Config, key: &str) -> f64 {
 /// #12: Set a named parameter value on Config.
 fn set_param_value(config: &mut crate::config::Config, key: &str, val: f64) {
     match key {
-        "lorenz.sigma"    => config.lorenz.sigma = val,
-        "lorenz.rho"      => config.lorenz.rho = val,
-        "lorenz.beta"     => config.lorenz.beta = val,
-        "system.speed"    => config.system.speed = val,
-        "audio.reverb_wet"   => config.audio.reverb_wet = val as f32,
-        "audio.delay_ms"     => config.audio.delay_ms = val as f32,
-        "audio.master_volume"=> config.audio.master_volume = val as f32,
+        "lorenz.sigma" => config.lorenz.sigma = val,
+        "lorenz.rho" => config.lorenz.rho = val,
+        "lorenz.beta" => config.lorenz.beta = val,
+        "system.speed" => config.system.speed = val,
+        "audio.reverb_wet" => config.audio.reverb_wet = val as f32,
+        "audio.delay_ms" => config.audio.delay_ms = val as f32,
+        "audio.master_volume" => config.audio.master_volume = val as f32,
         _ => {}
     }
 }
@@ -963,14 +1030,30 @@ fn set_param_value(config: &mut crate::config::Config, key: &str, val: f64) {
 fn lock_btn(ui: &mut Ui, locked_params: &mut HashSet<String>, key: &str) {
     let locked = locked_params.contains(key);
     let icon = if locked { "🔒" } else { "🔓" };
-    let col = if locked { Color32::from_rgb(220, 160, 40) } else { Color32::from_rgb(80, 85, 110) };
-    if ui.add(
-        Button::new(RichText::new(icon).size(11.0).color(col))
-            .fill(Color32::TRANSPARENT)
-            .frame(false)
-            .min_size(Vec2::new(18.0, 18.0))
-    ).on_hover_text(if locked { "Unlock parameter (preset loads will restore this value)" } else { "Lock parameter (preset loads will not change this)" }).clicked() {
-        if locked { locked_params.remove(key); } else { locked_params.insert(key.to_string()); }
+    let col = if locked {
+        Color32::from_rgb(220, 160, 40)
+    } else {
+        Color32::from_rgb(80, 85, 110)
+    };
+    if ui
+        .add(
+            Button::new(RichText::new(icon).size(11.0).color(col))
+                .fill(Color32::TRANSPARENT)
+                .frame(false)
+                .min_size(Vec2::new(18.0, 18.0)),
+        )
+        .on_hover_text(if locked {
+            "Unlock parameter (preset loads will restore this value)"
+        } else {
+            "Lock parameter (preset loads will not change this)"
+        })
+        .clicked()
+    {
+        if locked {
+            locked_params.remove(key);
+        } else {
+            locked_params.insert(key.to_string());
+        }
     }
 }
 
@@ -984,7 +1067,10 @@ pub fn draw_ui(
     loop_export: &LoopExportPending,
     bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>,
 ) {
-    let (theme, light_theme) = { let st = state.lock(); (st.theme.clone(), st.light_theme) };
+    let (theme, light_theme) = {
+        let st = state.lock();
+        (st.theme.clone(), st.light_theme)
+    };
     if light_theme {
         ctx.set_visuals(egui::Visuals::light());
     } else {
@@ -1029,26 +1115,56 @@ pub fn draw_ui(
             if i.key_pressed(Key::ArrowLeft) {
                 st.config.system.speed = (st.config.system.speed / 1.2).max(0.1);
             }
-            if i.key_pressed(Key::Num1) { st.viz_tab = 0; } // Phase Portrait
-            if i.key_pressed(Key::Num2) { st.viz_tab = 1; } // MIXER
-            if i.key_pressed(Key::Num3) { st.viz_tab = 2; } // ARRANGE
-            if i.key_pressed(Key::Num4) { st.viz_tab = 3; } // Waveform
-            if i.key_pressed(Key::Num5) { st.viz_tab = 4; } // Note Map
-            if i.key_pressed(Key::Num6) { st.viz_tab = 5; } // Math View
-            if i.key_pressed(Key::Num7) { st.viz_tab = 6; } // Bifurcation
-            if i.key_pressed(Key::Num8) { st.viz_tab = 7; } // Studio
-            if i.key_pressed(Key::Num9) { st.viz_tab = 8; } // Basin
-            if i.key_pressed(Key::F) { st.perf_mode = !st.perf_mode; }
+            if i.key_pressed(Key::Num1) {
+                st.viz_tab = 0;
+            } // Phase Portrait
+            if i.key_pressed(Key::Num2) {
+                st.viz_tab = 1;
+            } // MIXER
+            if i.key_pressed(Key::Num3) {
+                st.viz_tab = 2;
+            } // ARRANGE
+            if i.key_pressed(Key::Num4) {
+                st.viz_tab = 3;
+            } // Waveform
+            if i.key_pressed(Key::Num5) {
+                st.viz_tab = 4;
+            } // Note Map
+            if i.key_pressed(Key::Num6) {
+                st.viz_tab = 5;
+            } // Math View
+            if i.key_pressed(Key::Num7) {
+                st.viz_tab = 6;
+            } // Bifurcation
+            if i.key_pressed(Key::Num8) {
+                st.viz_tab = 7;
+            } // Studio
+            if i.key_pressed(Key::Num9) {
+                st.viz_tab = 8;
+            } // Basin
+            if i.key_pressed(Key::F) {
+                st.perf_mode = !st.perf_mode;
+            }
             // New shortcuts
             if i.key_pressed(Key::R) { /* recording toggle handled below */ }
-            if i.key_pressed(Key::P) { st.arr_playing = !st.arr_playing; }
-            if i.key_pressed(Key::E) { st.macro_walk_enabled = !st.macro_walk_enabled; }
-            if i.key_pressed(Key::Questionmark) { st.show_tips_window = !st.show_tips_window; }
+            if i.key_pressed(Key::P) {
+                st.arr_playing = !st.arr_playing;
+            }
+            if i.key_pressed(Key::E) {
+                st.macro_walk_enabled = !st.macro_walk_enabled;
+            }
+            if i.key_pressed(Key::Questionmark) {
+                st.show_tips_window = !st.show_tips_window;
+            }
             // Undo / Redo
             let ctrl = i.modifiers.ctrl;
             let shift = i.modifiers.shift;
-            if ctrl && !shift && i.key_pressed(Key::Z) { st.undo(); }
-            if ctrl && shift && i.key_pressed(Key::Z) { st.redo(); }
+            if ctrl && !shift && i.key_pressed(Key::Z) {
+                st.undo();
+            }
+            if ctrl && shift && i.key_pressed(Key::Z) {
+                st.redo();
+            }
         });
     } // lock released here
 
@@ -1058,7 +1174,9 @@ pub fn draw_ui(
         if r_pressed {
             let sr = state.lock().sample_rate;
             if recording.try_lock().map_or(false, |l| l.is_some()) {
-                if let Some(mut lock) = recording.try_lock() { *lock = None; }
+                if let Some(mut lock) = recording.try_lock() {
+                    *lock = None;
+                }
             } else {
                 let secs = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -1085,20 +1203,60 @@ pub fn draw_ui(
     if is_perf_mode {
         egui::CentralPanel::default().show(ctx, |ui| {
             let trail_color = state.lock().trail_color;
-            let (projection, rotation_angle, auto_rotate, system_name, mode_name,
-                 current_state, current_deriv) = {
+            let (
+                projection,
+                rotation_angle,
+                auto_rotate,
+                system_name,
+                mode_name,
+                current_state,
+                current_deriv,
+            ) = {
                 let st = state.lock();
-                (st.viz_projection, st.rotation_angle, st.auto_rotate,
-                 st.config.system.name.clone(), st.config.sonification.mode.clone(),
-                 st.current_state.clone(), st.current_deriv.clone())
+                (
+                    st.viz_projection,
+                    st.rotation_angle,
+                    st.auto_rotate,
+                    st.config.system.name.clone(),
+                    st.config.sonification.mode.clone(),
+                    st.current_state.clone(),
+                    st.current_deriv.clone(),
+                )
             };
-            let (ag, ag_sep) = { let st = state.lock(); (st.anaglyph_3d, st.anaglyph_separation) };
-            let (pg, pi) = { let st = state.lock(); (st.portrait_ghosts.clone(), st.portrait_ink.clone()) };
+            let (ag, ag_sep) = {
+                let st = state.lock();
+                (st.anaglyph_3d, st.anaglyph_separation)
+            };
+            let (pg, pi) = {
+                let st = state.lock();
+                (st.portrait_ghosts.clone(), st.portrait_ink.clone())
+            };
             let lunar = { state.lock().lunar_phase };
-            let (scars_perf, tod_perf) = { let st = state.lock(); (st.scars.clone(), st.time_of_day_f) };
+            let (scars_perf, tod_perf) = {
+                let st = state.lock();
+                (st.scars.clone(), st.time_of_day_f)
+            };
             let ee_perf = { state.lock().energy_error };
-            draw_phase_portrait(ui, viz_points, &system_name, &mode_name,
-                &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, ag, ag_sep, &pg, &pi, lunar, &scars_perf, tod_perf, ee_perf);
+            draw_phase_portrait(
+                ui,
+                viz_points,
+                &system_name,
+                &mode_name,
+                &current_state,
+                &current_deriv,
+                projection,
+                rotation_angle,
+                auto_rotate,
+                trail_color,
+                ag,
+                ag_sep,
+                &pg,
+                &pi,
+                lunar,
+                &scars_perf,
+                tod_perf,
+                ee_perf,
+            );
             // Dim hint in corner
             let rect = ui.min_rect();
             ui.painter().text(
@@ -1113,117 +1271,154 @@ pub fn draw_ui(
     }
 
     let panel_w = state.lock().panel_width;
-    let panel_resp = SidePanel::left("controls").resizable(true).min_width(200.0).max_width(900.0).exact_width(panel_w).show(ctx, |ui| {
-        ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
+    let panel_resp = SidePanel::left("controls")
+        .resizable(true)
+        .min_width(200.0)
+        .max_width(900.0)
+        .exact_width(panel_w)
+        .show(ctx, |ui| {
+            ScrollArea::vertical().show(ui, |ui| {
+                ui.add_space(8.0);
 
-            // ── App identity header ────────────────────────────────────────────────
-            egui::Frame::none()
-                .fill(Color32::from_rgb(10, 12, 24))
-                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
-                .rounding(egui::Rounding::same(8.0))
-                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(30, 50, 90)))
-                .show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.label(
-                        RichText::new("MATH SONIFY")
-                            .size(19.0)
-                            .color(CYAN)
-                            .strong(),
-                    );
-                    ui.label(
-                        RichText::new("strange attractors  →  sound")
-                            .size(10.5)
-                            .color(GRAY_HINT)
-                            .italics(),
-                    );
-                });
-            ui.add_space(8.0);
-
-            // ── Live chaos status bar ──────────────────────────────────────────────
-            {
-                let (chaos, paused) = {
-                    let st = state.lock();
-                    (st.chaos_level, st.paused)
-                };
-                let chaos_col = lerp_color(
-                    Color32::from_rgb(30, 110, 200),
-                    Color32::from_rgb(220, 70, 30),
-                    chaos,
-                );
-                ui.horizontal(|ui| {
-                    let status_text = if paused { "⏸  PAUSED" } else { "▶  LIVE" };
-                    let status_col = if paused { Color32::from_rgb(150, 150, 180) } else { Color32::from_rgb(80, 220, 120) };
-                    ui.label(RichText::new(status_text).size(10.0).color(status_col).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{:.0}% chaos", chaos * 100.0)).size(10.0).color(chaos_col));
+                // ── App identity header ────────────────────────────────────────────────
+                egui::Frame::none()
+                    .fill(Color32::from_rgb(10, 12, 24))
+                    .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                    .rounding(egui::Rounding::same(8.0))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(30, 50, 90)))
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.label(RichText::new("MATH SONIFY").size(19.0).color(CYAN).strong());
+                        ui.label(
+                            RichText::new("strange attractors  →  sound")
+                                .size(10.5)
+                                .color(GRAY_HINT)
+                                .italics(),
+                        );
                     });
-                });
-                let bar_w = ui.available_width();
-                let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(bar_w, 5.0), Sense::hover());
-                ui.painter().rect_filled(bar_rect, 2.5, Color32::from_rgb(15, 15, 30));
-                let fill_rect = egui::Rect::from_min_size(
-                    bar_rect.min,
-                    Vec2::new(bar_rect.width() * chaos.clamp(0.0, 1.0), bar_rect.height()),
-                );
-                ui.painter().rect_filled(fill_rect, 2.5, chaos_col);
-            }
-            ui.add_space(8.0);
+                ui.add_space(8.0);
 
-            // ── Simple / Advanced toggle ───────────────────────────────────────────
-            let is_simple = {
-                let mut st = state.lock();
-                let half_w = (ui.available_width() - 6.0) / 2.0;
-                ui.horizontal(|ui| {
-                    let simple_active = st.simple_mode;
-                    let simple_fill = if simple_active {
-                        Color32::from_rgb(22, 140, 78)
-                    } else {
-                        Color32::from_rgb(18, 18, 36)
+                // ── Live chaos status bar ──────────────────────────────────────────────
+                {
+                    let (chaos, paused) = {
+                        let st = state.lock();
+                        (st.chaos_level, st.paused)
                     };
-                    let adv_fill = if !simple_active {
-                        Color32::from_rgb(15, 105, 205)
-                    } else {
-                        Color32::from_rgb(18, 18, 36)
-                    };
-                    let simple_border = if simple_active {
-                        Color32::from_rgb(50, 200, 110)
-                    } else {
-                        Color32::from_rgb(40, 42, 70)
-                    };
-                    let adv_border = if !simple_active {
-                        Color32::from_rgb(60, 160, 255)
-                    } else {
-                        Color32::from_rgb(40, 42, 70)
-                    };
-                    if ui.add(
-                        Button::new(RichText::new("Simple").color(Color32::WHITE).size(13.0).strong())
-                            .fill(simple_fill)
-                            .stroke(egui::Stroke::new(if simple_active { 1.5 } else { 1.0 }, simple_border))
-                            .min_size(Vec2::new(half_w, 32.0)),
-                    ).clicked() {
-                        st.simple_mode = true;
-                    }
-                    if ui.add(
-                        Button::new(RichText::new("Advanced").color(Color32::WHITE).size(13.0).strong())
-                            .fill(adv_fill)
-                            .stroke(egui::Stroke::new(if !simple_active { 1.5 } else { 1.0 }, adv_border))
-                            .min_size(Vec2::new(half_w, 32.0)),
-                    ).clicked() {
-                        st.simple_mode = false;
-                    }
-                });
-                ui.add_space(6.0);
-                st.simple_mode
-            }; // lock released here
+                    let chaos_col = lerp_color(
+                        Color32::from_rgb(30, 110, 200),
+                        Color32::from_rgb(220, 70, 30),
+                        chaos,
+                    );
+                    ui.horizontal(|ui| {
+                        let status_text = if paused { "⏸  PAUSED" } else { "▶  LIVE" };
+                        let status_col = if paused {
+                            Color32::from_rgb(150, 150, 180)
+                        } else {
+                            Color32::from_rgb(80, 220, 120)
+                        };
+                        ui.label(
+                            RichText::new(status_text)
+                                .size(10.0)
+                                .color(status_col)
+                                .strong(),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(format!("{:.0}% chaos", chaos * 100.0))
+                                    .size(10.0)
+                                    .color(chaos_col),
+                            );
+                        });
+                    });
+                    let bar_w = ui.available_width();
+                    let (bar_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(bar_w, 5.0), Sense::hover());
+                    ui.painter()
+                        .rect_filled(bar_rect, 2.5, Color32::from_rgb(15, 15, 30));
+                    let fill_rect = egui::Rect::from_min_size(
+                        bar_rect.min,
+                        Vec2::new(bar_rect.width() * chaos.clamp(0.0, 1.0), bar_rect.height()),
+                    );
+                    ui.painter().rect_filled(fill_rect, 2.5, chaos_col);
+                }
+                ui.add_space(8.0);
 
-            if is_simple {
-                draw_simple_panel(ui, ctx, state, recording);
-            } else {
-                draw_advanced_panel(ui, state, recording, loop_export);
-            }
+                // ── Simple / Advanced toggle ───────────────────────────────────────────
+                let is_simple = {
+                    let mut st = state.lock();
+                    let half_w = (ui.available_width() - 6.0) / 2.0;
+                    ui.horizontal(|ui| {
+                        let simple_active = st.simple_mode;
+                        let simple_fill = if simple_active {
+                            Color32::from_rgb(22, 140, 78)
+                        } else {
+                            Color32::from_rgb(18, 18, 36)
+                        };
+                        let adv_fill = if !simple_active {
+                            Color32::from_rgb(15, 105, 205)
+                        } else {
+                            Color32::from_rgb(18, 18, 36)
+                        };
+                        let simple_border = if simple_active {
+                            Color32::from_rgb(50, 200, 110)
+                        } else {
+                            Color32::from_rgb(40, 42, 70)
+                        };
+                        let adv_border = if !simple_active {
+                            Color32::from_rgb(60, 160, 255)
+                        } else {
+                            Color32::from_rgb(40, 42, 70)
+                        };
+                        if ui
+                            .add(
+                                Button::new(
+                                    RichText::new("Simple")
+                                        .color(Color32::WHITE)
+                                        .size(13.0)
+                                        .strong(),
+                                )
+                                .fill(simple_fill)
+                                .stroke(egui::Stroke::new(
+                                    if simple_active { 1.5 } else { 1.0 },
+                                    simple_border,
+                                ))
+                                .min_size(Vec2::new(half_w, 32.0)),
+                            )
+                            .clicked()
+                        {
+                            st.simple_mode = true;
+                        }
+                        if ui
+                            .add(
+                                Button::new(
+                                    RichText::new("Advanced")
+                                        .color(Color32::WHITE)
+                                        .size(13.0)
+                                        .strong(),
+                                )
+                                .fill(adv_fill)
+                                .stroke(egui::Stroke::new(
+                                    if !simple_active { 1.5 } else { 1.0 },
+                                    adv_border,
+                                ))
+                                .min_size(Vec2::new(half_w, 32.0)),
+                            )
+                            .clicked()
+                        {
+                            st.simple_mode = false;
+                        }
+                    });
+                    ui.add_space(6.0);
+                    st.simple_mode
+                }; // lock released here
+
+                if is_simple {
+                    draw_simple_panel(ui, ctx, state, recording);
+                } else {
+                    draw_advanced_panel(ui, state, recording, loop_export);
+                }
+            });
         });
-    });
 
     // #11: sync resized panel width
     if let Some(rw) = Some(panel_resp.response.rect.width()).filter(|&w| w > 1.0) {
@@ -1237,79 +1432,113 @@ pub fn draw_ui(
             .fill(Color32::from_rgb(10, 10, 22))
             .inner_margin(egui::Margin::symmetric(4.0, 4.0))
             .show(ui, |ui| {
-        ui.horizontal(|ui| {
-            let tabs = [
-                ("🌀", "Phase"),
-                ("🎚", "Mixer"),
-                ("🎬", "Arrange"),
-                ("〰", "Wave"),
-                ("🎵", "Notes"),
-                ("∑", "Math"),
-                ("∿", "Bifurc"),
-                ("📼", "Studio"),
-                ("⬡", "Basin"),
-                ("⊙", "Poincaré"),
-            ];
-            let mut viz_tab = state.lock().viz_tab;
-            for (i, (icon, name)) in tabs.iter().enumerate() {
-                let selected = viz_tab == i;
-                let (fill, text_col) = if selected {
-                    (Color32::from_rgb(0, 125, 215), Color32::WHITE)
-                } else {
-                    (Color32::from_rgb(20, 22, 42), Color32::from_rgb(160, 170, 200))
-                };
-                let btn = Button::new(
-                    RichText::new(format!("{} {}", icon, name)).color(text_col).size(11.5)
-                )
-                .fill(fill)
-                .stroke(egui::Stroke::new(
-                    if selected { 1.5 } else { 0.0 },
-                    Color32::from_rgb(60, 160, 255),
-                ))
-                .min_size(Vec2::new(74.0, 28.0));
-                if ui.add(btn).clicked() {
-                    viz_tab = i;
-                }
-            }
-            state.lock().viz_tab = viz_tab;
-
-            // Theme switcher right-aligned
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let themes = [
-                    ("☀", "solar",     Color32::from_rgb(195, 110, 10)),
-                    ("⎕", "crt",       Color32::from_rgb(0, 170, 0)),
-                    ("◈", "vaporwave", Color32::from_rgb(170, 35, 130)),
-                    ("◆", "neon",      Color32::from_rgb(0, 130, 215)),
-                ];
-                for (icon, theme_key, color) in themes.iter() {
-                    let is_active = state.lock().theme == *theme_key;
-                    let btn_color = if is_active { *color } else { Color32::from_rgb(22, 22, 40) };
-                    let border = if is_active { *color } else { Color32::from_rgb(40, 42, 65) };
-                    if ui.add(
-                        Button::new(RichText::new(*icon).color(Color32::WHITE).size(13.0))
-                            .fill(btn_color)
-                            .stroke(egui::Stroke::new(1.0, border))
-                            .min_size(Vec2::new(26.0, 26.0))
-                    ).on_hover_text(*theme_key).clicked() {
-                        state.lock().theme = theme_key.to_string();
+                ui.horizontal(|ui| {
+                    let tabs = [
+                        ("🌀", "Phase"),
+                        ("🎚", "Mixer"),
+                        ("🎬", "Arrange"),
+                        ("〰", "Wave"),
+                        ("🎵", "Notes"),
+                        ("∑", "Math"),
+                        ("∿", "Bifurc"),
+                        ("📼", "Studio"),
+                        ("⬡", "Basin"),
+                        ("⊙", "Poincaré"),
+                    ];
+                    let mut viz_tab = state.lock().viz_tab;
+                    for (i, (icon, name)) in tabs.iter().enumerate() {
+                        let selected = viz_tab == i;
+                        let (fill, text_col) = if selected {
+                            (Color32::from_rgb(0, 125, 215), Color32::WHITE)
+                        } else {
+                            (
+                                Color32::from_rgb(20, 22, 42),
+                                Color32::from_rgb(160, 170, 200),
+                            )
+                        };
+                        let btn = Button::new(
+                            RichText::new(format!("{} {}", icon, name))
+                                .color(text_col)
+                                .size(11.5),
+                        )
+                        .fill(fill)
+                        .stroke(egui::Stroke::new(
+                            if selected { 1.5 } else { 0.0 },
+                            Color32::from_rgb(60, 160, 255),
+                        ))
+                        .min_size(Vec2::new(74.0, 28.0));
+                        if ui.add(btn).clicked() {
+                            viz_tab = i;
+                        }
                     }
-                }
-                // ── #14: Dark/Light toggle ──────────────────────────────────────────
-                let lt = state.lock().light_theme;
-                let lt_icon = if lt { "🌙" } else { "☀" };
-                let lt_fill = if lt { Color32::from_rgb(200, 200, 220) } else { Color32::from_rgb(22, 22, 40) };
-                let lt_text = if lt { Color32::BLACK } else { Color32::WHITE };
-                if ui.add(
-                    Button::new(RichText::new(lt_icon).color(lt_text).size(13.0))
-                        .fill(lt_fill)
-                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(100, 100, 150)))
-                        .min_size(Vec2::new(26.0, 26.0))
-                ).on_hover_text(if lt { "Switch to dark theme" } else { "Switch to light theme" }).clicked() {
-                    state.lock().light_theme = !lt;
-                }
+                    state.lock().viz_tab = viz_tab;
+
+                    // Theme switcher right-aligned
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let themes = [
+                            ("☀", "solar", Color32::from_rgb(195, 110, 10)),
+                            ("⎕", "crt", Color32::from_rgb(0, 170, 0)),
+                            ("◈", "vaporwave", Color32::from_rgb(170, 35, 130)),
+                            ("◆", "neon", Color32::from_rgb(0, 130, 215)),
+                        ];
+                        for (icon, theme_key, color) in themes.iter() {
+                            let is_active = state.lock().theme == *theme_key;
+                            let btn_color = if is_active {
+                                *color
+                            } else {
+                                Color32::from_rgb(22, 22, 40)
+                            };
+                            let border = if is_active {
+                                *color
+                            } else {
+                                Color32::from_rgb(40, 42, 65)
+                            };
+                            if ui
+                                .add(
+                                    Button::new(
+                                        RichText::new(*icon).color(Color32::WHITE).size(13.0),
+                                    )
+                                    .fill(btn_color)
+                                    .stroke(egui::Stroke::new(1.0, border))
+                                    .min_size(Vec2::new(26.0, 26.0)),
+                                )
+                                .on_hover_text(*theme_key)
+                                .clicked()
+                            {
+                                state.lock().theme = theme_key.to_string();
+                            }
+                        }
+                        // ── #14: Dark/Light toggle ──────────────────────────────────────────
+                        let lt = state.lock().light_theme;
+                        let lt_icon = if lt { "🌙" } else { "☀" };
+                        let lt_fill = if lt {
+                            Color32::from_rgb(200, 200, 220)
+                        } else {
+                            Color32::from_rgb(22, 22, 40)
+                        };
+                        let lt_text = if lt { Color32::BLACK } else { Color32::WHITE };
+                        if ui
+                            .add(
+                                Button::new(RichText::new(lt_icon).color(lt_text).size(13.0))
+                                    .fill(lt_fill)
+                                    .stroke(egui::Stroke::new(
+                                        1.0,
+                                        Color32::from_rgb(100, 100, 150),
+                                    ))
+                                    .min_size(Vec2::new(26.0, 26.0)),
+                            )
+                            .on_hover_text(if lt {
+                                "Switch to dark theme"
+                            } else {
+                                "Switch to light theme"
+                            })
+                            .clicked()
+                        {
+                            state.lock().light_theme = !lt;
+                        }
+                    });
+                });
             });
-        });
-        });
 
         let viz_tab = state.lock().viz_tab;
 
@@ -1342,7 +1571,8 @@ pub fn draw_ui(
                         if song_loop {
                             // Loop: find first non-empty slot
                             next = 0;
-                            while next < st.snippet_slots.len() && st.snippet_slots[next].is_none() {
+                            while next < st.snippet_slots.len() && st.snippet_slots[next].is_none()
+                            {
                                 next += 1;
                             }
                         } else {
@@ -1386,23 +1616,37 @@ pub fn draw_ui(
                 let mut new_proj = proj;
                 for (i, label) in ["XY", "XZ", "YZ"].iter().enumerate() {
                     let selected = proj == i;
-                    let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
-                    if ui.add(
-                        Button::new(RichText::new(*label).color(Color32::WHITE))
-                            .fill(color)
-                            .min_size(Vec2::new(36.0, 22.0))
-                    ).clicked() {
+                    let color = if selected {
+                        Color32::from_rgb(0, 140, 210)
+                    } else {
+                        Color32::from_rgb(40, 40, 70)
+                    };
+                    if ui
+                        .add(
+                            Button::new(RichText::new(*label).color(Color32::WHITE))
+                                .fill(color)
+                                .min_size(Vec2::new(36.0, 22.0)),
+                        )
+                        .clicked()
+                    {
                         new_proj = i;
                     }
                 }
                 ui.separator();
-                let rot_color = if auto_rot { Color32::from_rgb(0, 160, 100) } else { Color32::from_rgb(40, 40, 70) };
+                let rot_color = if auto_rot {
+                    Color32::from_rgb(0, 160, 100)
+                } else {
+                    Color32::from_rgb(40, 40, 70)
+                };
                 let mut new_auto_rot = auto_rot;
-                if ui.add(
-                    Button::new(RichText::new("3D Rotate").color(Color32::WHITE))
-                        .fill(rot_color)
-                        .min_size(Vec2::new(72.0, 22.0))
-                ).clicked() {
+                if ui
+                    .add(
+                        Button::new(RichText::new("3D Rotate").color(Color32::WHITE))
+                            .fill(rot_color)
+                            .min_size(Vec2::new(72.0, 22.0)),
+                    )
+                    .clicked()
+                {
                     new_auto_rot = !auto_rot;
                 }
                 if !auto_rot {
@@ -1419,11 +1663,21 @@ pub fn draw_ui(
                     let st = state.lock();
                     (st.anaglyph_3d, st.anaglyph_separation)
                 };
-                let ag_color = if anaglyph { Color32::from_rgb(180, 40, 40) } else { Color32::from_rgb(40, 40, 70) };
+                let ag_color = if anaglyph {
+                    Color32::from_rgb(180, 40, 40)
+                } else {
+                    Color32::from_rgb(40, 40, 70)
+                };
                 let mut new_anaglyph = anaglyph;
                 let mut new_sep = sep;
-                if ui.add(Button::new(RichText::new("Anaglyph 3D").color(Color32::WHITE))
-                    .fill(ag_color).min_size(Vec2::new(84.0, 22.0))).clicked() {
+                if ui
+                    .add(
+                        Button::new(RichText::new("Anaglyph 3D").color(Color32::WHITE))
+                            .fill(ag_color)
+                            .min_size(Vec2::new(84.0, 22.0)),
+                    )
+                    .clicked()
+                {
                     new_anaglyph = !anaglyph;
                 }
                 if anaglyph {
@@ -1441,7 +1695,12 @@ pub fn draw_ui(
                 let param_opts = ["rho", "sigma", "coupling", "c"];
                 let (current_bp, current_bp2, computing, mode_2d) = {
                     let st = state.lock();
-                    (st.bifurc_param.clone(), st.bifurc_param2.clone(), st.bifurc_computing, st.bifurc_2d_mode)
+                    (
+                        st.bifurc_param.clone(),
+                        st.bifurc_param2.clone(),
+                        st.bifurc_computing,
+                        st.bifurc_2d_mode,
+                    )
                 };
                 let mut new_bp = current_bp.clone();
                 let mut new_bp2 = current_bp2.clone();
@@ -1459,7 +1718,11 @@ pub fn draw_ui(
                     });
 
                 // 2D mode toggle + second param selector
-                if ui.toggle_value(&mut new_2d, "2D").on_hover_text("Sweep two parameters as a heatmap").changed() {}
+                if ui
+                    .toggle_value(&mut new_2d, "2D")
+                    .on_hover_text("Sweep two parameters as a heatmap")
+                    .changed()
+                {}
                 if new_2d {
                     ComboBox::from_id_source("bifurc_param2")
                         .selected_text(&current_bp2)
@@ -1483,26 +1746,57 @@ pub fn draw_ui(
                 // Check if the cache is still valid for the current settings
                 let cache_hit = {
                     let st = state.lock();
-                    let cache_key = (st.config.system.name.clone(), st.bifurc_param.clone(), st.bifurc_param2.clone(), st.bifurc_2d_mode);
-                    st.bifurc_cache_key.as_ref() == Some(&cache_key) && !bifurc_data.lock().is_empty()
+                    let cache_key = (
+                        st.config.system.name.clone(),
+                        st.bifurc_param.clone(),
+                        st.bifurc_param2.clone(),
+                        st.bifurc_2d_mode,
+                    );
+                    st.bifurc_cache_key.as_ref() == Some(&cache_key)
+                        && !bifurc_data.lock().is_empty()
                 };
                 if cache_hit {
-                    ui.label(RichText::new("✓ cached").color(Color32::from_rgb(80, 200, 80)).size(10.0));
+                    ui.label(
+                        RichText::new("✓ cached")
+                            .color(Color32::from_rgb(80, 200, 80))
+                            .size(10.0),
+                    );
                 }
                 // "Force Refresh" button clears the cache
-                if cache_hit && ui.small_button("↺ Refresh").on_hover_text("Force recompute").clicked() {
+                if cache_hit
+                    && ui
+                        .small_button("↺ Refresh")
+                        .on_hover_text("Force recompute")
+                        .clicked()
+                {
                     state.lock().bifurc_cache_key = None;
                 }
 
-                let compute_color = if computing { Color32::from_rgb(100, 60, 0) } else { Color32::from_rgb(0, 80, 120) };
-                if !computing && !cache_hit && ui.add(
-                    Button::new(RichText::new("Compute").color(Color32::WHITE)).fill(compute_color)
-                ).clicked() {
+                let compute_color = if computing {
+                    Color32::from_rgb(100, 60, 0)
+                } else {
+                    Color32::from_rgb(0, 80, 120)
+                };
+                if !computing
+                    && !cache_hit
+                    && ui
+                        .add(
+                            Button::new(RichText::new("Compute").color(Color32::WHITE))
+                                .fill(compute_color),
+                        )
+                        .clicked()
+                {
                     let (param, param2, is_2d, sys_name, lorenz_cfg, rossler_cfg, kuramoto_cfg) = {
                         let st = state.lock();
-                        (st.bifurc_param.clone(), st.bifurc_param2.clone(), st.bifurc_2d_mode,
-                         st.config.system.name.clone(),
-                         st.config.lorenz.clone(), st.config.rossler.clone(), st.config.kuramoto.clone())
+                        (
+                            st.bifurc_param.clone(),
+                            st.bifurc_param2.clone(),
+                            st.bifurc_2d_mode,
+                            st.config.system.name.clone(),
+                            st.config.lorenz.clone(),
+                            st.config.rossler.clone(),
+                            st.config.kuramoto.clone(),
+                        )
                     };
                     state.lock().bifurc_computing = true;
                     let bifurc_data_clone = bifurc_data.clone();
@@ -1513,29 +1807,54 @@ pub fn draw_ui(
                             let grid = 40usize;
                             let (p1min, p1max) = param_range(&param);
                             let (p2min, p2max) = param_range(&param2);
-                            let result: Vec<(f32, f32, f32)> = (0..grid * grid).into_par_iter().map(|idx| {
-                                let i = idx / grid;
-                                let j = idx % grid;
-                                let p1val = p1min + (p1max - p1min) * i as f64 / (grid - 1) as f64;
-                                let p2val = p2min + (p2max - p2min) * j as f64 / (grid - 1) as f64;
-                                let mut sys = build_bifurc_system(&sys_name, &param, p1val, &lorenz_cfg, &rossler_cfg, &kuramoto_cfg);
-                                // Apply second param on top of first
-                                let mut sys2 = build_bifurc_system(&sys_name, &param2, p2val, &lorenz_cfg, &rossler_cfg, &kuramoto_cfg);
-                                // Use whichever system has both params set (build_bifurc only sets one)
-                                // For simplicity: rebuild with param=p1 then override param2 via a combined system
-                                // Workaround: use sys for p1, apply p2 perturbation as initial offset
-                                for _ in 0..1000 { sys.step(0.005); sys2.step(0.005); }
-                                // Chaos metric: variance of x over 200 steps
-                                let mut vals = Vec::with_capacity(200);
-                                for _ in 0..200 {
-                                    sys.step(0.005);
-                                    if let Some(&v) = sys.state().first() { vals.push(v); }
-                                }
-                                let mean = vals.iter().sum::<f64>() / vals.len().max(1) as f64;
-                                let var = vals.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / vals.len().max(1) as f64;
-                                let _ = sys2; // suppress unused warning
-                                (p1val as f32, p2val as f32, var.sqrt() as f32)
-                            }).collect();
+                            let result: Vec<(f32, f32, f32)> = (0..grid * grid)
+                                .into_par_iter()
+                                .map(|idx| {
+                                    let i = idx / grid;
+                                    let j = idx % grid;
+                                    let p1val =
+                                        p1min + (p1max - p1min) * i as f64 / (grid - 1) as f64;
+                                    let p2val =
+                                        p2min + (p2max - p2min) * j as f64 / (grid - 1) as f64;
+                                    let mut sys = build_bifurc_system(
+                                        &sys_name,
+                                        &param,
+                                        p1val,
+                                        &lorenz_cfg,
+                                        &rossler_cfg,
+                                        &kuramoto_cfg,
+                                    );
+                                    // Apply second param on top of first
+                                    let mut sys2 = build_bifurc_system(
+                                        &sys_name,
+                                        &param2,
+                                        p2val,
+                                        &lorenz_cfg,
+                                        &rossler_cfg,
+                                        &kuramoto_cfg,
+                                    );
+                                    // Use whichever system has both params set (build_bifurc only sets one)
+                                    // For simplicity: rebuild with param=p1 then override param2 via a combined system
+                                    // Workaround: use sys for p1, apply p2 perturbation as initial offset
+                                    for _ in 0..1000 {
+                                        sys.step(0.005);
+                                        sys2.step(0.005);
+                                    }
+                                    // Chaos metric: variance of x over 200 steps
+                                    let mut vals = Vec::with_capacity(200);
+                                    for _ in 0..200 {
+                                        sys.step(0.005);
+                                        if let Some(&v) = sys.state().first() {
+                                            vals.push(v);
+                                        }
+                                    }
+                                    let mean = vals.iter().sum::<f64>() / vals.len().max(1) as f64;
+                                    let var = vals.iter().map(|&v| (v - mean).powi(2)).sum::<f64>()
+                                        / vals.len().max(1) as f64;
+                                    let _ = sys2; // suppress unused warning
+                                    (p1val as f32, p2val as f32, var.sqrt() as f32)
+                                })
+                                .collect();
                             // For 2D we store in AppState directly
                             *state_clone.lock().bifurc_data_2d.lock() = result;
                             *bifurc_data_clone.lock() = Vec::new(); // clear 1D display
@@ -1543,89 +1862,139 @@ pub fn draw_ui(
                             // 1D: parallel sweep over parameter range
                             let steps = 200usize;
                             let (pmin, pmax) = param_range(&param);
-                            let result: Vec<(f32, f32)> = (0..steps).into_par_iter().flat_map(|i| {
-                                let pval = pmin + (pmax - pmin) * i as f64 / (steps - 1) as f64;
-                                let mut sys = build_bifurc_system(&sys_name, &param, pval, &lorenz_cfg, &rossler_cfg, &kuramoto_cfg);
-                                for _ in 0..2000 { sys.step(0.005); }
-                                let mut pts = Vec::with_capacity(100);
-                                for _ in 0..100 {
-                                    sys.step(0.005);
-                                    if let Some(&v) = sys.state().first() {
-                                        pts.push((pval as f32, v as f32));
+                            let result: Vec<(f32, f32)> = (0..steps)
+                                .into_par_iter()
+                                .flat_map(|i| {
+                                    let pval = pmin + (pmax - pmin) * i as f64 / (steps - 1) as f64;
+                                    let mut sys = build_bifurc_system(
+                                        &sys_name,
+                                        &param,
+                                        pval,
+                                        &lorenz_cfg,
+                                        &rossler_cfg,
+                                        &kuramoto_cfg,
+                                    );
+                                    for _ in 0..2000 {
+                                        sys.step(0.005);
                                     }
-                                }
-                                pts
-                            }).collect();
+                                    let mut pts = Vec::with_capacity(100);
+                                    for _ in 0..100 {
+                                        sys.step(0.005);
+                                        if let Some(&v) = sys.state().first() {
+                                            pts.push((pval as f32, v as f32));
+                                        }
+                                    }
+                                    pts
+                                })
+                                .collect();
                             *bifurc_data_clone.lock() = result;
                         }
                         let mut st = state_clone.lock();
                         st.bifurc_computing = false;
                         // Store cache key so subsequent renders skip recompute
-                        st.bifurc_cache_key = Some((st.config.system.name.clone(), param.clone(), param2.clone(), is_2d));
+                        st.bifurc_cache_key = Some((
+                            st.config.system.name.clone(),
+                            param.clone(),
+                            param2.clone(),
+                            is_2d,
+                        ));
                     });
 
-        // Basin controls
-        if viz_tab == 8 {
-            ui.horizontal(|ui| {
-                let (computing, resolution, xlim, ylim, z_slice, sigma, rho) = {
-                    let st = state.lock();
-                    (st.basin_computing, st.basin_resolution,
-                     st.basin_xlim, st.basin_ylim, st.basin_z_slice,
-                     st.config.lorenz.sigma, st.config.lorenz.rho)
-                };
-                ui.label(RichText::new(format!("σ={:.1} ρ={:.1}", sigma, rho))
-                    .color(Color32::from_rgb(140, 200, 255)).size(11.0));
-                ui.separator();
-                let mut new_res = resolution;
-                ui.label("Res:");
-                ui.add(egui::DragValue::new(&mut new_res).clamp_range(20usize..=200usize).speed(1.0));
-                let mut new_xl0 = xlim.0;
-                let mut new_xl1 = xlim.1;
-                let mut new_yl0 = ylim.0;
-                let mut new_yl1 = ylim.1;
-                let mut new_z   = z_slice;
-                ui.label("X:");
-                ui.add(egui::DragValue::new(&mut new_xl0).speed(0.5).prefix("lo "));
-                ui.add(egui::DragValue::new(&mut new_xl1).speed(0.5).prefix("hi "));
-                ui.label("Y:");
-                ui.add(egui::DragValue::new(&mut new_yl0).speed(0.5).prefix("lo "));
-                ui.add(egui::DragValue::new(&mut new_yl1).speed(0.5).prefix("hi "));
-                ui.label("Z0:");
-                ui.add(egui::DragValue::new(&mut new_z).speed(0.5));
-                {
-                    let mut st = state.lock();
-                    st.basin_resolution = new_res;
-                    st.basin_xlim = (new_xl0, new_xl1);
-                    st.basin_ylim = (new_yl0, new_yl1);
-                    st.basin_z_slice = new_z;
-                }
-                let compute_color = if computing { Color32::from_rgb(100, 60, 0) } else { Color32::from_rgb(0, 80, 120) };
-                if !computing && ui.add(
-                    Button::new(RichText::new("Compute Basin").color(Color32::WHITE)).fill(compute_color)
-                ).clicked() {
-                    let (xlim2, ylim2, z_slice2, resolution2, basin_out) = {
-                        let mut st = state.lock();
-                        st.basin_computing = true;
-                        let xl = st.basin_xlim;
-                        let yl = st.basin_ylim;
-                        let zs = st.basin_z_slice;
-                        let rs = st.basin_resolution;
-                        let out = st.basin_data.clone();
-                        *out.lock() = Vec::new();
-                        (xl, yl, zs, rs, out)
-                    };
-                    let state_clone = state.clone();
-                    std::thread::spawn(move || {
-                        compute_basin(xlim2, ylim2, z_slice2, resolution2, "lorenz", basin_out);
-                        state_clone.lock().basin_computing = false;
-                    });
-                }
-                if computing {
-                    ui.label(RichText::new("Computing...").color(Color32::from_rgb(255, 200, 0)));
-                }
-            });
-        }
-
+                    // Basin controls
+                    if viz_tab == 8 {
+                        ui.horizontal(|ui| {
+                            let (computing, resolution, xlim, ylim, z_slice, sigma, rho) = {
+                                let st = state.lock();
+                                (
+                                    st.basin_computing,
+                                    st.basin_resolution,
+                                    st.basin_xlim,
+                                    st.basin_ylim,
+                                    st.basin_z_slice,
+                                    st.config.lorenz.sigma,
+                                    st.config.lorenz.rho,
+                                )
+                            };
+                            ui.label(
+                                RichText::new(format!("σ={:.1} ρ={:.1}", sigma, rho))
+                                    .color(Color32::from_rgb(140, 200, 255))
+                                    .size(11.0),
+                            );
+                            ui.separator();
+                            let mut new_res = resolution;
+                            ui.label("Res:");
+                            ui.add(
+                                egui::DragValue::new(&mut new_res)
+                                    .clamp_range(20usize..=200usize)
+                                    .speed(1.0),
+                            );
+                            let mut new_xl0 = xlim.0;
+                            let mut new_xl1 = xlim.1;
+                            let mut new_yl0 = ylim.0;
+                            let mut new_yl1 = ylim.1;
+                            let mut new_z = z_slice;
+                            ui.label("X:");
+                            ui.add(egui::DragValue::new(&mut new_xl0).speed(0.5).prefix("lo "));
+                            ui.add(egui::DragValue::new(&mut new_xl1).speed(0.5).prefix("hi "));
+                            ui.label("Y:");
+                            ui.add(egui::DragValue::new(&mut new_yl0).speed(0.5).prefix("lo "));
+                            ui.add(egui::DragValue::new(&mut new_yl1).speed(0.5).prefix("hi "));
+                            ui.label("Z0:");
+                            ui.add(egui::DragValue::new(&mut new_z).speed(0.5));
+                            {
+                                let mut st = state.lock();
+                                st.basin_resolution = new_res;
+                                st.basin_xlim = (new_xl0, new_xl1);
+                                st.basin_ylim = (new_yl0, new_yl1);
+                                st.basin_z_slice = new_z;
+                            }
+                            let compute_color = if computing {
+                                Color32::from_rgb(100, 60, 0)
+                            } else {
+                                Color32::from_rgb(0, 80, 120)
+                            };
+                            if !computing
+                                && ui
+                                    .add(
+                                        Button::new(
+                                            RichText::new("Compute Basin").color(Color32::WHITE),
+                                        )
+                                        .fill(compute_color),
+                                    )
+                                    .clicked()
+                            {
+                                let (xlim2, ylim2, z_slice2, resolution2, basin_out) = {
+                                    let mut st = state.lock();
+                                    st.basin_computing = true;
+                                    let xl = st.basin_xlim;
+                                    let yl = st.basin_ylim;
+                                    let zs = st.basin_z_slice;
+                                    let rs = st.basin_resolution;
+                                    let out = st.basin_data.clone();
+                                    *out.lock() = Vec::new();
+                                    (xl, yl, zs, rs, out)
+                                };
+                                let state_clone = state.clone();
+                                std::thread::spawn(move || {
+                                    compute_basin(
+                                        xlim2,
+                                        ylim2,
+                                        z_slice2,
+                                        resolution2,
+                                        "lorenz",
+                                        basin_out,
+                                    );
+                                    state_clone.lock().basin_computing = false;
+                                });
+                            }
+                            if computing {
+                                ui.label(
+                                    RichText::new("Computing...")
+                                        .color(Color32::from_rgb(255, 200, 0)),
+                                );
+                            }
+                        });
+                    }
                 }
                 if computing {
                     ui.label(RichText::new("Computing...").color(Color32::from_rgb(255, 200, 0)));
@@ -1635,12 +2004,32 @@ pub fn draw_ui(
 
         ui.separator();
 
-        let (projection, rotation_angle, auto_rotate, system_name, mode_name,
-             freqs, voice_levels, chord_intervals, current_state, current_deriv,
-             chaos_level, order_param, kuramoto_phases, trail_color, _perf_mode,
-             anaglyph_3d, anaglyph_separation, lyapunov_spectrum, attractor_type,
-             kolmogorov_entropy, energy_error, sync_error, permutation_entropy,
-             integrator_divergence) = {
+        let (
+            projection,
+            rotation_angle,
+            auto_rotate,
+            system_name,
+            mode_name,
+            freqs,
+            voice_levels,
+            chord_intervals,
+            current_state,
+            current_deriv,
+            chaos_level,
+            order_param,
+            kuramoto_phases,
+            trail_color,
+            _perf_mode,
+            anaglyph_3d,
+            anaglyph_separation,
+            lyapunov_spectrum,
+            attractor_type,
+            kolmogorov_entropy,
+            energy_error,
+            sync_error,
+            permutation_entropy,
+            integrator_divergence,
+        ) = {
             let st = state.lock();
             let proj = st.viz_projection;
             let rot = st.rotation_angle;
@@ -1671,7 +2060,10 @@ pub fn draw_ui(
             let se = st.sync_error;
             let pe = st.permutation_entropy;
             let id = st.integrator_divergence;
-            (proj, rot, ar, sn, mn, fr, vl, ci, cs, cd, cl, op, kp, tc, pm, ag, ag_sep, ls, at, ke, ee, se, pe, id)
+            (
+                proj, rot, ar, sn, mn, fr, vl, ci, cs, cd, cl, op, kp, tc, pm, ag, ag_sep, ls, at,
+                ke, ee, se, pe, id,
+            )
         };
 
         // ── Ghost trails + portrait ink update (visual memory) ─────────────────
@@ -1696,13 +2088,16 @@ pub fn draw_ui(
             // Use a simple elapsed-time check
             let ghost_interval_secs = 600.0 + (st.portrait_ghosts.len() as f64 * 47.0) % 300.0; // 10-15 min
             if st.portrait_ghost_last_capture.elapsed().as_secs_f64() >= ghost_interval_secs
-               && !viz_points.is_empty() {
+                && !viz_points.is_empty()
+            {
                 // Sample every 4th point to keep ghost compact
-                let ghost_pts: Vec<(f32, f32)> = viz_points.iter()
+                let ghost_pts: Vec<(f32, f32)> = viz_points
+                    .iter()
                     .step_by(4)
                     .map(|&(x, y, _, _, _)| (x, y))
                     .collect();
-                st.portrait_ghosts.push((ghost_pts, std::time::Instant::now()));
+                st.portrait_ghosts
+                    .push((ghost_pts, std::time::Instant::now()));
                 st.portrait_ghost_last_capture = std::time::Instant::now();
                 // Keep at most 4 ghost snapshots
                 while st.portrait_ghosts.len() > 4 {
@@ -1712,7 +2107,11 @@ pub fn draw_ui(
         }
         let (ghosts, ink, lunar_phase2) = {
             let st = state.lock();
-            (st.portrait_ghosts.clone(), st.portrait_ink.clone(), st.lunar_phase)
+            (
+                st.portrait_ghosts.clone(),
+                st.portrait_ink.clone(),
+                st.lunar_phase,
+            )
         };
         let (scars_main, tod_main) = {
             let st = state.lock();
@@ -1731,18 +2130,60 @@ pub fn draw_ui(
         }
 
         match viz_tab {
-            0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, anaglyph_3d, anaglyph_separation, &ghosts, &ink, lunar_phase2, &scars_main, tod_main, energy_error),
+            0 => draw_phase_portrait(
+                ui,
+                viz_points,
+                &system_name,
+                &mode_name,
+                &current_state,
+                &current_deriv,
+                projection,
+                rotation_angle,
+                auto_rotate,
+                trail_color,
+                anaglyph_3d,
+                anaglyph_separation,
+                &ghosts,
+                &ink,
+                lunar_phase2,
+                &scars_main,
+                tod_main,
+                energy_error,
+            ),
             1 => draw_mixer_tab(ui, state, viz_points),
             2 => draw_arrange_tab(ui, state, recording),
             3 => {
-                let (wz, wo) = { let st = state.lock(); (st.waveform_zoom, st.waveform_offset) };
+                let (wz, wo) = {
+                    let st = state.lock();
+                    (st.waveform_zoom, st.waveform_offset)
+                };
                 let (new_wz, new_wo) = draw_waveform(ui, waveform, wz, wo, ctx);
-                { let mut st = state.lock(); st.waveform_zoom = new_wz; st.waveform_offset = new_wo; }
+                {
+                    let mut st = state.lock();
+                    st.waveform_zoom = new_wz;
+                    st.waveform_offset = new_wo;
+                }
             }
             4 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
             5 => {
                 let lyap_hist = state.lock().lyapunov_history.clone();
-                draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases, &lyapunov_spectrum, &attractor_type, kolmogorov_entropy, energy_error, sync_error, permutation_entropy, integrator_divergence, &lyap_hist);
+                draw_math_view(
+                    ui,
+                    &system_name,
+                    &current_state,
+                    &current_deriv,
+                    chaos_level,
+                    order_param,
+                    &kuramoto_phases,
+                    &lyapunov_spectrum,
+                    &attractor_type,
+                    kolmogorov_entropy,
+                    energy_error,
+                    sync_error,
+                    permutation_entropy,
+                    integrator_divergence,
+                    &lyap_hist,
+                );
             }
             6 => draw_bifurc_diagram(ui, bifurc_data, state),
             7 => draw_studio_tab(ui, state),
@@ -1757,7 +2198,8 @@ pub fn draw_ui(
     {
         let now = std::time::Instant::now();
         let mut st = state.lock();
-        st.toast_queue.retain(|t| now.duration_since(t.born).as_secs_f32() < t.ttl_secs);
+        st.toast_queue
+            .retain(|t| now.duration_since(t.born).as_secs_f32() < t.ttl_secs);
         let toasts: Vec<Toast> = st.toast_queue.clone();
         drop(st);
         if !toasts.is_empty() {
@@ -1765,14 +2207,29 @@ pub fn draw_ui(
             let mut y_offset = screen_rect.max.y - 16.0;
             for toast in toasts.iter().rev() {
                 let age = now.duration_since(toast.born).as_secs_f32();
-                let fade = if age < toast.ttl_secs - 0.5 { 1.0f32 } else { ((toast.ttl_secs - age) / 0.5).clamp(0.0, 1.0) };
+                let fade = if age < toast.ttl_secs - 0.5 {
+                    1.0f32
+                } else {
+                    ((toast.ttl_secs - age) / 0.5).clamp(0.0, 1.0)
+                };
                 let (bg_col, icon) = match toast.kind {
-                    ToastKind::Info    => (Color32::from_rgba_unmultiplied(40, 120, 200, (200.0 * fade) as u8), "ℹ"),
-                    ToastKind::Warning => (Color32::from_rgba_unmultiplied(180, 130, 0,  (200.0 * fade) as u8), "⚠"),
-                    ToastKind::Error   => (Color32::from_rgba_unmultiplied(180, 40,  40,  (220.0 * fade) as u8), "✕"),
+                    ToastKind::Info => (
+                        Color32::from_rgba_unmultiplied(40, 120, 200, (200.0 * fade) as u8),
+                        "ℹ",
+                    ),
+                    ToastKind::Warning => (
+                        Color32::from_rgba_unmultiplied(180, 130, 0, (200.0 * fade) as u8),
+                        "⚠",
+                    ),
+                    ToastKind::Error => (
+                        Color32::from_rgba_unmultiplied(180, 40, 40, (220.0 * fade) as u8),
+                        "✕",
+                    ),
                 };
                 let text = format!("{} {}", icon, toast.message);
-                let galley = ctx.fonts(|f| f.layout_no_wrap(text.clone(), FontId::proportional(13.0), Color32::WHITE));
+                let galley = ctx.fonts(|f| {
+                    f.layout_no_wrap(text.clone(), FontId::proportional(13.0), Color32::WHITE)
+                });
                 let w = galley.rect.width() + 24.0;
                 let h = galley.rect.height() + 12.0;
                 y_offset -= h + 6.0;
@@ -1780,10 +2237,16 @@ pub fn draw_ui(
                     Pos2::new(screen_rect.max.x - w - 12.0, y_offset),
                     Vec2::new(w, h),
                 );
-                let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("toast_overlay")));
+                let painter =
+                    ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("toast_overlay")));
                 painter.rect_filled(rect, 6.0, bg_col);
-                painter.text(rect.min + Vec2::new(12.0, 6.0), Align2::LEFT_TOP, text, FontId::proportional(13.0),
-                    Color32::from_rgba_unmultiplied(255, 255, 255, (255.0 * fade) as u8));
+                painter.text(
+                    rect.min + Vec2::new(12.0, 6.0),
+                    Align2::LEFT_TOP,
+                    text,
+                    FontId::proportional(13.0),
+                    Color32::from_rgba_unmultiplied(255, 255, 255, (255.0 * fade) as u8),
+                );
             }
             ctx.request_repaint();
         }
@@ -1811,7 +2274,12 @@ fn draw_advanced_panel(
 
     // Compact header bar: volume + pause side by side
     ui.horizontal(|ui| {
-        ui.label(RichText::new("🔊  Volume").color(Color32::WHITE).strong().size(12.0));
+        ui.label(
+            RichText::new("🔊  Volume")
+                .color(Color32::WHITE)
+                .strong()
+                .size(12.0),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(RichText::new(&adv_db_label).color(AMBER).size(11.0));
         });
@@ -1821,24 +2289,45 @@ fn draw_advanced_panel(
         let vol_locked = st.locked_params.contains("audio.master_volume");
         ui.add_enabled(
             !vol_locked,
-            Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text("")
+            Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text(""),
         );
     });
-    let _ = ui.label("").on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
+    let _ = ui
+        .label("")
+        .on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
     ui.add_space(4.0);
 
     // ---- Pause button ----
-    let pause_label = if st.paused { "▶  RESUME" } else { "⏸  PAUSE" };
-    let (pause_fill, pause_stroke) = if st.paused {
-        (Color32::from_rgb(18, 135, 65), Color32::from_rgb(60, 220, 110))
+    let pause_label = if st.paused {
+        "▶  RESUME"
     } else {
-        (Color32::from_rgb(15, 90, 165), Color32::from_rgb(60, 160, 255))
+        "⏸  PAUSE"
     };
-    let btn = Button::new(RichText::new(pause_label).color(Color32::WHITE).strong().size(13.0))
-        .fill(pause_fill)
-        .stroke(egui::Stroke::new(1.5, pause_stroke))
-        .min_size(Vec2::new(ui.available_width(), 36.0));
-    if ui.add(btn).on_hover_text("Pause or resume the simulation and audio. Shortcut: Space bar.").clicked() {
+    let (pause_fill, pause_stroke) = if st.paused {
+        (
+            Color32::from_rgb(18, 135, 65),
+            Color32::from_rgb(60, 220, 110),
+        )
+    } else {
+        (
+            Color32::from_rgb(15, 90, 165),
+            Color32::from_rgb(60, 160, 255),
+        )
+    };
+    let btn = Button::new(
+        RichText::new(pause_label)
+            .color(Color32::WHITE)
+            .strong()
+            .size(13.0),
+    )
+    .fill(pause_fill)
+    .stroke(egui::Stroke::new(1.5, pause_stroke))
+    .min_size(Vec2::new(ui.available_width(), 36.0));
+    if ui
+        .add(btn)
+        .on_hover_text("Pause or resume the simulation and audio. Shortcut: Space bar.")
+        .clicked()
+    {
         st.paused = !st.paused;
     }
     ui.add_space(6.0);
@@ -1853,12 +2342,17 @@ fn draw_advanced_panel(
     ui.horizontal(|ui| {
         ui.label(RichText::new("Chaos").color(GRAY_HINT).size(11.0));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(format!("{:.0}%", chaos * 100.0)).color(chaos_color).size(11.0));
+            ui.label(
+                RichText::new(format!("{:.0}%", chaos * 100.0))
+                    .color(chaos_color)
+                    .size(11.0),
+            );
         });
     });
     let bar_w = ui.available_width();
     let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(bar_w, 7.0), Sense::hover());
-    ui.painter().rect_filled(bar_rect, 3.5, Color32::from_rgb(14, 14, 28));
+    ui.painter()
+        .rect_filled(bar_rect, 3.5, Color32::from_rgb(14, 14, 28));
     let fill_rect = egui::Rect::from_min_size(
         bar_rect.min,
         Vec2::new(bar_rect.width() * chaos.clamp(0.0, 1.0), bar_rect.height()),
@@ -1876,20 +2370,35 @@ fn draw_advanced_panel(
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new("🔍").size(11.0).color(GRAY_HINT));
-            ui.add(egui::TextEdit::singleline(&mut st.preset_search)
-                .hint_text("Search presets…")
-                .desired_width(ui.available_width()));
+            ui.add(
+                egui::TextEdit::singleline(&mut st.preset_search)
+                    .hint_text("Search presets…")
+                    .desired_width(ui.available_width()),
+            );
         });
         ui.add_space(4.0);
 
         // #13: Favorites-only toggle
         ui.horizontal(|ui| {
             let fav_only = st.show_favorites_only;
-            let fav_col = if fav_only { Color32::from_rgb(255, 205, 30) } else { Color32::from_rgb(80, 85, 110) };
-            if ui.add(Button::new(RichText::new("⭐ only").color(fav_col).size(11.0))
-                .fill(if fav_only { Color32::from_rgb(60, 50, 10) } else { Color32::TRANSPARENT })
-                .stroke(egui::Stroke::new(1.0, fav_col))
-                .min_size(Vec2::new(58.0, 22.0))).clicked() {
+            let fav_col = if fav_only {
+                Color32::from_rgb(255, 205, 30)
+            } else {
+                Color32::from_rgb(80, 85, 110)
+            };
+            if ui
+                .add(
+                    Button::new(RichText::new("⭐ only").color(fav_col).size(11.0))
+                        .fill(if fav_only {
+                            Color32::from_rgb(60, 50, 10)
+                        } else {
+                            Color32::TRANSPARENT
+                        })
+                        .stroke(egui::Stroke::new(1.0, fav_col))
+                        .min_size(Vec2::new(58.0, 22.0)),
+                )
+                .clicked()
+            {
                 st.show_favorites_only = !fav_only;
             }
         });
@@ -1899,13 +2408,17 @@ fn draw_advanced_panel(
         let selected = st.selected_preset.clone();
         let show_fav_only = st.show_favorites_only;
         // #13: build sorted preset list — favorites first
-        let mut sorted_presets_adv: Vec<&crate::patches::Preset> = PRESETS.iter().filter(|p| {
-            (search_lower.is_empty()
-                || p.name.to_lowercase().contains(&search_lower)
-                || p.category.to_lowercase().contains(&search_lower))
-            && (!show_fav_only || st.favorite_presets.contains(p.name))
-        }).collect();
-        sorted_presets_adv.sort_by_key(|p| (!st.favorite_presets.contains(p.name), p.category, p.name));
+        let mut sorted_presets_adv: Vec<&crate::patches::Preset> = PRESETS
+            .iter()
+            .filter(|p| {
+                (search_lower.is_empty()
+                    || p.name.to_lowercase().contains(&search_lower)
+                    || p.category.to_lowercase().contains(&search_lower))
+                    && (!show_fav_only || st.favorite_presets.contains(p.name))
+            })
+            .collect();
+        sorted_presets_adv
+            .sort_by_key(|p| (!st.favorite_presets.contains(p.name), p.category, p.name));
 
         let mut last_cat = "";
         for preset in sorted_presets_adv.iter() {
@@ -1913,11 +2426,17 @@ fn draw_advanced_panel(
                 last_cat = preset.category;
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("  {}", preset.category.to_uppercase()))
-                        .color(GRAY_HINT).size(10.0).strong());
+                    ui.label(
+                        RichText::new(format!("  {}", preset.category.to_uppercase()))
+                            .color(GRAY_HINT)
+                            .size(10.0)
+                            .strong(),
+                    );
                     let avail = ui.available_width();
-                    let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(avail - 4.0, 1.0), Sense::hover());
-                    ui.painter().rect_filled(sep_rect, 0.0, Color32::from_rgb(35, 38, 65));
+                    let (sep_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(avail - 4.0, 1.0), Sense::hover());
+                    ui.painter()
+                        .rect_filled(sep_rect, 0.0, Color32::from_rgb(35, 38, 65));
                 });
                 ui.add_space(3.0);
             }
@@ -1936,43 +2455,94 @@ fn draw_advanced_panel(
             };
             let card = egui::Frame::none()
                 .fill(bg_color)
-                .stroke(Stroke::new(if is_selected { 1.5 } else { 1.0 },
-                    if is_selected { pc } else { Color32::from_rgb(34, 36, 64) }))
+                .stroke(Stroke::new(
+                    if is_selected { 1.5 } else { 1.0 },
+                    if is_selected {
+                        pc
+                    } else {
+                        Color32::from_rgb(34, 36, 64)
+                    },
+                ))
                 .inner_margin(egui::Margin::symmetric(0.0, 5.0))
                 .rounding(egui::Rounding::same(6.0));
-            let response = card.show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    // #13: star toggle
-                    let star_col = if is_fav { Color32::from_rgb(255, 205, 30) } else { Color32::from_rgb(60, 65, 90) };
-                    if ui.add(Button::new(RichText::new("⭐").size(12.0).color(star_col))
-                        .fill(Color32::TRANSPARENT).frame(false).min_size(Vec2::new(22.0, 22.0))).clicked() {
-                        if is_fav { st.favorite_presets.remove(preset.name); }
-                        else { st.favorite_presets.insert(preset.name.to_string()); }
-                        let fav_txt: String = st.favorite_presets.iter().cloned().collect::<Vec<_>>().join("\n");
-                        let _ = std::fs::write("favorites.txt", fav_txt);
-                    }
-                    let (strip_rect, _) = ui.allocate_exact_size(Vec2::new(5.0, 34.0), Sense::hover());
-                    let strip_col = if is_selected { pc } else {
-                        Color32::from_rgba_premultiplied(pc.r()/3, pc.g()/3, pc.b()/3, 200)
-                    };
-                    ui.painter().rect_filled(strip_rect, egui::Rounding::same(3.0), strip_col);
-                    ui.add_space(7.0);
-                    ui.vertical(|ui| {
-                        let name_col = if is_selected { pc } else { Color32::WHITE };
-                        ui.label(RichText::new(preset.name).strong().color(name_col).size(12.5));
-                        ui.label(RichText::new(preset.description).italics().color(GRAY_HINT).size(10.5));
+            let response = card
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        // #13: star toggle
+                        let star_col = if is_fav {
+                            Color32::from_rgb(255, 205, 30)
+                        } else {
+                            Color32::from_rgb(60, 65, 90)
+                        };
+                        if ui
+                            .add(
+                                Button::new(RichText::new("⭐").size(12.0).color(star_col))
+                                    .fill(Color32::TRANSPARENT)
+                                    .frame(false)
+                                    .min_size(Vec2::new(22.0, 22.0)),
+                            )
+                            .clicked()
+                        {
+                            if is_fav {
+                                st.favorite_presets.remove(preset.name);
+                            } else {
+                                st.favorite_presets.insert(preset.name.to_string());
+                            }
+                            let fav_txt: String = st
+                                .favorite_presets
+                                .iter()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let _ = std::fs::write("favorites.txt", fav_txt);
+                        }
+                        let (strip_rect, _) =
+                            ui.allocate_exact_size(Vec2::new(5.0, 34.0), Sense::hover());
+                        let strip_col = if is_selected {
+                            pc
+                        } else {
+                            Color32::from_rgba_premultiplied(
+                                pc.r() / 3,
+                                pc.g() / 3,
+                                pc.b() / 3,
+                                200,
+                            )
+                        };
+                        ui.painter()
+                            .rect_filled(strip_rect, egui::Rounding::same(3.0), strip_col);
+                        ui.add_space(7.0);
+                        ui.vertical(|ui| {
+                            let name_col = if is_selected { pc } else { Color32::WHITE };
+                            ui.label(
+                                RichText::new(preset.name)
+                                    .strong()
+                                    .color(name_col)
+                                    .size(12.5),
+                            );
+                            ui.label(
+                                RichText::new(preset.description)
+                                    .italics()
+                                    .color(GRAY_HINT)
+                                    .size(10.5),
+                            );
+                        });
                     });
-                });
-            }).response;
+                })
+                .response;
             if response.interact(Sense::click()).clicked() {
                 st.push_undo();
                 // #12: snapshot locked params before load
-                let locked_snapshot_adv: Vec<(String, f64)> = st.locked_params.iter()
-                    .map(|k| (k.clone(), get_param_value(&st.config, k))).collect();
+                let locked_snapshot_adv: Vec<(String, f64)> = st
+                    .locked_params
+                    .iter()
+                    .map(|k| (k.clone(), get_param_value(&st.config, k)))
+                    .collect();
                 st.selected_preset = preset.name.to_string();
                 st.config = load_preset(preset.name);
-                for (k, v) in locked_snapshot_adv { set_param_value(&mut st.config, &k, v); }
+                for (k, v) in locked_snapshot_adv {
+                    set_param_value(&mut st.config, &k, v);
+                }
                 st.system_changed = true;
                 st.mode_changed = true;
             }
@@ -1989,11 +2559,15 @@ fn draw_advanced_panel(
         ui.horizontal_wrapped(|ui| {
             for m in &modes {
                 let selected = current_mode == *m;
-                let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
+                let color = if selected {
+                    Color32::from_rgb(0, 140, 210)
+                } else {
+                    Color32::from_rgb(40, 40, 70)
+                };
                 let resp = ui.add(
                     Button::new(RichText::new(*m).color(Color32::WHITE))
                         .fill(color)
-                        .min_size(Vec2::new(55.0, 26.0))
+                        .min_size(Vec2::new(55.0, 26.0)),
                 );
                 if resp.clicked() {
                     st.config.sonification.mode = m.to_string();
@@ -2006,19 +2580,20 @@ fn draw_advanced_panel(
 
         // Scale list includes EDO and modal scales added in #3.
         let scales = [
-            ("pentatonic",      "Pentatonic"),
-            ("chromatic",       "Chromatic"),
+            ("pentatonic", "Pentatonic"),
+            ("chromatic", "Chromatic"),
             ("just_intonation", "Just Intonation"),
-            ("microtonal",      "Microtonal (13-TET)"),
-            ("edo19",           "19-EDO"),
-            ("edo31",           "31-EDO"),
-            ("edo24",           "24-EDO (Quarter-tones)"),
-            ("whole_tone",      "Whole Tone"),
-            ("phrygian",        "Phrygian"),
-            ("lydian",          "Lydian"),
+            ("microtonal", "Microtonal (13-TET)"),
+            ("edo19", "19-EDO"),
+            ("edo31", "31-EDO"),
+            ("edo24", "24-EDO (Quarter-tones)"),
+            ("whole_tone", "Whole Tone"),
+            ("phrygian", "Phrygian"),
+            ("lydian", "Lydian"),
         ];
         let current_scale = st.config.sonification.scale.clone();
-        let current_scale_label = scales.iter()
+        let current_scale_label = scales
+            .iter()
             .find(|(k, _)| *k == current_scale.as_str())
             .map(|(_, v)| *v)
             .unwrap_or(current_scale.as_str());
@@ -2026,7 +2601,8 @@ fn draw_advanced_panel(
             .selected_text(current_scale_label)
             .show_ui(ui, |ui| {
                 for (key, label) in &scales {
-                    if ui.selectable_label(current_scale == *key, *label)
+                    if ui
+                        .selectable_label(current_scale == *key, *label)
                         .on_hover_text(scale_description(key))
                         .clicked()
                     {
@@ -2093,15 +2669,20 @@ fn draw_advanced_panel(
             st.config.sonification.transpose_semitones = ts as f32;
         }
 
-        ui.add(Slider::new(&mut st.config.sonification.portamento_ms, 1.0..=1000.0)
-            .text("Portamento ms").logarithmic(true))
-            .on_hover_text("Frequency glide time between notes.");
+        ui.add(
+            Slider::new(&mut st.config.sonification.portamento_ms, 1.0..=1000.0)
+                .text("Portamento ms")
+                .logarithmic(true),
+        )
+        .on_hover_text("Frequency glide time between notes.");
 
         ui.add_space(4.0);
         ui.label(RichText::new("Voice Levels").color(Color32::WHITE));
         for i in 0..4 {
-            ui.add(Slider::new(&mut st.config.sonification.voice_levels[i], 0.0..=1.0)
-                .text(format!("Voice {}", i + 1)));
+            ui.add(
+                Slider::new(&mut st.config.sonification.voice_levels[i], 0.0..=1.0)
+                    .text(format!("Voice {}", i + 1)),
+            );
         }
 
         ui.add_space(4.0);
@@ -2113,12 +2694,19 @@ fn draw_advanced_panel(
                 let current_shape = st.config.sonification.voice_shapes[i].clone();
                 for s in &shapes {
                     let selected = current_shape == *s;
-                    let color = if selected { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
-                    if ui.add(
-                        Button::new(RichText::new(*s).color(Color32::WHITE))
-                            .fill(color)
-                            .min_size(Vec2::new(50.0, 24.0))
-                    ).clicked() {
+                    let color = if selected {
+                        Color32::from_rgb(0, 140, 210)
+                    } else {
+                        Color32::from_rgb(40, 40, 70)
+                    };
+                    if ui
+                        .add(
+                            Button::new(RichText::new(*s).color(Color32::WHITE))
+                                .fill(color)
+                                .min_size(Vec2::new(50.0, 24.0)),
+                        )
+                        .clicked()
+                    {
                         st.config.sonification.voice_shapes[i] = s.to_string();
                     }
                 }
@@ -2135,7 +2723,8 @@ fn draw_advanced_panel(
             .selected_text(current_display)
             .show_ui(ui, |ui| {
                 for entry in systems::SYSTEM_REGISTRY {
-                    if ui.selectable_label(current_sys == entry.name, entry.display_name)
+                    if ui
+                        .selectable_label(current_sys == entry.name, entry.display_name)
                         .on_hover_text(entry.description)
                         .clicked()
                     {
@@ -2148,7 +2737,10 @@ fn draw_advanced_panel(
         ui.horizontal(|ui| {
             lock_btn(ui, &mut st.locked_params, "system.speed");
             let spd_locked = st.locked_params.contains("system.speed");
-            ui.add_enabled(!spd_locked, Slider::new(&mut st.config.system.speed, 0.1..=10.0).text("Speed"));
+            ui.add_enabled(
+                !spd_locked,
+                Slider::new(&mut st.config.system.speed, 0.1..=10.0).text("Speed"),
+            );
         });
 
         // Feature #10: Thermal Noise injection
@@ -2160,14 +2752,28 @@ fn draw_advanced_panel(
         ui.colored_label(Color32::from_rgb(160, 200, 255), "Attractor Morph");
         ui.checkbox(&mut st.interp_enabled, "Enable morph");
         if st.interp_enabled {
-            let systems_list = ["lorenz", "rossler", "double_pendulum", "duffing", "van_der_pol",
-                "halvorsen", "aizawa", "chua", "nose_hoover", "sprott_b", "henon_map"];
+            let systems_list = [
+                "lorenz",
+                "rossler",
+                "double_pendulum",
+                "duffing",
+                "van_der_pol",
+                "halvorsen",
+                "aizawa",
+                "chua",
+                "nose_hoover",
+                "sprott_b",
+                "henon_map",
+            ];
             let cur_interp = st.interp_system.clone();
             ComboBox::from_label("Morph to")
                 .selected_text(system_display_name(&cur_interp))
                 .show_ui(ui, |ui| {
                     for &s in &systems_list {
-                        if ui.selectable_label(cur_interp == s, system_display_name(s)).clicked() {
+                        if ui
+                            .selectable_label(cur_interp == s, system_display_name(s))
+                            .clicked()
+                        {
                             st.interp_system = s.to_string();
                         }
                     }
@@ -2281,11 +2887,14 @@ fn draw_advanced_panel(
         });
 
         ui.add_space(4.0);
-        if ui.add(
-            Button::new(RichText::new("Randomize Parameters").color(Color32::WHITE))
-                .fill(Color32::from_rgb(60, 40, 80))
-                .min_size(Vec2::new(ui.available_width(), 28.0))
-        ).clicked() {
+        if ui
+            .add(
+                Button::new(RichText::new("Randomize Parameters").color(Color32::WHITE))
+                    .fill(Color32::from_rgb(60, 40, 80))
+                    .min_size(Vec2::new(ui.available_width(), 28.0)),
+            )
+            .clicked()
+        {
             let mut seed = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -2293,9 +2902,10 @@ fn draw_advanced_panel(
             let vary = |v: f64, s: &mut u64| v * (0.8 + lcg_rand(s) * 0.4);
             match st.config.system.name.as_str() {
                 "lorenz" => {
-                    st.config.lorenz.sigma = vary(st.config.lorenz.sigma, &mut seed).clamp(1.0, 20.0);
-                    st.config.lorenz.rho   = vary(st.config.lorenz.rho,   &mut seed).clamp(10.0, 50.0);
-                    st.config.lorenz.beta  = vary(st.config.lorenz.beta,  &mut seed).clamp(0.5, 5.0);
+                    st.config.lorenz.sigma =
+                        vary(st.config.lorenz.sigma, &mut seed).clamp(1.0, 20.0);
+                    st.config.lorenz.rho = vary(st.config.lorenz.rho, &mut seed).clamp(10.0, 50.0);
+                    st.config.lorenz.beta = vary(st.config.lorenz.beta, &mut seed).clamp(0.5, 5.0);
                 }
                 "rossler" => {
                     st.config.rossler.a = vary(st.config.rossler.a, &mut seed).clamp(0.01, 0.5);
@@ -2303,7 +2913,8 @@ fn draw_advanced_panel(
                     st.config.rossler.c = vary(st.config.rossler.c, &mut seed).clamp(1.0, 15.0);
                 }
                 "kuramoto" => {
-                    st.config.kuramoto.coupling = vary(st.config.kuramoto.coupling, &mut seed).clamp(0.0, 5.0);
+                    st.config.kuramoto.coupling =
+                        vary(st.config.kuramoto.coupling, &mut seed).clamp(0.0, 5.0);
                 }
                 _ => {}
             }
@@ -2316,9 +2927,14 @@ fn draw_advanced_panel(
         ui.horizontal(|ui| {
             lock_btn(ui, &mut st.locked_params, "audio.reverb_wet");
             let rvb_locked = st.locked_params.contains("audio.reverb_wet");
-            ui.add_enabled(!rvb_locked, Slider::new(&mut st.config.audio.reverb_wet, 0.0..=1.0).text("Reverb"));
+            ui.add_enabled(
+                !rvb_locked,
+                Slider::new(&mut st.config.audio.reverb_wet, 0.0..=1.0).text("Reverb"),
+            );
         });
-        let _ = ui.label("").on_hover_text("Wet/dry mix for the 8×8 feedback delay network reverb.");
+        let _ = ui
+            .label("")
+            .on_hover_text("Wet/dry mix for the 8×8 feedback delay network reverb.");
         ui.add(Slider::new(&mut st.config.audio.delay_ms, 0.0..=1000.0).text("Delay Time ms"))
             .on_hover_text("Delay time. BPM-syncable.");
         ui.add(Slider::new(&mut st.config.audio.delay_feedback, 0.0..=0.95).text("Feedback (max 90%)"))
@@ -2327,18 +2943,32 @@ fn draw_advanced_panel(
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add(Slider::new(&mut st.bpm, 60.0..=200.0).text("BPM"));
-            let sync_color = if st.bpm_sync { Color32::from_rgb(0, 160, 0) } else { Color32::from_rgb(50, 50, 70) };
-            if ui.add(
-                Button::new(RichText::new("Sync").color(Color32::WHITE))
-                    .fill(sync_color)
-                    .min_size(Vec2::new(44.0, 26.0))
-            ).clicked() {
+            let sync_color = if st.bpm_sync {
+                Color32::from_rgb(0, 160, 0)
+            } else {
+                Color32::from_rgb(50, 50, 70)
+            };
+            if ui
+                .add(
+                    Button::new(RichText::new("Sync").color(Color32::WHITE))
+                        .fill(sync_color)
+                        .min_size(Vec2::new(44.0, 26.0)),
+                )
+                .clicked()
+            {
                 st.bpm_sync = !st.bpm_sync;
             }
         });
         if st.bpm_sync {
-            ui.label(RichText::new(format!("Delay: {:.0}ms  LFO: {:.2}Hz", 60000.0 / st.bpm, st.bpm / 60.0 * 0.25))
-                .size(11.0).color(Color32::from_rgb(100, 200, 100)));
+            ui.label(
+                RichText::new(format!(
+                    "Delay: {:.0}ms  LFO: {:.2}Hz",
+                    60000.0 / st.bpm,
+                    st.bpm / 60.0 * 0.25
+                ))
+                .size(11.0)
+                .color(Color32::from_rgb(100, 200, 100)),
+            );
         }
 
         ui.add_space(4.0);
@@ -2370,23 +3000,38 @@ fn draw_advanced_panel(
         ui.separator();
         ui.add_space(2.0);
         ui.label(RichText::new("3-Band EQ").color(Color32::WHITE).strong());
-        ui.label(RichText::new("Low shelf 200 Hz  ·  Mid peak  ·  High shelf 6 kHz")
-            .size(10.0).color(GRAY_HINT).italics());
+        ui.label(
+            RichText::new("Low shelf 200 Hz  ·  Mid peak  ·  High shelf 6 kHz")
+                .size(10.0)
+                .color(GRAY_HINT)
+                .italics(),
+        );
         ui.add_space(2.0);
         ui.add(Slider::new(&mut st.eq_low_db, -12.0..=12.0).text("Low  dB"))
             .on_hover_text("Low shelf gain at 200 Hz. Boost for warmth and bass weight; cut to thin out muddy low-end.");
         ui.add(Slider::new(&mut st.eq_mid_db, -12.0..=12.0).text("Mid  dB"))
-            .on_hover_text("Peaking mid-band gain. Boost presence and body; cut to scoop out harshness.");
-        ui.add(Slider::new(&mut st.eq_mid_freq, 200.0..=8000.0).text("Mid Hz").logarithmic(true))
-            .on_hover_text("Center frequency of the mid peak filter (200–8000 Hz).");
+            .on_hover_text(
+                "Peaking mid-band gain. Boost presence and body; cut to scoop out harshness.",
+            );
+        ui.add(
+            Slider::new(&mut st.eq_mid_freq, 200.0..=8000.0)
+                .text("Mid Hz")
+                .logarithmic(true),
+        )
+        .on_hover_text("Center frequency of the mid peak filter (200–8000 Hz).");
         ui.add(Slider::new(&mut st.eq_high_db, -12.0..=12.0).text("High dB"))
             .on_hover_text("High shelf gain at 6 kHz. Boost for air and brightness; cut to soften harsh highs.");
-        let any_nonzero = st.eq_low_db.abs() > 0.1 || st.eq_mid_db.abs() > 0.1 || st.eq_high_db.abs() > 0.1;
+        let any_nonzero =
+            st.eq_low_db.abs() > 0.1 || st.eq_mid_db.abs() > 0.1 || st.eq_high_db.abs() > 0.1;
         if any_nonzero {
-            if ui.add(Button::new(RichText::new("Reset EQ").color(Color32::WHITE).size(11.0))
-                .fill(Color32::from_rgb(40, 30, 50))
-                .min_size(Vec2::new(ui.available_width(), 24.0))
-            ).clicked() {
+            if ui
+                .add(
+                    Button::new(RichText::new("Reset EQ").color(Color32::WHITE).size(11.0))
+                        .fill(Color32::from_rgb(40, 30, 50))
+                        .min_size(Vec2::new(ui.available_width(), 24.0)),
+                )
+                .clicked()
+            {
                 st.eq_low_db = 0.0;
                 st.eq_mid_db = 0.0;
                 st.eq_high_db = 0.0;
@@ -2399,17 +3044,18 @@ fn draw_advanced_panel(
     // Below 1.0 collapses toward mono; above 1.0 pushes the stereo field wider.
     collapsing_section(ui, "STEREO WIDTH", false, |ui| {
         ui.add_space(2.0);
-        let changed = ui.add(
-            Slider::new(&mut st.stereo_width, 0.0..=3.0)
-                .text("Width")
-                .clamp_to_range(true),
-        )
-        .on_hover_text(
-            "Master stereo width applied after the limiter.\n\
+        let changed = ui
+            .add(
+                Slider::new(&mut st.stereo_width, 0.0..=3.0)
+                    .text("Width")
+                    .clamp_to_range(true),
+            )
+            .on_hover_text(
+                "Master stereo width applied after the limiter.\n\
              0.0 = mono  ·  1.0 = unity (unchanged)  ·  3.0 = hyper-wide.\n\
              Uses energy-normalised mid/side encoding so loudness stays constant.",
-        )
-        .changed();
+            )
+            .changed();
         if changed {
             if let Some(mut w) = st.stereo_width_shared.try_lock() {
                 *w = st.stereo_width;
@@ -2417,12 +3063,22 @@ fn draw_advanced_panel(
         }
         ui.add_space(2.0);
         if (st.stereo_width - 1.0).abs() > 0.01 {
-            if ui.add(Button::new(RichText::new("Reset Width").color(Color32::WHITE).size(11.0))
-                .fill(Color32::from_rgb(40, 30, 50))
-                .min_size(Vec2::new(ui.available_width(), 24.0))
-            ).clicked() {
+            if ui
+                .add(
+                    Button::new(
+                        RichText::new("Reset Width")
+                            .color(Color32::WHITE)
+                            .size(11.0),
+                    )
+                    .fill(Color32::from_rgb(40, 30, 50))
+                    .min_size(Vec2::new(ui.available_width(), 24.0)),
+                )
+                .clicked()
+            {
                 st.stereo_width = 1.0;
-                if let Some(mut w) = st.stereo_width_shared.try_lock() { *w = 1.0; }
+                if let Some(mut w) = st.stereo_width_shared.try_lock() {
+                    *w = 1.0;
+                }
             }
         }
     });
@@ -2431,15 +3087,28 @@ fn draw_advanced_panel(
     collapsing_section(ui, "OUTPUT", false, |ui| {
         let st_sample_rate = st.sample_rate;
         let is_recording = recording.try_lock().map(|r| r.is_some()).unwrap_or(false);
-        let rec_label = if is_recording { "⏹  Stop & Save" } else { "⏺  Start Recording" };
-        let rec_color = if is_recording { Color32::from_rgb(180, 30, 30) } else { Color32::from_rgb(30, 120, 30) };
-        if ui.add(
-            Button::new(RichText::new(rec_label).color(Color32::WHITE))
-                .fill(rec_color)
-                .min_size(Vec2::new(ui.available_width(), 36.0))
-        ).clicked() {
+        let rec_label = if is_recording {
+            "⏹  Stop & Save"
+        } else {
+            "⏺  Start Recording"
+        };
+        let rec_color = if is_recording {
+            Color32::from_rgb(180, 30, 30)
+        } else {
+            Color32::from_rgb(30, 120, 30)
+        };
+        if ui
+            .add(
+                Button::new(RichText::new(rec_label).color(Color32::WHITE))
+                    .fill(rec_color)
+                    .min_size(Vec2::new(ui.available_width(), 36.0)),
+            )
+            .clicked()
+        {
             if is_recording {
-                if let Some(mut lock) = recording.try_lock() { *lock = None; }
+                if let Some(mut lock) = recording.try_lock() {
+                    *lock = None;
+                }
             } else {
                 let secs = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -2471,7 +3140,10 @@ fn draw_advanced_panel(
                 .width(60.0)
                 .show_ui(ui, |ui| {
                     for &b in &bars_options {
-                        if ui.selectable_label(current_bars == b, format!("{}", b)).clicked() {
+                        if ui
+                            .selectable_label(current_bars == b, format!("{}", b))
+                            .clicked()
+                        {
                             st.loop_bars = b;
                         }
                     }
@@ -2483,11 +3155,19 @@ fn draw_advanced_panel(
             } else {
                 format!("Export {}-Bar Loop", st.loop_bars)
             };
-            let export_color = if is_exporting { Color32::from_rgb(180, 120, 0) } else { Color32::from_rgb(0, 90, 110) };
-            if !is_exporting && ui.add(
-                Button::new(RichText::new(export_label).color(Color32::WHITE))
-                    .fill(export_color)
-            ).clicked() {
+            let export_color = if is_exporting {
+                Color32::from_rgb(180, 120, 0)
+            } else {
+                Color32::from_rgb(0, 90, 110)
+            };
+            if !is_exporting
+                && ui
+                    .add(
+                        Button::new(RichText::new(export_label).color(Color32::WHITE))
+                            .fill(export_color),
+                    )
+                    .clicked()
+            {
                 let bars = st.loop_bars;
                 let bpm = st.bpm;
                 let sr = st.sample_rate;
@@ -2500,59 +3180,77 @@ fn draw_advanced_panel(
 
         ui.add_space(4.0);
 
-        if ui.add(
-            Button::new(RichText::new("Save as Default").color(Color32::WHITE))
-                .fill(Color32::from_rgb(30, 55, 30))
-                .min_size(Vec2::new(ui.available_width(), 28.0))
-        ).clicked() {
+        if ui
+            .add(
+                Button::new(RichText::new("Save as Default").color(Color32::WHITE))
+                    .fill(Color32::from_rgb(30, 55, 30))
+                    .min_size(Vec2::new(ui.available_width(), 28.0)),
+            )
+            .clicked()
+        {
             let toml_str = toml::to_string_pretty(&st.config).unwrap_or_default();
             let _ = std::fs::write("config.toml", toml_str);
         }
 
         ui.add_space(6.0);
 
-        CollapsingHeader::new(
-            RichText::new("MY PATCHES").size(12.0).color(GRAY_HINT)
-        ).default_open(false).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.add(TextEdit::singleline(&mut st.patch_name_input)
-                    .desired_width(140.0)
-                    .hint_text("Patch name..."));
-                if ui.add(
-                    Button::new(RichText::new("Save").color(Color32::WHITE))
-                        .fill(Color32::from_rgb(0, 80, 120))
-                ).clicked() {
-                    let name = st.patch_name_input.clone();
-                    if !name.is_empty() {
-                        save_patch(&name, &st.config);
-                        st.patch_list = list_patches();
-                        st.toast_queue.push(Toast::info(format!("Patch '{}' saved", name)));
-                    } else {
-                        st.toast_queue.push(Toast::warning("Enter a patch name first"));
-                    }
-                }
-            });
-            ui.add_space(4.0);
-            let patches = st.patch_list.clone();
-            if patches.is_empty() {
-                ui.label(RichText::new("No patches saved yet").color(GRAY_HINT).size(11.0));
-            } else {
-                for patch_name in &patches {
-                    if ui.button(patch_name).clicked() {
-                        if let Some(cfg) = load_patch_file(patch_name) {
-                            let loaded_name = patch_name.clone();
-                            st.config = cfg;
-                            st.system_changed = true;
-                            st.mode_changed = true;
-                            st.toast_queue.push(Toast::info(format!("Loaded '{}'", loaded_name)));
+        CollapsingHeader::new(RichText::new("MY PATCHES").size(12.0).color(GRAY_HINT))
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        TextEdit::singleline(&mut st.patch_name_input)
+                            .desired_width(140.0)
+                            .hint_text("Patch name..."),
+                    );
+                    if ui
+                        .add(
+                            Button::new(RichText::new("Save").color(Color32::WHITE))
+                                .fill(Color32::from_rgb(0, 80, 120)),
+                        )
+                        .clicked()
+                    {
+                        let name = st.patch_name_input.clone();
+                        if !name.is_empty() {
+                            save_patch(&name, &st.config);
+                            st.patch_list = list_patches();
+                            st.toast_queue
+                                .push(Toast::info(format!("Patch '{}' saved", name)));
                         } else {
-                            let failed_name = patch_name.clone();
-                            st.toast_queue.push(Toast::error(format!("Failed to load '{}'", failed_name)));
+                            st.toast_queue
+                                .push(Toast::warning("Enter a patch name first"));
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                let patches = st.patch_list.clone();
+                if patches.is_empty() {
+                    ui.label(
+                        RichText::new("No patches saved yet")
+                            .color(GRAY_HINT)
+                            .size(11.0),
+                    );
+                } else {
+                    for patch_name in &patches {
+                        if ui.button(patch_name).clicked() {
+                            if let Some(cfg) = load_patch_file(patch_name) {
+                                let loaded_name = patch_name.clone();
+                                st.config = cfg;
+                                st.system_changed = true;
+                                st.mode_changed = true;
+                                st.toast_queue
+                                    .push(Toast::info(format!("Loaded '{}'", loaded_name)));
+                            } else {
+                                let failed_name = patch_name.clone();
+                                st.toast_queue.push(Toast::error(format!(
+                                    "Failed to load '{}'",
+                                    failed_name
+                                )));
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
 
         // ---- RESTORE BACKUP ----
         {
@@ -2561,12 +3259,16 @@ fn draw_advanced_panel(
                 let backups = list_backups(&patch_name);
                 if !backups.is_empty() {
                     CollapsingHeader::new(
-                        RichText::new("RESTORE BACKUP").size(12.0).color(GRAY_HINT)
-                    ).default_open(false).show(ui, |ui| {
+                        RichText::new("RESTORE BACKUP").size(12.0).color(GRAY_HINT),
+                    )
+                    .default_open(false)
+                    .show(ui, |ui| {
                         let mut to_restore: Option<String> = None;
                         for (filename, ts) in &backups {
                             let dt = std::time::UNIX_EPOCH + std::time::Duration::from_secs(*ts);
-                            let label = if let Ok(elapsed) = std::time::SystemTime::now().duration_since(dt) {
+                            let label = if let Ok(elapsed) =
+                                std::time::SystemTime::now().duration_since(dt)
+                            {
                                 let secs = elapsed.as_secs();
                                 if secs < 3600 {
                                     format!("{} min ago", secs / 60)
@@ -2585,7 +3287,10 @@ fn draw_advanced_panel(
                                 st.config = cfg;
                                 st.system_changed = true;
                                 st.mode_changed = true;
-                                st.toast_queue.push(Toast::info(format!("Restored backup for '{}'", patch_name)));
+                                st.toast_queue.push(Toast::info(format!(
+                                    "Restored backup for '{}'",
+                                    patch_name
+                                )));
                             } else {
                                 st.toast_queue.push(Toast::error("Failed to load backup"));
                             }
@@ -2597,78 +3302,125 @@ fn draw_advanced_panel(
 
         ui.add_space(6.0);
 
-        CollapsingHeader::new(
-            RichText::new("PERFORMANCE").size(12.0).color(GRAY_HINT)
-        ).default_open(false).show(ui, |ui| {
-            CollapsingHeader::new(
-                RichText::new("Automation").size(11.0).color(GRAY_HINT)
-            ).default_open(false).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let rec_color = if st.auto_recording { Color32::from_rgb(180, 30, 30) } else { Color32::from_rgb(60, 40, 40) };
-                    if ui.add(
-                        Button::new(RichText::new("Rec").color(Color32::WHITE))
-                            .fill(rec_color)
-                            .min_size(Vec2::new(50.0, 26.0))
-                    ).clicked() {
-                        st.auto_recording = !st.auto_recording;
+        CollapsingHeader::new(RichText::new("PERFORMANCE").size(12.0).color(GRAY_HINT))
+            .default_open(false)
+            .show(ui, |ui| {
+                CollapsingHeader::new(RichText::new("Automation").size(11.0).color(GRAY_HINT))
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let rec_color = if st.auto_recording {
+                                Color32::from_rgb(180, 30, 30)
+                            } else {
+                                Color32::from_rgb(60, 40, 40)
+                            };
+                            if ui
+                                .add(
+                                    Button::new(RichText::new("Rec").color(Color32::WHITE))
+                                        .fill(rec_color)
+                                        .min_size(Vec2::new(50.0, 26.0)),
+                                )
+                                .clicked()
+                            {
+                                st.auto_recording = !st.auto_recording;
+                                if st.auto_recording {
+                                    st.auto_playing = false;
+                                    st.auto_events.clear();
+                                    st.auto_start_time = Instant::now();
+                                }
+                            }
+                            let play_color = if st.auto_playing {
+                                Color32::from_rgb(0, 140, 0)
+                            } else {
+                                Color32::from_rgb(40, 60, 40)
+                            };
+                            if ui
+                                .add(
+                                    Button::new(RichText::new("Play").color(Color32::WHITE))
+                                        .fill(play_color)
+                                        .min_size(Vec2::new(50.0, 26.0)),
+                                )
+                                .clicked()
+                            {
+                                st.auto_playing = !st.auto_playing;
+                                if st.auto_playing {
+                                    st.auto_recording = false;
+                                    st.auto_play_pos = 0;
+                                    st.auto_start_time = Instant::now();
+                                }
+                            }
+                            if ui
+                                .add(
+                                    Button::new(RichText::new("Stop").color(Color32::WHITE))
+                                        .fill(Color32::from_rgb(50, 50, 50))
+                                        .min_size(Vec2::new(50.0, 26.0)),
+                                )
+                                .clicked()
+                            {
+                                st.auto_recording = false;
+                                st.auto_playing = false;
+                            }
+                        });
+                        ui.checkbox(
+                            &mut st.auto_loop,
+                            RichText::new("Loop playback").color(Color32::WHITE),
+                        );
+                        ui.label(
+                            RichText::new(format!("{} events recorded", st.auto_events.len()))
+                                .size(11.0)
+                                .color(GRAY_HINT),
+                        );
                         if st.auto_recording {
-                            st.auto_playing = false;
-                            st.auto_events.clear();
-                            st.auto_start_time = Instant::now();
+                            ui.label(
+                                RichText::new("Recording...").color(Color32::from_rgb(255, 80, 80)),
+                            );
                         }
-                    }
-                    let play_color = if st.auto_playing { Color32::from_rgb(0, 140, 0) } else { Color32::from_rgb(40, 60, 40) };
-                    if ui.add(
-                        Button::new(RichText::new("Play").color(Color32::WHITE))
-                            .fill(play_color)
-                            .min_size(Vec2::new(50.0, 26.0))
-                    ).clicked() {
-                        st.auto_playing = !st.auto_playing;
                         if st.auto_playing {
-                            st.auto_recording = false;
-                            st.auto_play_pos = 0;
-                            st.auto_start_time = Instant::now();
+                            ui.label(
+                                RichText::new("Playing back").color(Color32::from_rgb(80, 255, 80)),
+                            );
                         }
-                    }
-                    if ui.add(
-                        Button::new(RichText::new("Stop").color(Color32::WHITE))
-                            .fill(Color32::from_rgb(50, 50, 50))
-                            .min_size(Vec2::new(50.0, 26.0))
-                    ).clicked() {
-                        st.auto_recording = false;
-                        st.auto_playing = false;
-                    }
-                });
-                ui.checkbox(&mut st.auto_loop, RichText::new("Loop playback").color(Color32::WHITE));
-                ui.label(RichText::new(format!("{} events recorded", st.auto_events.len()))
-                    .size(11.0).color(GRAY_HINT));
-                if st.auto_recording {
-                    ui.label(RichText::new("Recording...").color(Color32::from_rgb(255, 80, 80)));
-                }
-                if st.auto_playing {
-                    ui.label(RichText::new("Playing back").color(Color32::from_rgb(80, 255, 80)));
+                    });
+
+                ui.add_space(4.0);
+                ui.checkbox(
+                    &mut st.midi_enabled,
+                    RichText::new("MIDI Output").color(Color32::WHITE),
+                );
+                if st.midi_enabled {
+                    ui.label(
+                        RichText::new("Sending to first MIDI port")
+                            .size(11.0)
+                            .color(Color32::from_rgb(100, 200, 100)),
+                    );
                 }
             });
-
-            ui.add_space(4.0);
-            ui.checkbox(&mut st.midi_enabled, RichText::new("MIDI Output").color(Color32::WHITE));
-            if st.midi_enabled {
-                ui.label(RichText::new("Sending to first MIDI port").size(11.0).color(Color32::from_rgb(100, 200, 100)));
-            }
-        });
     });
 
     // ---- RHYTHM & ARP ----
     collapsing_section(ui, "RHYTHM & ARP", false, |ui| {
-        ui.checkbox(&mut st.arp_enabled, RichText::new("Enable Arpeggiator").color(Color32::WHITE));
+        ui.checkbox(
+            &mut st.arp_enabled,
+            RichText::new("Enable Arpeggiator").color(Color32::WHITE),
+        );
         if st.arp_enabled {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Steps:").color(Color32::WHITE));
                 for &s in &[4usize, 8, 16] {
                     let sel = st.arp_steps == s;
-                    let col = if sel { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
-                    if ui.add(Button::new(RichText::new(format!("{}", s)).color(Color32::WHITE))
-                        .fill(col).min_size(Vec2::new(36.0, 24.0))).clicked() {
+                    let col = if sel {
+                        Color32::from_rgb(0, 140, 210)
+                    } else {
+                        Color32::from_rgb(40, 40, 70)
+                    };
+                    if ui
+                        .add(
+                            Button::new(RichText::new(format!("{}", s)).color(Color32::WHITE))
+                                .fill(col)
+                                .min_size(Vec2::new(36.0, 24.0)),
+                        )
+                        .clicked()
+                    {
                         st.arp_steps = s;
                     }
                 }
@@ -2676,9 +3428,19 @@ fn draw_advanced_panel(
                 ui.label(RichText::new("Oct:").color(Color32::WHITE));
                 for &o in &[1usize, 2] {
                     let sel = st.arp_octaves == o;
-                    let col = if sel { Color32::from_rgb(0, 140, 210) } else { Color32::from_rgb(40, 40, 70) };
-                    if ui.add(Button::new(RichText::new(format!("{}", o)).color(Color32::WHITE))
-                        .fill(col).min_size(Vec2::new(30.0, 24.0))).clicked() {
+                    let col = if sel {
+                        Color32::from_rgb(0, 140, 210)
+                    } else {
+                        Color32::from_rgb(40, 40, 70)
+                    };
+                    if ui
+                        .add(
+                            Button::new(RichText::new(format!("{}", o)).color(Color32::WHITE))
+                                .fill(col)
+                                .min_size(Vec2::new(30.0, 24.0)),
+                        )
+                        .clicked()
+                    {
                         st.arp_octaves = o;
                     }
                 }
@@ -2686,14 +3448,22 @@ fn draw_advanced_panel(
             ui.add(Slider::new(&mut st.arp_bpm, 40.0..=240.0).text("ARP BPM"));
             let step_pct = if st.arp_steps > 0 {
                 (st.arp_position as f32 + 1.0) / st.arp_steps as f32
-            } else { 0.0 };
-            ui.add(ProgressBar::new(step_pct)
-                .text(format!("Step {}/{}", st.arp_position + 1, st.arp_steps)));
+            } else {
+                0.0
+            };
+            ui.add(ProgressBar::new(step_pct).text(format!(
+                "Step {}/{}",
+                st.arp_position + 1,
+                st.arp_steps
+            )));
         }
         ui.add_space(4.0);
         ui.separator();
         ui.label(RichText::new("Plucked Strings").color(Color32::WHITE));
-        ui.checkbox(&mut st.ks_enabled, RichText::new("Enable KS (Poincaré rhythm)").color(Color32::WHITE));
+        ui.checkbox(
+            &mut st.ks_enabled,
+            RichText::new("Enable KS (Poincaré rhythm)").color(Color32::WHITE),
+        );
         if st.ks_enabled {
             ui.add(Slider::new(&mut st.ks_volume, 0.0..=1.0).text("Volume"));
         }
@@ -2703,12 +3473,26 @@ fn draw_advanced_panel(
     drop(st); // release lock before calling collapsing_section (which takes state)
     collapsing_section(ui, "COUPLED SYSTEMS", false, |ui| {
         let mut st = state.lock();
-        ui.checkbox(&mut st.coupled_enabled, RichText::new("Enable Coupled Attractor").color(Color32::WHITE));
+        ui.checkbox(
+            &mut st.coupled_enabled,
+            RichText::new("Enable Coupled Attractor").color(Color32::WHITE),
+        );
         ui.add_space(4.0);
 
         // Source system dropdown
-        let systems = ["lorenz", "rossler", "duffing", "van_der_pol", "halvorsen",
-                        "aizawa", "chua", "double_pendulum", "geodesic_torus", "kuramoto", "three_body"];
+        let systems = [
+            "lorenz",
+            "rossler",
+            "duffing",
+            "van_der_pol",
+            "halvorsen",
+            "aizawa",
+            "chua",
+            "double_pendulum",
+            "geodesic_torus",
+            "kuramoto",
+            "three_body",
+        ];
         let current_src = st.coupled_source.clone();
         ComboBox::from_label("Source System")
             .selected_text(&current_src)
@@ -2742,49 +3526,89 @@ fn draw_advanced_panel(
         let src_x = st.coupled_src_x_out;
         let sync_err = st.sync_error;
         drop(st);
-        ui.label(RichText::new("Live Output (x):").color(GRAY_HINT).size(11.0));
+        ui.label(
+            RichText::new("Live Output (x):")
+                .color(GRAY_HINT)
+                .size(11.0),
+        );
         ui.horizontal(|ui| {
             ui.label(RichText::new("Main:").color(Color32::WHITE).size(11.0));
             let (rect, _) = ui.allocate_exact_size(Vec2::new(120.0, 14.0), Sense::hover());
-            ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(20, 20, 40));
-            let bar = egui::Rect::from_min_size(rect.min, Vec2::new(rect.width() * main_x, rect.height()));
-            ui.painter().rect_filled(bar, 2.0, Color32::from_rgb(0, 160, 200));
+            ui.painter()
+                .rect_filled(rect, 2.0, Color32::from_rgb(20, 20, 40));
+            let bar = egui::Rect::from_min_size(
+                rect.min,
+                Vec2::new(rect.width() * main_x, rect.height()),
+            );
+            ui.painter()
+                .rect_filled(bar, 2.0, Color32::from_rgb(0, 160, 200));
         });
         ui.horizontal(|ui| {
             ui.label(RichText::new("Src: ").color(Color32::WHITE).size(11.0));
             let (rect, _) = ui.allocate_exact_size(Vec2::new(120.0, 14.0), Sense::hover());
-            ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(20, 20, 40));
-            let bar = egui::Rect::from_min_size(rect.min, Vec2::new(rect.width() * src_x, rect.height()));
-            ui.painter().rect_filled(bar, 2.0, Color32::from_rgb(200, 100, 0));
+            ui.painter()
+                .rect_filled(rect, 2.0, Color32::from_rgb(20, 20, 40));
+            let bar =
+                egui::Rect::from_min_size(rect.min, Vec2::new(rect.width() * src_x, rect.height()));
+            ui.painter()
+                .rect_filled(bar, 2.0, Color32::from_rgb(200, 100, 0));
         });
         ui.add_space(4.0);
-        ui.label(RichText::new("Sync Error (EMA):").color(GRAY_HINT).size(11.0));
+        ui.label(
+            RichText::new("Sync Error (EMA):")
+                .color(GRAY_HINT)
+                .size(11.0),
+        );
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(120.0, 14.0), Sense::hover());
-            ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(20, 20, 40));
-            let bar = egui::Rect::from_min_size(rect.min, Vec2::new(rect.width() * sync_err.clamp(0.0, 1.0), rect.height()));
+            ui.painter()
+                .rect_filled(rect, 2.0, Color32::from_rgb(20, 20, 40));
+            let bar = egui::Rect::from_min_size(
+                rect.min,
+                Vec2::new(rect.width() * sync_err.clamp(0.0, 1.0), rect.height()),
+            );
             let err_color = {
                 let t = sync_err.clamp(0.0, 1.0);
                 Color32::from_rgb((t * 220.0) as u8, ((1.0 - t) * 160.0) as u8, 60)
             };
             ui.painter().rect_filled(bar, 2.0, err_color);
-            ui.label(RichText::new(format!("{:.3}", sync_err)).color(GRAY_HINT).size(10.0));
+            ui.label(
+                RichText::new(format!("{:.3}", sync_err))
+                    .color(GRAY_HINT)
+                    .size(10.0),
+            );
         });
         {
             let mut st = state.lock();
-            ui.checkbox(&mut st.coupled_bidirectional, RichText::new("Bidirectional Coupling").color(Color32::WHITE));
+            ui.checkbox(
+                &mut st.coupled_bidirectional,
+                RichText::new("Bidirectional Coupling").color(Color32::WHITE),
+            );
         }
     });
 
     // ---- CUSTOM ODE ----
     collapsing_section(ui, "CUSTOM ODE", false, |ui| {
-        ui.label(RichText::new("Define your own 3D ODE system").color(GRAY_HINT).size(11.0));
-        ui.label(RichText::new("Variables: x, y, z, t  |  Functions: sin, cos, exp, abs, sqrt").color(GRAY_HINT).size(10.0));
+        ui.label(
+            RichText::new("Define your own 3D ODE system")
+                .color(GRAY_HINT)
+                .size(11.0),
+        );
+        ui.label(
+            RichText::new("Variables: x, y, z, t  |  Functions: sin, cos, exp, abs, sqrt")
+                .color(GRAY_HINT)
+                .size(10.0),
+        );
         ui.add_space(4.0);
 
         let (mut ex, mut ey, mut ez, err) = {
             let st = state.lock();
-            (st.custom_ode_x.clone(), st.custom_ode_y.clone(), st.custom_ode_z.clone(), st.custom_ode_error.clone())
+            (
+                st.custom_ode_x.clone(),
+                st.custom_ode_y.clone(),
+                st.custom_ode_z.clone(),
+                st.custom_ode_error.clone(),
+            )
         };
 
         let mut any_expr_changed = false;
@@ -2815,21 +3639,35 @@ fn draw_advanced_panel(
             let validation = validate_exprs(&ex, &ey, &ez);
             let mut st = state.lock();
             match validation {
-                Ok(()) => { st.custom_ode_error.clear(); }
-                Err(e) => { st.custom_ode_error = e; }
+                Ok(()) => {
+                    st.custom_ode_error.clear();
+                }
+                Err(e) => {
+                    st.custom_ode_error = e;
+                }
             }
         }
         ui.add_space(4.0);
         // Show validation error/warning inline, before the Apply button
         if !err.is_empty() {
             let is_warning = err.starts_with("Warning");
-            let color = if is_warning { Color32::from_rgb(255, 200, 60) } else { Color32::from_rgb(255, 80, 80) };
+            let color = if is_warning {
+                Color32::from_rgb(255, 200, 60)
+            } else {
+                Color32::from_rgb(255, 80, 80)
+            };
             ui.colored_label(color, &err);
         }
-        let can_apply = !err.starts_with("dx/dt error") && !err.starts_with("dy/dt error") && !err.starts_with("dz/dt error");
+        let can_apply = !err.starts_with("dx/dt error")
+            && !err.starts_with("dy/dt error")
+            && !err.starts_with("dz/dt error");
         let apply_btn = ui.add_enabled(
             can_apply,
-            egui::Button::new(RichText::new("Apply Custom ODE").color(Color32::WHITE).strong()),
+            egui::Button::new(
+                RichText::new("Apply Custom ODE")
+                    .color(Color32::WHITE)
+                    .strong(),
+            ),
         );
         if apply_btn.clicked() {
             use crate::systems::validate_exprs;
@@ -2843,16 +3681,25 @@ fn draw_advanced_panel(
                     st.toast_queue.push(Toast::info("Custom ODE applied"));
                 }
                 Err(e) => {
-                    st.toast_queue.push(Toast::error(format!("ODE error: {}", e)));
+                    st.toast_queue
+                        .push(Toast::error(format!("ODE error: {}", e)));
                     st.custom_ode_error = e;
                 }
             }
         }
         ui.add_space(4.0);
-        ui.label(RichText::new("Available: x y z t pi e  |  Functions: sin cos exp abs sqrt ln log tan")
-            .italics().size(10.0).color(GRAY_HINT));
-        ui.label(RichText::new("Example (Lorenz): 10*(y-x) | x*(28-z)-y | x*y-2.667*z")
-            .italics().size(10.0).color(GRAY_HINT));
+        ui.label(
+            RichText::new("Available: x y z t pi e  |  Functions: sin cos exp abs sqrt ln log tan")
+                .italics()
+                .size(10.0)
+                .color(GRAY_HINT),
+        );
+        ui.label(
+            RichText::new("Example (Lorenz): 10*(y-x) | x*(28-z)-y | x*y-2.667*z")
+                .italics()
+                .size(10.0)
+                .color(GRAY_HINT),
+        );
     });
 
     // ---- MOD MATRIX ----
@@ -2860,19 +3707,50 @@ fn draw_advanced_panel(
         let mut st = state.lock();
         // Table header
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Source").color(AMBER).size(11.0).strong().monospace());
+            ui.label(
+                RichText::new("Source")
+                    .color(AMBER)
+                    .size(11.0)
+                    .strong()
+                    .monospace(),
+            );
             ui.add_space(8.0);
-            ui.label(RichText::new("Target").color(AMBER).size(11.0).strong().monospace());
+            ui.label(
+                RichText::new("Target")
+                    .color(AMBER)
+                    .size(11.0)
+                    .strong()
+                    .monospace(),
+            );
             ui.add_space(8.0);
-            ui.label(RichText::new("Depth").color(AMBER).size(11.0).strong().monospace());
+            ui.label(
+                RichText::new("Depth")
+                    .color(AMBER)
+                    .size(11.0)
+                    .strong()
+                    .monospace(),
+            );
             ui.add_space(4.0);
-            ui.label(RichText::new("En").color(AMBER).size(11.0).strong().monospace());
+            ui.label(
+                RichText::new("En")
+                    .color(AMBER)
+                    .size(11.0)
+                    .strong()
+                    .monospace(),
+            );
         });
         ui.separator();
 
         let source_options = ["x", "y", "z", "speed"];
-        let target_options = ["reverb_wet", "delay_ms", "base_freq_mult", "speed",
-                              "chorus_mix", "master_volume", "chaos"];
+        let target_options = [
+            "reverb_wet",
+            "delay_ms",
+            "base_freq_mult",
+            "speed",
+            "chorus_mix",
+            "master_volume",
+            "chaos",
+        ];
 
         let mut to_remove: Option<usize> = None;
         let n = st.mod_matrix.len();
@@ -2906,12 +3784,16 @@ fn draw_advanced_panel(
                 ui.add(
                     Slider::new(&mut st.mod_matrix[i].depth, -1.0..=1.0)
                         .text("")
-                        .fixed_decimals(2)
-                ).on_hover_text("Modulation depth: negative inverts the modulation direction.");
+                        .fixed_decimals(2),
+                )
+                .on_hover_text("Modulation depth: negative inverts the modulation direction.");
                 // Enabled checkbox
                 ui.checkbox(&mut st.mod_matrix[i].enabled, "");
                 // Remove button
-                if ui.small_button(RichText::new("✕").color(Color32::from_rgb(200, 60, 60))).clicked() {
+                if ui
+                    .small_button(RichText::new("✕").color(Color32::from_rgb(200, 60, 60)))
+                    .clicked()
+                {
                     to_remove = Some(i);
                 }
             });
@@ -2923,7 +3805,14 @@ fn draw_advanced_panel(
         ui.add_space(4.0);
         // Add Route button (capped at 8)
         if st.mod_matrix.len() < 8 {
-            if ui.button(RichText::new("+ Add Route").color(Color32::from_rgb(0, 200, 100)).size(12.0)).clicked() {
+            if ui
+                .button(
+                    RichText::new("+ Add Route")
+                        .color(Color32::from_rgb(0, 200, 100))
+                        .size(12.0),
+                )
+                .clicked()
+            {
                 st.mod_matrix.push(crate::ui::ModRoute {
                     source: "x".to_string(),
                     target: "reverb_wet".to_string(),
@@ -2932,18 +3821,30 @@ fn draw_advanced_panel(
                 });
             }
         } else {
-            ui.label(RichText::new("Max 8 routes").color(GRAY_HINT).size(11.0).italics());
+            ui.label(
+                RichText::new("Max 8 routes")
+                    .color(GRAY_HINT)
+                    .size(11.0)
+                    .italics(),
+            );
         }
         if st.mod_matrix.is_empty() {
-            ui.label(RichText::new("No routes. Add one to modulate synth params from attractor state.")
-                .color(GRAY_HINT).size(11.0).italics());
+            ui.label(
+                RichText::new("No routes. Add one to modulate synth params from attractor state.")
+                    .color(GRAY_HINT)
+                    .size(11.0)
+                    .italics(),
+            );
         }
     });
 
     // ---- MIDI INPUT ----
     collapsing_section(ui, "MIDI INPUT", false, |ui| {
         let mut st = state.lock();
-        ui.checkbox(&mut st.midi_in_enabled, RichText::new("Enable MIDI Input").color(Color32::WHITE));
+        ui.checkbox(
+            &mut st.midi_in_enabled,
+            RichText::new("Enable MIDI Input").color(Color32::WHITE),
+        );
         if st.midi_in_enabled {
             let targets = ["rho", "sigma", "speed", "coupling", "base_freq"];
             let cur_note = st.midi_in_note_target.clone();
@@ -2967,7 +3868,14 @@ fn draw_advanced_panel(
                     }
                 });
             let mut cc_num = st.midi_in_cc_num as u32;
-            if ui.add(DragValue::new(&mut cc_num).clamp_range(0u32..=127).prefix("CC#")).changed() {
+            if ui
+                .add(
+                    DragValue::new(&mut cc_num)
+                        .clamp_range(0u32..=127)
+                        .prefix("CC#"),
+                )
+                .changed()
+            {
                 st.midi_in_cc_num = cc_num as u8;
             }
             // CC Target row with Learn button
@@ -2987,8 +3895,14 @@ fn draw_advanced_panel(
                 } else {
                     Color32::from_rgb(60, 60, 100)
                 };
-                if ui.add(Button::new(RichText::new("Learn").color(Color32::WHITE).size(11.0))
-                    .fill(learn_col).min_size(Vec2::new(48.0, 22.0))).clicked() {
+                if ui
+                    .add(
+                        Button::new(RichText::new("Learn").color(Color32::WHITE).size(11.0))
+                            .fill(learn_col)
+                            .min_size(Vec2::new(48.0, 22.0)),
+                    )
+                    .clicked()
+                {
                     st.midi_cc_learn_active = true;
                     st.midi_cc_learn_target = st.midi_in_cc_target.clone();
                     st.midi_cc_learn_last_cc = st.midi_in_last_cc;
@@ -3000,31 +3914,56 @@ fn draw_advanced_panel(
                 let current_cc = st.midi_in_last_cc;
                 if current_cc != st.midi_cc_learn_last_cc {
                     let target = st.midi_cc_learn_target.clone();
-                    st.midi_cc_map.retain(|(cc, t)| *cc != current_cc && t != &target);
+                    st.midi_cc_map
+                        .retain(|(cc, t)| *cc != current_cc && t != &target);
                     st.midi_cc_map.push((current_cc, target));
                     st.midi_cc_learn_active = false;
                 }
                 ui.add_space(2.0);
-                ui.label(RichText::new("Waiting for CC...").color(Color32::from_rgb(220, 170, 0)).size(11.0).strong());
+                ui.label(
+                    RichText::new("Waiting for CC...")
+                        .color(Color32::from_rgb(220, 170, 0))
+                        .size(11.0)
+                        .strong(),
+                );
             }
 
             ui.add_space(4.0);
-            ui.label(RichText::new(format!(
-                "Note: {}  Vel: {}  CC: {}",
-                st.midi_in_last_note, st.midi_in_last_vel, st.midi_in_last_cc
-            )).color(CYAN).size(11.0));
+            ui.label(
+                RichText::new(format!(
+                    "Note: {}  Vel: {}  CC: {}",
+                    st.midi_in_last_note, st.midi_in_last_vel, st.midi_in_last_cc
+                ))
+                .color(CYAN)
+                .size(11.0),
+            );
             // Visual summary of active MIDI mappings
             ui.add_space(2.0);
             let badge_color = Color32::from_rgb(0, 200, 100);
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(format!("Note\u{2192}{}", st.midi_in_note_target))
-                    .color(badge_color).size(11.0).strong());
+                ui.label(
+                    RichText::new(format!("Note\u{2192}{}", st.midi_in_note_target))
+                        .color(badge_color)
+                        .size(11.0)
+                        .strong(),
+                );
                 ui.label(RichText::new("  |  ").color(GRAY_HINT).size(11.0));
-                ui.label(RichText::new(format!("Vel\u{2192}{}", st.midi_in_vel_target))
-                    .color(badge_color).size(11.0).strong());
+                ui.label(
+                    RichText::new(format!("Vel\u{2192}{}", st.midi_in_vel_target))
+                        .color(badge_color)
+                        .size(11.0)
+                        .strong(),
+                );
                 ui.label(RichText::new("  |  ").color(GRAY_HINT).size(11.0));
-                ui.label(RichText::new(format!("CC#{}\u{2192}{}", st.midi_in_cc_num, st.midi_in_cc_target))
-                    .color(badge_color).size(11.0).strong());
+                ui.label(
+                    RichText::new(format!(
+                        "CC#{}\u{2192}{}",
+                        st.midi_in_cc_num, st.midi_in_cc_target
+                    ))
+                    .color(badge_color)
+                    .size(11.0)
+                    .strong(),
+                );
             });
 
             // CC Map list with remove buttons
@@ -3035,9 +3974,18 @@ fn draw_advanced_panel(
                 let mut remove_idx: Option<usize> = None;
                 for (i, (cc_num, param)) in map_snapshot.iter().enumerate() {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("CC{} \u{2192} {}", cc_num, param))
-                            .color(Color32::from_rgb(180, 220, 180)).size(11.0).monospace());
-                        if ui.small_button(RichText::new("\u{00d7}").color(Color32::from_rgb(200, 80, 80))).clicked() {
+                        ui.label(
+                            RichText::new(format!("CC{} \u{2192} {}", cc_num, param))
+                                .color(Color32::from_rgb(180, 220, 180))
+                                .size(11.0)
+                                .monospace(),
+                        );
+                        if ui
+                            .small_button(
+                                RichText::new("\u{00d7}").color(Color32::from_rgb(200, 80, 80)),
+                            )
+                            .clicked()
+                        {
                             remove_idx = Some(i);
                         }
                     });
@@ -3052,14 +4000,28 @@ fn draw_advanced_panel(
     // ---- OSC OUTPUT ----
     collapsing_section(ui, "OSC OUTPUT", false, |ui| {
         let mut st = state.lock();
-        ui.checkbox(&mut st.osc_enabled, RichText::new("Enable OSC Output").color(Color32::WHITE));
+        ui.checkbox(
+            &mut st.osc_enabled,
+            RichText::new("Enable OSC Output").color(Color32::WHITE),
+        );
         if st.osc_enabled {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Host:").color(GRAY_HINT).size(11.0));
-                ui.add(TextEdit::singleline(&mut st.osc_host).desired_width(120.0).hint_text("127.0.0.1"));
+                ui.add(
+                    TextEdit::singleline(&mut st.osc_host)
+                        .desired_width(120.0)
+                        .hint_text("127.0.0.1"),
+                );
             });
             let mut port = st.osc_port as u32;
-            if ui.add(DragValue::new(&mut port).clamp_range(1000u32..=65535).prefix("Port: ")).changed() {
+            if ui
+                .add(
+                    DragValue::new(&mut port)
+                        .clamp_range(1000u32..=65535)
+                        .prefix("Port: "),
+                )
+                .changed()
+            {
                 st.osc_port = port as u16;
             }
             if !st.osc_status.is_empty() {
@@ -3071,13 +4033,26 @@ fn draw_advanced_panel(
     // ---- MIDI CLOCK OUT ----
     collapsing_section(ui, "MIDI CLOCK OUT", false, |ui| {
         let mut st = state.lock();
-        ui.checkbox(&mut st.midi_clock_enabled, RichText::new("MIDI Clock Out").color(Color32::WHITE));
-        ui.label(RichText::new("Syncs external gear to BPM").color(GRAY_HINT).size(11.0).italics());
+        ui.checkbox(
+            &mut st.midi_clock_enabled,
+            RichText::new("MIDI Clock Out").color(Color32::WHITE),
+        );
+        ui.label(
+            RichText::new("Syncs external gear to BPM")
+                .color(GRAY_HINT)
+                .size(11.0)
+                .italics(),
+        );
     });
 
     // ---- BEHAVIORAL LAYERS (item 16) ----
     collapsing_section(ui, "BEHAVIORAL LAYERS", false, |ui| {
-        ui.label(RichText::new("Invisible automatic modifiers — uncheck to disable").color(GRAY_HINT).size(10.5).italics());
+        ui.label(
+            RichText::new("Invisible automatic modifiers — uncheck to disable")
+                .color(GRAY_HINT)
+                .size(10.5)
+                .italics(),
+        );
         ui.add_space(4.0);
         let mut st = state.lock();
         macro_rules! behav_row {
@@ -3085,19 +4060,56 @@ fn draw_advanced_panel(
                 let col = if $field { Color32::WHITE } else { GRAY_HINT };
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut $field, "");
-                    ui.label(RichText::new($label).color(col).size(11.0)).on_hover_text($tip);
+                    ui.label(RichText::new($label).color(col).size(11.0))
+                        .on_hover_text($tip);
                 });
             }};
         }
-        behav_row!("🕐 Time of Day",       "Biases macros at launch: night→darker, day→brighter",   st.behav_time_of_day);
-        behav_row!("🌸 Seasonal Drift",    "Base frequency shifts ±1.5% over the calendar year",    st.behav_seasonal_drift);
-        behav_row!("📉 Volume Creep",      "Volume drifts from 1.0 → 0.87 over ~1 hour",            st.behav_volume_creep);
-        behav_row!("🫁 Breathing",         "4.5s gain oscillation ±0.3 dB",                         st.behav_breathing);
-        behav_row!("🌙 Circadian Sleep",   "~8% volume cut during 3–5am hours",                     st.behav_circadian_sleep);
-        behav_row!("💤 Attractor Dreams",  "30min idle → brief visit to another system",            st.behav_dreams);
-        behav_row!("⌛ Aging",             "High-freq rolloff increases slowly over hours",          st.behav_aging);
-        behav_row!("⌨ Typing Resonance",  "Windows: keyboard cadence wobbles frequency",            st.behav_typing_resonance);
-        behav_row!("🤝 Instance Empathy", "Two instances sync volume over local UDP",               st.behav_instance_empathy);
+        behav_row!(
+            "🕐 Time of Day",
+            "Biases macros at launch: night→darker, day→brighter",
+            st.behav_time_of_day
+        );
+        behav_row!(
+            "🌸 Seasonal Drift",
+            "Base frequency shifts ±1.5% over the calendar year",
+            st.behav_seasonal_drift
+        );
+        behav_row!(
+            "📉 Volume Creep",
+            "Volume drifts from 1.0 → 0.87 over ~1 hour",
+            st.behav_volume_creep
+        );
+        behav_row!(
+            "🫁 Breathing",
+            "4.5s gain oscillation ±0.3 dB",
+            st.behav_breathing
+        );
+        behav_row!(
+            "🌙 Circadian Sleep",
+            "~8% volume cut during 3–5am hours",
+            st.behav_circadian_sleep
+        );
+        behav_row!(
+            "💤 Attractor Dreams",
+            "30min idle → brief visit to another system",
+            st.behav_dreams
+        );
+        behav_row!(
+            "⌛ Aging",
+            "High-freq rolloff increases slowly over hours",
+            st.behav_aging
+        );
+        behav_row!(
+            "⌨ Typing Resonance",
+            "Windows: keyboard cadence wobbles frequency",
+            st.behav_typing_resonance
+        );
+        behav_row!(
+            "🤝 Instance Empathy",
+            "Two instances sync volume over local UDP",
+            st.behav_instance_empathy
+        );
     });
 
     // ---- SOUND DESIGN TIPS ----
@@ -3108,27 +4120,33 @@ fn draw_advanced_panel(
     // ---- KEYBOARD SHORTCUTS ----
     collapsing_section(ui, "KEYBOARD SHORTCUTS", false, |ui| {
         let shortcuts = [
-            ("Space",      "Pause / Resume simulation"),
-            ("F",          "Toggle performance mode (fullscreen portrait)"),
-            ("R",          "Toggle recording on/off"),
-            ("P",          "Toggle arranger playback"),
-            ("E",          "Toggle Evolve (macro random walk)"),
-            ("?",          "Show / hide this tips window"),
-            ("Ctrl+Z",     "Undo last config change"),
+            ("Space", "Pause / Resume simulation"),
+            ("F", "Toggle performance mode (fullscreen portrait)"),
+            ("R", "Toggle recording on/off"),
+            ("P", "Toggle arranger playback"),
+            ("E", "Toggle Evolve (macro random walk)"),
+            ("?", "Show / hide this tips window"),
+            ("Ctrl+Z", "Undo last config change"),
             ("Ctrl+Shift+Z", "Redo"),
-            ("↑ / ↓",     "Volume up / down (+/- 5%)"),
-            ("← / →",     "Speed slower / faster (÷1.2 / ×1.2)"),
-            ("1",          "Tab: Phase Portrait"),
-            ("2",          "Tab: MIXER"),
-            ("3",          "Tab: ARRANGE"),
-            ("4",          "Tab: Waveform"),
-            ("5",          "Tab: Note Map"),
-            ("6",          "Tab: Math View"),
-            ("7",          "Tab: Bifurcation Diagram"),
+            ("↑ / ↓", "Volume up / down (+/- 5%)"),
+            ("← / →", "Speed slower / faster (÷1.2 / ×1.2)"),
+            ("1", "Tab: Phase Portrait"),
+            ("2", "Tab: MIXER"),
+            ("3", "Tab: ARRANGE"),
+            ("4", "Tab: Waveform"),
+            ("5", "Tab: Note Map"),
+            ("6", "Tab: Math View"),
+            ("7", "Tab: Bifurcation Diagram"),
         ];
         for (key, desc) in &shortcuts {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(*key).color(AMBER).strong().size(11.0).monospace());
+                ui.label(
+                    RichText::new(*key)
+                        .color(AMBER)
+                        .strong()
+                        .size(11.0)
+                        .monospace(),
+                );
                 ui.add_space(8.0);
                 ui.label(RichText::new(*desc).color(GRAY_HINT).size(11.0));
             });
@@ -3195,8 +4213,14 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
             };
             let total = total_duration(&scenes_snap);
             if let Some((scene_idx, morphing, _t)) = scene_at(&scenes_snap, arr_elapsed) {
-                let active_scenes: Vec<usize> = (0..scenes_snap.len()).filter(|&i| scenes_snap[i].active).collect();
-                let scene_ord = active_scenes.iter().position(|&i| i == scene_idx).unwrap_or(0) + 1;
+                let active_scenes: Vec<usize> = (0..scenes_snap.len())
+                    .filter(|&i| scenes_snap[i].active)
+                    .collect();
+                let scene_ord = active_scenes
+                    .iter()
+                    .position(|&i| i == scene_idx)
+                    .unwrap_or(0)
+                    + 1;
                 let scene_count = active_scenes.len();
                 let scene_name = &scenes_snap[scene_idx].name;
                 let phase_label = if morphing { "morphing →" } else { "holding" };
@@ -3205,19 +4229,37 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
                 let total_m = (total / 60.0) as u32;
                 let total_s = (total % 60.0) as u32;
                 ui.add_space(4.0);
-                ui.label(RichText::new(format!(
-                    "Scene {}/{} — {} ({}) {:02}:{:02}/{:02}:{:02}",
-                    scene_ord, scene_count, scene_name, phase_label,
-                    elapsed_m, elapsed_s, total_m, total_s
-                )).color(CYAN).size(11.0));
-                let progress = if total > 0.001 { (arr_elapsed / total).clamp(0.0, 1.0) } else { 0.0 };
+                ui.label(
+                    RichText::new(format!(
+                        "Scene {}/{} — {} ({}) {:02}:{:02}/{:02}:{:02}",
+                        scene_ord,
+                        scene_count,
+                        scene_name,
+                        phase_label,
+                        elapsed_m,
+                        elapsed_s,
+                        total_m,
+                        total_s
+                    ))
+                    .color(CYAN)
+                    .size(11.0),
+                );
+                let progress = if total > 0.001 {
+                    (arr_elapsed / total).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
                 ui.add(ProgressBar::new(progress).desired_width(ui.available_width()));
             }
         } else {
             // First-run hint when nothing is playing
             ui.add_space(4.0);
-            ui.label(RichText::new("👆 Hit AUTO to start — generates a unique arrangement each time")
-                .color(AMBER).size(11.0).italics());
+            ui.label(
+                RichText::new("👆 Hit AUTO to start — generates a unique arrangement each time")
+                    .color(AMBER)
+                    .size(11.0)
+                    .italics(),
+            );
         }
 
         // ---- Play Demo + Save WAV buttons ----
@@ -3301,38 +4343,76 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
         }
 
         // ---- Mood selector ----
-        ui.label(RichText::new("ARRANGEMENT MOOD").color(CYAN).size(11.0).strong());
+        ui.label(
+            RichText::new("ARRANGEMENT MOOD")
+                .color(CYAN)
+                .size(11.0)
+                .strong(),
+        );
         ui.add_space(4.0);
         let mood_defs: &[(&str, &str, &str, Color32, Color32)] = &[
-            ("ambient",      "🌙  Ambient",      "Deep reverb · slow drift · harmonic pads",
-                Color32::from_rgb(0, 95, 175),  Color32::from_rgb(60, 150, 255)),
-            ("rhythmic",     "⚡  Rhythmic",     "Pulsing energy · granular · percussive",
-                Color32::from_rgb(155, 115, 0), Color32::from_rgb(240, 185, 30)),
-            ("experimental", "🔬  Experimental", "Glitch · microtonal · unexpected",
-                Color32::from_rgb(100, 0, 165), Color32::from_rgb(185, 80, 255)),
+            (
+                "ambient",
+                "🌙  Ambient",
+                "Deep reverb · slow drift · harmonic pads",
+                Color32::from_rgb(0, 95, 175),
+                Color32::from_rgb(60, 150, 255),
+            ),
+            (
+                "rhythmic",
+                "⚡  Rhythmic",
+                "Pulsing energy · granular · percussive",
+                Color32::from_rgb(155, 115, 0),
+                Color32::from_rgb(240, 185, 30),
+            ),
+            (
+                "experimental",
+                "🔬  Experimental",
+                "Glitch · microtonal · unexpected",
+                Color32::from_rgb(100, 0, 165),
+                Color32::from_rgb(185, 80, 255),
+            ),
         ];
         for (mood_key, label, desc, active_fill, accent) in mood_defs.iter() {
             let selected = arr_mood == *mood_key;
-            let fill = if selected { *active_fill } else { Color32::from_rgb(16, 16, 32) };
-            let border_col = if selected { *accent } else { Color32::from_rgb(38, 40, 68) };
+            let fill = if selected {
+                *active_fill
+            } else {
+                Color32::from_rgb(16, 16, 32)
+            };
+            let border_col = if selected {
+                *accent
+            } else {
+                Color32::from_rgb(38, 40, 68)
+            };
             let border_w = if selected { 1.5 } else { 1.0 };
             let frame = egui::Frame::none()
                 .fill(fill)
                 .stroke(egui::Stroke::new(border_w, border_col))
                 .inner_margin(egui::Margin::symmetric(10.0, 7.0))
                 .rounding(egui::Rounding::same(7.0));
-            let resp = frame.show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(*label).color(Color32::WHITE).size(12.5).strong());
-                    if selected {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new("●").color(*accent).size(10.0));
-                        });
-                    }
-                });
-                ui.label(RichText::new(*desc).color(GRAY_HINT).size(10.0));
-            }).response;
+            let resp = frame
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(*label)
+                                .color(Color32::WHITE)
+                                .size(12.5)
+                                .strong(),
+                        );
+                        if selected {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(RichText::new("●").color(*accent).size(10.0));
+                                },
+                            );
+                        }
+                    });
+                    ui.label(RichText::new(*desc).color(GRAY_HINT).size(10.0));
+                })
+                .response;
             if resp.interact(Sense::click()).clicked() {
                 let mut st = state.lock();
                 st.arr_mood = mood_key.to_string();
@@ -3367,46 +4447,76 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
             .rounding(egui::Rounding::same(8.0))
             .stroke(egui::Stroke::new(1.0, Color32::from_rgb(28, 35, 65)))
             .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("🔊  VOLUME").color(Color32::WHITE).strong().size(12.0));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(&db_label).color(AMBER).size(11.0));
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("🔊  VOLUME")
+                            .color(Color32::WHITE)
+                            .strong()
+                            .size(12.0),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(&db_label).color(AMBER).size(11.0));
+                    });
+                });
+                ui.add(Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text(""))
+                    .on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let pause_label = if st.paused {
+                        "▶  RESUME"
+                    } else {
+                        "⏸  PAUSE"
+                    };
+                    let (pause_fill, pause_stroke) = if st.paused {
+                        (
+                            Color32::from_rgb(18, 135, 65),
+                            Color32::from_rgb(60, 220, 110),
+                        )
+                    } else {
+                        (
+                            Color32::from_rgb(15, 90, 165),
+                            Color32::from_rgb(60, 160, 255),
+                        )
+                    };
+                    let avail = ui.available_width();
+                    if ui
+                        .add(
+                            Button::new(
+                                RichText::new(pause_label)
+                                    .color(Color32::WHITE)
+                                    .strong()
+                                    .size(13.0),
+                            )
+                            .fill(pause_fill)
+                            .stroke(egui::Stroke::new(1.5, pause_stroke))
+                            .min_size(Vec2::new(avail - 60.0, 36.0)),
+                        )
+                        .on_hover_text("Pause or resume. Shortcut: Space bar.")
+                        .clicked()
+                    {
+                        st.paused = !st.paused;
+                    }
+                    let perf_fill = if st.perf_mode {
+                        Color32::from_rgb(175, 80, 0)
+                    } else {
+                        Color32::from_rgb(24, 24, 44)
+                    };
+                    if ui
+                        .add(
+                            Button::new(RichText::new("⛶").color(Color32::WHITE).size(16.0))
+                                .fill(perf_fill)
+                                .min_size(Vec2::new(50.0, 36.0)),
+                        )
+                        .on_hover_text(
+                            "Performance mode: fullscreen phase portrait. Press F to toggle.",
+                        )
+                        .clicked()
+                    {
+                        st.perf_mode = !st.perf_mode;
+                    }
                 });
             });
-            ui.add(Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text(""))
-                .on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let pause_label = if st.paused { "▶  RESUME" } else { "⏸  PAUSE" };
-                let (pause_fill, pause_stroke) = if st.paused {
-                    (Color32::from_rgb(18, 135, 65), Color32::from_rgb(60, 220, 110))
-                } else {
-                    (Color32::from_rgb(15, 90, 165), Color32::from_rgb(60, 160, 255))
-                };
-                let avail = ui.available_width();
-                if ui.add(
-                    Button::new(RichText::new(pause_label).color(Color32::WHITE).strong().size(13.0))
-                        .fill(pause_fill)
-                        .stroke(egui::Stroke::new(1.5, pause_stroke))
-                        .min_size(Vec2::new(avail - 60.0, 36.0)),
-                )
-                .on_hover_text("Pause or resume. Shortcut: Space bar.")
-                .clicked() {
-                    st.paused = !st.paused;
-                }
-                let perf_fill = if st.perf_mode { Color32::from_rgb(175, 80, 0) } else { Color32::from_rgb(24, 24, 44) };
-                if ui.add(
-                    Button::new(RichText::new("⛶").color(Color32::WHITE).size(16.0))
-                        .fill(perf_fill)
-                        .min_size(Vec2::new(50.0, 36.0)),
-                )
-                .on_hover_text("Performance mode: fullscreen phase portrait. Press F to toggle.")
-                .clicked() {
-                    st.perf_mode = !st.perf_mode;
-                }
-            });
-        });
     }
     ui.add_space(8.0);
     ui.separator();
@@ -3474,9 +4584,11 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
             let mut st = state.lock();
             ui.horizontal(|ui| {
                 ui.label(RichText::new("🔍").size(11.0).color(GRAY_HINT));
-                ui.add(egui::TextEdit::singleline(&mut st.preset_search)
-                    .hint_text("Search presets…")
-                    .desired_width(ui.available_width()));
+                ui.add(
+                    egui::TextEdit::singleline(&mut st.preset_search)
+                        .hint_text("Search presets…")
+                        .desired_width(ui.available_width()),
+                );
             });
         }
         ui.add_space(4.0);
@@ -3486,23 +4598,40 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
         // #13: favorites-only toggle
         {
             let fav_only = show_fav_only_sim;
-            let fav_col = if fav_only { egui::Color32::from_rgb(255, 205, 30) } else { egui::Color32::from_rgb(80, 85, 110) };
-            if ui.add(Button::new(RichText::new("⭐ only").color(fav_col).size(11.0))
-                .fill(if fav_only { egui::Color32::from_rgb(60, 50, 10) } else { egui::Color32::TRANSPARENT })
-                .stroke(egui::Stroke::new(1.0, fav_col))
-                .min_size(Vec2::new(58.0, 22.0))).clicked() {
+            let fav_col = if fav_only {
+                egui::Color32::from_rgb(255, 205, 30)
+            } else {
+                egui::Color32::from_rgb(80, 85, 110)
+            };
+            if ui
+                .add(
+                    Button::new(RichText::new("⭐ only").color(fav_col).size(11.0))
+                        .fill(if fav_only {
+                            egui::Color32::from_rgb(60, 50, 10)
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        })
+                        .stroke(egui::Stroke::new(1.0, fav_col))
+                        .min_size(Vec2::new(58.0, 22.0)),
+                )
+                .clicked()
+            {
                 state.lock().show_favorites_only = !fav_only;
             }
             ui.add_space(4.0);
         }
         let show_count = if show_all { PRESETS.len() } else { 12 };
         let fav_set_sim: HashSet<String> = state.lock().favorite_presets.clone();
-        let mut sorted_presets_sim: Vec<&crate::patches::Preset> = PRESETS.iter().take(show_count).filter(|p| {
-            (search_lower.is_empty()
-                || p.name.to_lowercase().contains(&search_lower)
-                || p.category.to_lowercase().contains(&search_lower))
-            && (!show_fav_only_sim || fav_set_sim.contains(p.name))
-        }).collect();
+        let mut sorted_presets_sim: Vec<&crate::patches::Preset> = PRESETS
+            .iter()
+            .take(show_count)
+            .filter(|p| {
+                (search_lower.is_empty()
+                    || p.name.to_lowercase().contains(&search_lower)
+                    || p.category.to_lowercase().contains(&search_lower))
+                    && (!show_fav_only_sim || fav_set_sim.contains(p.name))
+            })
+            .collect();
         sorted_presets_sim.sort_by_key(|p| (!fav_set_sim.contains(p.name), p.category, p.name));
         let mut last_cat = "";
         for preset in sorted_presets_sim.iter() {
@@ -3510,11 +4639,17 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
                 last_cat = preset.category;
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("  {}", preset.category.to_uppercase()))
-                        .color(GRAY_HINT).size(10.0).strong());
+                    ui.label(
+                        RichText::new(format!("  {}", preset.category.to_uppercase()))
+                            .color(GRAY_HINT)
+                            .size(10.0)
+                            .strong(),
+                    );
                     let avail = ui.available_width();
-                    let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(avail - 4.0, 1.0), Sense::hover());
-                    ui.painter().rect_filled(sep_rect, 0.0, Color32::from_rgb(35, 38, 65));
+                    let (sep_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(avail - 4.0, 1.0), Sense::hover());
+                    ui.painter()
+                        .rect_filled(sep_rect, 0.0, Color32::from_rgb(35, 38, 65));
                 });
                 ui.add_space(3.0);
             }
@@ -3531,52 +4666,99 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
                 Color32::from_rgb(14, 14, 26)
             };
             let border_w = if is_selected { 1.5 } else { 1.0 };
-            let border_col = if is_selected { pc } else { Color32::from_rgb(34, 36, 64) };
+            let border_col = if is_selected {
+                pc
+            } else {
+                Color32::from_rgb(34, 36, 64)
+            };
             let is_fav_sim = fav_set_sim.contains(preset.name);
             let card = egui::Frame::none()
                 .fill(bg_color)
                 .stroke(Stroke::new(border_w, border_col))
                 .inner_margin(egui::Margin::symmetric(0.0, 5.0))
                 .rounding(egui::Rounding::same(6.0));
-            let response = card.show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    // #13: star toggle
-                    let star_col = if is_fav_sim { Color32::from_rgb(255, 205, 30) } else { Color32::from_rgb(60, 65, 90) };
-                    if ui.add(Button::new(RichText::new("⭐").size(12.0).color(star_col))
-                        .fill(Color32::TRANSPARENT).frame(false).min_size(Vec2::new(22.0, 22.0))).clicked() {
-                        let mut st = state.lock();
-                        if is_fav_sim { st.favorite_presets.remove(preset.name); }
-                        else { st.favorite_presets.insert(preset.name.to_string()); }
-                        let fav_txt: String = st.favorite_presets.iter().cloned().collect::<Vec<_>>().join("\n");
-                        let _ = std::fs::write("favorites.txt", fav_txt);
-                    }
-                    // Colored left accent strip
-                    let strip_h = 34.0;
-                    let (strip_rect, _) = ui.allocate_exact_size(Vec2::new(5.0, strip_h), Sense::hover());
-                    let strip_col = if is_selected {
-                        pc
-                    } else {
-                        Color32::from_rgba_premultiplied(pc.r() / 3, pc.g() / 3, pc.b() / 3, 200)
-                    };
-                    ui.painter().rect_filled(strip_rect, egui::Rounding::same(3.0), strip_col);
-                    ui.add_space(7.0);
-                    ui.vertical(|ui| {
-                        let name_col = if is_selected { pc } else { Color32::WHITE };
-                        ui.label(RichText::new(preset.name).strong().color(name_col).size(12.0));
-                        ui.label(RichText::new(preset.description).italics().color(GRAY_HINT).size(10.0));
+            let response = card
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        // #13: star toggle
+                        let star_col = if is_fav_sim {
+                            Color32::from_rgb(255, 205, 30)
+                        } else {
+                            Color32::from_rgb(60, 65, 90)
+                        };
+                        if ui
+                            .add(
+                                Button::new(RichText::new("⭐").size(12.0).color(star_col))
+                                    .fill(Color32::TRANSPARENT)
+                                    .frame(false)
+                                    .min_size(Vec2::new(22.0, 22.0)),
+                            )
+                            .clicked()
+                        {
+                            let mut st = state.lock();
+                            if is_fav_sim {
+                                st.favorite_presets.remove(preset.name);
+                            } else {
+                                st.favorite_presets.insert(preset.name.to_string());
+                            }
+                            let fav_txt: String = st
+                                .favorite_presets
+                                .iter()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let _ = std::fs::write("favorites.txt", fav_txt);
+                        }
+                        // Colored left accent strip
+                        let strip_h = 34.0;
+                        let (strip_rect, _) =
+                            ui.allocate_exact_size(Vec2::new(5.0, strip_h), Sense::hover());
+                        let strip_col = if is_selected {
+                            pc
+                        } else {
+                            Color32::from_rgba_premultiplied(
+                                pc.r() / 3,
+                                pc.g() / 3,
+                                pc.b() / 3,
+                                200,
+                            )
+                        };
+                        ui.painter()
+                            .rect_filled(strip_rect, egui::Rounding::same(3.0), strip_col);
+                        ui.add_space(7.0);
+                        ui.vertical(|ui| {
+                            let name_col = if is_selected { pc } else { Color32::WHITE };
+                            ui.label(
+                                RichText::new(preset.name)
+                                    .strong()
+                                    .color(name_col)
+                                    .size(12.0),
+                            );
+                            ui.label(
+                                RichText::new(preset.description)
+                                    .italics()
+                                    .color(GRAY_HINT)
+                                    .size(10.0),
+                            );
+                        });
                     });
-                });
-            }).response;
+                })
+                .response;
             if response.interact(Sense::click()).clicked() {
                 let mut st = state.lock();
                 st.push_undo();
                 // #12: snapshot locked params before load
-                let locked_snapshot_sim: Vec<(String, f64)> = st.locked_params.iter()
-                    .map(|k| (k.clone(), get_param_value(&st.config, k))).collect();
+                let locked_snapshot_sim: Vec<(String, f64)> = st
+                    .locked_params
+                    .iter()
+                    .map(|k| (k.clone(), get_param_value(&st.config, k)))
+                    .collect();
                 st.selected_preset = preset.name.to_string();
                 st.config = load_preset(preset.name);
-                for (k, v) in locked_snapshot_sim { set_param_value(&mut st.config, &k, v); }
+                for (k, v) in locked_snapshot_sim {
+                    set_param_value(&mut st.config, &k, v);
+                }
                 st.system_changed = true;
                 st.mode_changed = true;
             }
@@ -3585,23 +4767,32 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
 
         if !show_all {
             ui.add_space(4.0);
-            if ui.add(
-                Button::new(RichText::new(format!("Show all {} presets ▾", PRESETS.len()))
-                    .color(CYAN).size(11.0))
+            if ui
+                .add(
+                    Button::new(
+                        RichText::new(format!("Show all {} presets ▾", PRESETS.len()))
+                            .color(CYAN)
+                            .size(11.0),
+                    )
                     .fill(Color32::from_rgb(14, 18, 36))
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgb(40, 60, 110)))
                     .min_size(Vec2::new(ui.available_width(), 28.0)),
-            ).clicked() {
+                )
+                .clicked()
+            {
                 state.lock().simple_show_all_presets = true;
             }
         } else {
             ui.add_space(4.0);
-            if ui.add(
-                Button::new(RichText::new("Show less ▴").color(GRAY_HINT).size(11.0))
-                    .fill(Color32::from_rgb(14, 18, 36))
-                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(35, 38, 65)))
-                    .min_size(Vec2::new(ui.available_width(), 28.0)),
-            ).clicked() {
+            if ui
+                .add(
+                    Button::new(RichText::new("Show less ▴").color(GRAY_HINT).size(11.0))
+                        .fill(Color32::from_rgb(14, 18, 36))
+                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(35, 38, 65)))
+                        .min_size(Vec2::new(ui.available_width(), 28.0)),
+                )
+                .clicked()
+            {
                 state.lock().simple_show_all_presets = false;
             }
         }
@@ -3620,33 +4811,44 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
     {
         let (wounded, time_of_day_f, macro_walk_enabled, startup_ramp_t, shutdown_fading) = {
             let st = state.lock();
-            (st.wounded, st.time_of_day_f, st.macro_walk_enabled, st.startup_ramp_t, st.shutdown_fading)
+            (
+                st.wounded,
+                st.time_of_day_f,
+                st.macro_walk_enabled,
+                st.startup_ramp_t,
+                st.shutdown_fading,
+            )
         };
         let circadian_sleep = time_of_day_f < 0.15 || time_of_day_f > 0.98;
         let behaviors: &[(&str, bool)] = &[
-            ("Wound healing",    wounded),
-            ("Circadian sleep",  circadian_sleep),
-            ("Evolve active",    macro_walk_enabled),
-            ("Startup warmup",   startup_ramp_t < 1.0),
-            ("Shutdown fading",  shutdown_fading),
+            ("Wound healing", wounded),
+            ("Circadian sleep", circadian_sleep),
+            ("Evolve active", macro_walk_enabled),
+            ("Startup warmup", startup_ramp_t < 1.0),
+            ("Shutdown fading", shutdown_fading),
         ];
         let any_active = behaviors.iter().any(|(_, v)| *v);
         ui.add_space(8.0);
         egui::Frame::none()
             .fill(Color32::from_rgba_premultiplied(12, 14, 28, 200))
-            .stroke(egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(40, 44, 80, 180)))
+            .stroke(egui::Stroke::new(
+                1.0,
+                Color32::from_rgba_premultiplied(40, 44, 80, 180),
+            ))
             .inner_margin(egui::Margin::symmetric(8.0, 6.0))
             .rounding(egui::Rounding::same(6.0))
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
-                ui.label(RichText::new("System States")
-                    .size(10.0)
-                    .color(if any_active {
-                        Color32::from_rgba_premultiplied(160, 170, 200, 200)
-                    } else {
-                        Color32::from_rgba_premultiplied(80, 85, 110, 150)
-                    })
-                    .strong());
+                ui.label(
+                    RichText::new("System States")
+                        .size(10.0)
+                        .color(if any_active {
+                            Color32::from_rgba_premultiplied(160, 170, 200, 200)
+                        } else {
+                            Color32::from_rgba_premultiplied(80, 85, 110, 150)
+                        })
+                        .strong(),
+                );
                 ui.add_space(3.0);
                 ui.horizontal_wrapped(|ui| {
                     for (label, active) in behaviors {
@@ -3661,7 +4863,8 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
                             Color32::from_rgba_premultiplied(70, 75, 100, 140)
                         };
                         ui.horizontal(|ui| {
-                            let (dot_rect, _) = ui.allocate_exact_size(Vec2::new(7.0, 7.0), Sense::hover());
+                            let (dot_rect, _) =
+                                ui.allocate_exact_size(Vec2::new(7.0, 7.0), Sense::hover());
                             ui.painter().circle_filled(dot_rect.center(), 3.5, dot_col);
                             ui.label(RichText::new(*label).size(9.5).color(text_col));
                         });
@@ -3691,7 +4894,9 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
         };
         if pending && !playing {
             // arr_loop was false, arrangement reached end and stopped — finalize recording
-            if let Some(mut lock) = recording.try_lock() { *lock = None; }
+            if let Some(mut lock) = recording.try_lock() {
+                *lock = None;
+            }
             state.lock().save_gen_pending = false;
         }
         // Also stop if somehow elapsed went past total (shouldn't happen but be safe)
@@ -3725,7 +4930,9 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
                 }
             } else if !now_playing && st.arr_was_playing {
                 drop(st);
-                if let Some(mut lock) = recording.try_lock() { *lock = None; }
+                if let Some(mut lock) = recording.try_lock() {
+                    *lock = None;
+                }
             } else {
                 drop(st);
             }
@@ -3737,7 +4944,13 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
 
     let (arr_playing, arr_elapsed, arr_auto_record, arr_loop, scenes_snapshot) = {
         let st = state.lock();
-        (st.arr_playing, st.arr_elapsed, st.arr_auto_record, st.arr_loop, st.scenes.clone())
+        (
+            st.arr_playing,
+            st.arr_elapsed,
+            st.arr_auto_record,
+            st.arr_loop,
+            st.scenes.clone(),
+        )
     };
 
     let total = total_duration(&scenes_snapshot);
@@ -3749,23 +4962,48 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
         ui.add_space(8.0);
         let (cur_mood, seed_base) = {
             let st = state.lock();
-            (st.arr_mood.clone(), st.arr_elapsed.to_bits() as u64 ^ 0x1234567890abcdef)
+            (
+                st.arr_mood.clone(),
+                st.arr_elapsed.to_bits() as u64 ^ 0x1234567890abcdef,
+            )
         };
         for mood in &["ambient", "rhythmic", "experimental"] {
             let selected = cur_mood == *mood;
-            let col = if selected { Color32::from_rgb(0, 140, 200) } else { Color32::from_rgb(40, 40, 60) };
-            let label = match *mood { "ambient" => "🌙 Ambient", "rhythmic" => "⚡ Rhythmic", _ => "🔬 Experimental" };
-            if ui.add(Button::new(RichText::new(label).color(Color32::WHITE))
-                .fill(col).min_size(Vec2::new(90.0, 26.0))).clicked() {
+            let col = if selected {
+                Color32::from_rgb(0, 140, 200)
+            } else {
+                Color32::from_rgb(40, 40, 60)
+            };
+            let label = match *mood {
+                "ambient" => "🌙 Ambient",
+                "rhythmic" => "⚡ Rhythmic",
+                _ => "🔬 Experimental",
+            };
+            if ui
+                .add(
+                    Button::new(RichText::new(label).color(Color32::WHITE))
+                        .fill(col)
+                        .min_size(Vec2::new(90.0, 26.0)),
+                )
+                .clicked()
+            {
                 state.lock().arr_mood = mood.to_string();
             }
         }
         ui.add_space(8.0);
-        if ui.add(Button::new(RichText::new("🎲 Generate").color(Color32::BLACK))
-            .fill(Color32::from_rgb(220, 180, 40)).min_size(Vec2::new(90.0, 26.0))).clicked() {
+        if ui
+            .add(
+                Button::new(RichText::new("🎲 Generate").color(Color32::BLACK))
+                    .fill(Color32::from_rgb(220, 180, 40))
+                    .min_size(Vec2::new(90.0, 26.0)),
+            )
+            .clicked()
+        {
             let seed = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64 ^ (d.subsec_nanos() as u64).wrapping_mul(0x9e3779b97f4a7c15))
+                .map(|d| {
+                    d.as_nanos() as u64 ^ (d.subsec_nanos() as u64).wrapping_mul(0x9e3779b97f4a7c15)
+                })
                 .unwrap_or(seed_base);
             let mood = state.lock().arr_mood.clone();
             let new_scenes = generate_song(&mood, seed);
@@ -3779,27 +5017,52 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
         // Save Generation: record one full pass of the arrangement to WAV
         let save_pending = state.lock().save_gen_pending;
         let save_label = if save_pending {
-            RichText::new("⏺ Recording…").color(Color32::from_rgb(255, 80, 80)).size(11.0)
+            RichText::new("⏺ Recording…")
+                .color(Color32::from_rgb(255, 80, 80))
+                .size(11.0)
         } else {
-            RichText::new("💾 Save as WAV").color(Color32::WHITE).size(11.0)
+            RichText::new("💾 Save as WAV")
+                .color(Color32::WHITE)
+                .size(11.0)
         };
-        if ui.add(Button::new(save_label)
-            .fill(if save_pending { Color32::from_rgb(100, 20, 20) } else { Color32::from_rgb(30, 80, 60) })
-            .min_size(Vec2::new(110.0, 26.0))).clicked() && !save_pending {
+        if ui
+            .add(
+                Button::new(save_label)
+                    .fill(if save_pending {
+                        Color32::from_rgb(100, 20, 20)
+                    } else {
+                        Color32::from_rgb(30, 80, 60)
+                    })
+                    .min_size(Vec2::new(110.0, 26.0)),
+            )
+            .clicked()
+            && !save_pending
+        {
             // Generate fresh, reset playback, start recording, no loop
             let seed = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64 ^ (d.subsec_nanos() as u64).wrapping_mul(0x9e3779b97f4a7c15))
+                .map(|d| {
+                    d.as_nanos() as u64 ^ (d.subsec_nanos() as u64).wrapping_mul(0x9e3779b97f4a7c15)
+                })
                 .unwrap_or(seed_base);
             let mood = state.lock().arr_mood.clone();
             let new_scenes = generate_song(&mood, seed);
             let sr = state.lock().sample_rate;
             let secs_ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
             let filename = format!("generation_{}.wav", secs_ts);
-            let spec = hound::WavSpec { channels: 2, sample_rate: sr, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
+            let spec = hound::WavSpec {
+                channels: 2,
+                sample_rate: sr,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            };
             if let Ok(writer) = hound::WavWriter::create(&filename, spec) {
-                if let Some(mut lock) = recording.try_lock() { *lock = Some(writer); }
+                if let Some(mut lock) = recording.try_lock() {
+                    *lock = Some(writer);
+                }
                 let mut st = state.lock();
                 st.scenes = new_scenes;
                 st.arr_elapsed = 0.0;
@@ -3816,63 +5079,124 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
 
     // Top controls bar
     ui.horizontal(|ui| {
-        let play_col = if arr_playing { Color32::from_rgb(0, 140, 0) } else { Color32::from_rgb(0, 80, 120) };
-        if ui.add(Button::new(RichText::new(if arr_playing { "⏸ Pause" } else { "▶ Play" }).color(Color32::WHITE))
-            .fill(play_col).min_size(Vec2::new(80.0, 28.0))).clicked() {
+        let play_col = if arr_playing {
+            Color32::from_rgb(0, 140, 0)
+        } else {
+            Color32::from_rgb(0, 80, 120)
+        };
+        if ui
+            .add(
+                Button::new(
+                    RichText::new(if arr_playing { "⏸ Pause" } else { "▶ Play" })
+                        .color(Color32::WHITE),
+                )
+                .fill(play_col)
+                .min_size(Vec2::new(80.0, 28.0)),
+            )
+            .clicked()
+        {
             let mut st = state.lock();
             st.arr_playing = !st.arr_playing;
             if st.arr_playing && st.arr_elapsed == 0.0 {
                 // reset
             }
         }
-        if ui.add(Button::new(RichText::new("■ Stop").color(Color32::WHITE))
-            .fill(Color32::from_rgb(80, 30, 30)).min_size(Vec2::new(60.0, 28.0))).clicked() {
+        if ui
+            .add(
+                Button::new(RichText::new("■ Stop").color(Color32::WHITE))
+                    .fill(Color32::from_rgb(80, 30, 30))
+                    .min_size(Vec2::new(60.0, 28.0)),
+            )
+            .clicked()
+        {
             let mut st = state.lock();
             st.arr_playing = false;
             st.arr_elapsed = 0.0;
         }
 
-        let loop_col = if arr_loop { Color32::from_rgb(0, 120, 0) } else { Color32::from_rgb(40, 40, 60) };
-        if ui.add(Button::new(RichText::new("⟳ Loop").color(Color32::WHITE))
-            .fill(loop_col).min_size(Vec2::new(60.0, 28.0))).clicked() {
+        let loop_col = if arr_loop {
+            Color32::from_rgb(0, 120, 0)
+        } else {
+            Color32::from_rgb(40, 40, 60)
+        };
+        if ui
+            .add(
+                Button::new(RichText::new("⟳ Loop").color(Color32::WHITE))
+                    .fill(loop_col)
+                    .min_size(Vec2::new(60.0, 28.0)),
+            )
+            .clicked()
+        {
             state.lock().arr_loop = !arr_loop;
         }
 
-        let rec_col = if arr_auto_record { Color32::from_rgb(140, 30, 30) } else { Color32::from_rgb(40, 40, 60) };
-        if ui.add(Button::new(RichText::new("⏺ Auto-Rec").color(Color32::WHITE))
-            .fill(rec_col).min_size(Vec2::new(80.0, 28.0))).clicked() {
+        let rec_col = if arr_auto_record {
+            Color32::from_rgb(140, 30, 30)
+        } else {
+            Color32::from_rgb(40, 40, 60)
+        };
+        if ui
+            .add(
+                Button::new(RichText::new("⏺ Auto-Rec").color(Color32::WHITE))
+                    .fill(rec_col)
+                    .min_size(Vec2::new(80.0, 28.0)),
+            )
+            .clicked()
+        {
             state.lock().arr_auto_record = !arr_auto_record;
         }
 
         // Duration label
         let total_mins = (total / 60.0) as u32;
         let total_secs = (total % 60.0) as u32;
-        ui.label(RichText::new(format!("  Duration: {}:{:02}", total_mins, total_secs)).color(CYAN));
+        ui.label(
+            RichText::new(format!("  Duration: {}:{:02}", total_mins, total_secs)).color(CYAN),
+        );
 
         // Probabilistic mode
         let mut st = state.lock();
-        let prob_col = if st.arr_probabilistic { Color32::from_rgb(180, 80, 20) } else { Color32::from_rgb(40, 40, 60) };
-        if ui.add(Button::new(RichText::new("Probabilistic").color(Color32::WHITE))
-            .fill(prob_col).min_size(Vec2::new(100.0, 28.0))).clicked() {
+        let prob_col = if st.arr_probabilistic {
+            Color32::from_rgb(180, 80, 20)
+        } else {
+            Color32::from_rgb(40, 40, 60)
+        };
+        if ui
+            .add(
+                Button::new(RichText::new("Probabilistic").color(Color32::WHITE))
+                    .fill(prob_col)
+                    .min_size(Vec2::new(100.0, 28.0)),
+            )
+            .clicked()
+        {
             st.arr_probabilistic = !st.arr_probabilistic;
         }
     });
 
     // Progress bar
     if arr_playing || arr_elapsed > 0.0 {
-        let progress = if total > 0.001 { (arr_elapsed / total).clamp(0.0, 1.0) } else { 0.0 };
+        let progress = if total > 0.001 {
+            (arr_elapsed / total).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let elapsed_m = (arr_elapsed / 60.0) as u32;
         let elapsed_s = (arr_elapsed % 60.0) as u32;
-        ui.add(ProgressBar::new(progress)
-            .text(format!("{:02}:{:02} / {:02}:{:02}", elapsed_m, elapsed_s,
-                (total / 60.0) as u32, (total % 60.0) as u32)));
+        ui.add(ProgressBar::new(progress).text(format!(
+            "{:02}:{:02} / {:02}:{:02}",
+            elapsed_m,
+            elapsed_s,
+            (total / 60.0) as u32,
+            (total % 60.0) as u32
+        )));
     }
 
     // Morph diff panel: compute and display which parameters are changing during morph
     if arr_playing {
         let (morph_diff, is_morphing) = {
             let st = state.lock();
-            let active: Vec<usize> = (0..st.scenes.len()).filter(|&i| st.scenes[i].active).collect();
+            let active: Vec<usize> = (0..st.scenes.len())
+                .filter(|&i| st.scenes[i].active)
+                .collect();
             let mut diff: Vec<(String, f32, f32)> = Vec::new();
             let mut in_morph = false;
             if let Some((idx, morphing, _t)) = scene_at(&st.scenes, st.arr_elapsed) {
@@ -3888,14 +5212,26 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
                                     diff.push((name.to_string(), from, to));
                                 }
                             };
-                            check("\u{03c3} (sigma)",  a.lorenz.sigma as f32,               b.lorenz.sigma as f32);
-                            check("\u{03c1} (rho)",    a.lorenz.rho as f32,                 b.lorenz.rho as f32);
-                            check("\u{03b2} (beta)",   a.lorenz.beta as f32,                b.lorenz.beta as f32);
-                            check("speed",             a.system.speed as f32,               b.system.speed as f32);
-                            check("reverb_wet",        a.audio.reverb_wet,                  b.audio.reverb_wet);
-                            check("delay_ms",          a.audio.delay_ms,                    b.audio.delay_ms);
-                            check("base_freq",         a.sonification.base_frequency as f32, b.sonification.base_frequency as f32);
-                            check("master_vol",        a.audio.master_volume,               b.audio.master_volume);
+                            check(
+                                "\u{03c3} (sigma)",
+                                a.lorenz.sigma as f32,
+                                b.lorenz.sigma as f32,
+                            );
+                            check("\u{03c1} (rho)", a.lorenz.rho as f32, b.lorenz.rho as f32);
+                            check(
+                                "\u{03b2} (beta)",
+                                a.lorenz.beta as f32,
+                                b.lorenz.beta as f32,
+                            );
+                            check("speed", a.system.speed as f32, b.system.speed as f32);
+                            check("reverb_wet", a.audio.reverb_wet, b.audio.reverb_wet);
+                            check("delay_ms", a.audio.delay_ms, b.audio.delay_ms);
+                            check(
+                                "base_freq",
+                                a.sonification.base_frequency as f32,
+                                b.sonification.base_frequency as f32,
+                            );
+                            check("master_vol", a.audio.master_volume, b.audio.master_volume);
                         }
                     }
                 }
@@ -3906,13 +5242,20 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
             state.lock().arr_morph_diff = morph_diff.clone();
             ui.add_space(4.0);
             egui::CollapsingHeader::new(
-                RichText::new("Morphing parameters:").color(Color32::from_rgb(220, 180, 40)).size(11.0).strong()
+                RichText::new("Morphing parameters:")
+                    .color(Color32::from_rgb(220, 180, 40))
+                    .size(11.0)
+                    .strong(),
             )
             .default_open(true)
             .show(ui, |ui| {
                 for (name, from, to) in &morph_diff {
-                    ui.label(RichText::new(format!("  {}: {:.2} \u{2192} {:.2}", name, from, to))
-                        .color(Color32::from_rgb(200, 200, 100)).size(11.0).monospace());
+                    ui.label(
+                        RichText::new(format!("  {}: {:.2} \u{2192} {:.2}", name, from, to))
+                            .color(Color32::from_rgb(200, 200, 100))
+                            .size(11.0)
+                            .monospace(),
+                    );
                 }
             });
         } else if !is_morphing {
@@ -3942,11 +5285,18 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
     for i in 0..n_scenes {
         let (mut active, name, hold, morph) = {
             let st = state.lock();
-            (st.scenes[i].active, st.scenes[i].name.clone(), st.scenes[i].hold_secs, st.scenes[i].morph_secs)
+            (
+                st.scenes[i].active,
+                st.scenes[i].name.clone(),
+                st.scenes[i].hold_secs,
+                st.scenes[i].morph_secs,
+            )
         };
 
-        let is_current_scene = arr_playing && scene_at(&scenes_snapshot, arr_elapsed)
-            .map(|(idx, _, _)| idx == i).unwrap_or(false);
+        let is_current_scene = arr_playing
+            && scene_at(&scenes_snapshot, arr_elapsed)
+                .map(|(idx, _, _)| idx == i)
+                .unwrap_or(false);
 
         let row_bg = if is_current_scene {
             Color32::from_rgba_premultiplied(0, 60, 30, 255)
@@ -3954,104 +5304,165 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
             Color32::TRANSPARENT
         };
 
-        egui::Frame::none().fill(row_bg).inner_margin(egui::Margin::symmetric(4.0, 2.0)).show(ui, |ui| {
-        if is_current_scene {
-            ui.label(RichText::new("▶").color(Color32::from_rgb(80, 220, 80)).size(10.0));
-        } else {
-            ui.label(RichText::new("  ").size(10.0));
-        }
-        ui.horizontal(|ui| {
-            // Active checkbox
-            if ui.checkbox(&mut active, "").changed() {
-                state.lock().scenes[i].active = active;
-            }
-
-            // Scene number
-            ui.label(RichText::new(format!("{}", i + 1)).color(GRAY_HINT).size(11.0));
-
-            // Name text edit
-            let mut name_edit = name.clone();
-            let te = ui.add(TextEdit::singleline(&mut name_edit).desired_width(80.0));
-            if te.changed() {
-                state.lock().scenes[i].name = name_edit;
-            }
-
-            // Hold duration
-            let mut hold_v = hold;
-            if ui.add(DragValue::new(&mut hold_v).clamp_range(5.0..=300.0f32).suffix("s").speed(0.5)).changed() {
-                state.lock().scenes[i].hold_secs = hold_v;
-            }
-
-            // Morph duration + preview button
-            let mut morph_v = morph;
-            if ui.add(DragValue::new(&mut morph_v).clamp_range(0.0..=60.0f32).suffix("s").speed(0.1)).changed() {
-                state.lock().scenes[i].morph_secs = morph_v;
-            }
-            // ▶ preview: jump arrangement to just before this scene's morph
-            if i > 0 {
-                let preview_btn = ui.add(Button::new(RichText::new("▶").size(10.0))
-                    .min_size(Vec2::new(18.0, 18.0)))
-                    .on_hover_text("Preview morph into this scene");
-                if preview_btn.clicked() {
-                    let mut st = state.lock();
-                    // Compute elapsed time to the start of this scene's morph
-                    let active: Vec<usize> = (0..st.scenes.len()).filter(|&j| st.scenes[j].active).collect();
-                    let mut t = 0.0f32;
-                    for (ord, &idx) in active.iter().enumerate() {
-                        if idx == i {
-                            // We're at the start of this scene's morph
-                            st.arr_elapsed = t;
-                            st.arr_playing = true;
-                            break;
-                        }
-                        let s = &st.scenes[idx];
-                        if ord > 0 { t += s.morph_secs; }
-                        t += s.hold_secs;
+        egui::Frame::none()
+            .fill(row_bg)
+            .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+            .show(ui, |ui| {
+                if is_current_scene {
+                    ui.label(
+                        RichText::new("▶")
+                            .color(Color32::from_rgb(80, 220, 80))
+                            .size(10.0),
+                    );
+                } else {
+                    ui.label(RichText::new("  ").size(10.0));
+                }
+                ui.horizontal(|ui| {
+                    // Active checkbox
+                    if ui.checkbox(&mut active, "").changed() {
+                        state.lock().scenes[i].active = active;
                     }
-                }
-            }
 
-            // Probability weight (shown when probabilistic mode is on)
-            let arr_prob = state.lock().arr_probabilistic;
-            if arr_prob {
-                let mut prob_v = state.lock().scenes[i].transition_prob;
-                if ui.add(DragValue::new(&mut prob_v).clamp_range(0.0..=3.0f32).prefix("P:").speed(0.05)).changed() {
-                    state.lock().scenes[i].transition_prob = prob_v;
-                }
-            }
+                    // Scene number
+                    ui.label(
+                        RichText::new(format!("{}", i + 1))
+                            .color(GRAY_HINT)
+                            .size(11.0),
+                    );
 
-            // Capture button
-            if ui.add(Button::new(RichText::new("Capture").color(Color32::WHITE))
-                .fill(Color32::from_rgb(0, 80, 120))
-                .min_size(Vec2::new(58.0, 22.0))).clicked() {
-                let cfg = state.lock().config.clone();
-                let mut st = state.lock();
-                st.scenes[i].config = cfg;
-                st.scenes[i].active = true;
-            }
+                    // Name text edit
+                    let mut name_edit = name.clone();
+                    let te = ui.add(TextEdit::singleline(&mut name_edit).desired_width(80.0));
+                    if te.changed() {
+                        state.lock().scenes[i].name = name_edit;
+                    }
 
-            // Load button
-            if ui.add(Button::new(RichText::new("Load").color(Color32::WHITE))
-                .fill(Color32::from_rgb(60, 40, 80))
-                .min_size(Vec2::new(42.0, 22.0))).clicked() {
-                let scene_cfg = state.lock().scenes[i].config.clone();
-                let mut st = state.lock();
-                st.config = scene_cfg;
-                st.system_changed = true;
-                st.mode_changed = true;
-            }
-        }); // inner horizontal
-        }); // frame
+                    // Hold duration
+                    let mut hold_v = hold;
+                    if ui
+                        .add(
+                            DragValue::new(&mut hold_v)
+                                .clamp_range(5.0..=300.0f32)
+                                .suffix("s")
+                                .speed(0.5),
+                        )
+                        .changed()
+                    {
+                        state.lock().scenes[i].hold_secs = hold_v;
+                    }
+
+                    // Morph duration + preview button
+                    let mut morph_v = morph;
+                    if ui
+                        .add(
+                            DragValue::new(&mut morph_v)
+                                .clamp_range(0.0..=60.0f32)
+                                .suffix("s")
+                                .speed(0.1),
+                        )
+                        .changed()
+                    {
+                        state.lock().scenes[i].morph_secs = morph_v;
+                    }
+                    // ▶ preview: jump arrangement to just before this scene's morph
+                    if i > 0 {
+                        let preview_btn = ui
+                            .add(
+                                Button::new(RichText::new("▶").size(10.0))
+                                    .min_size(Vec2::new(18.0, 18.0)),
+                            )
+                            .on_hover_text("Preview morph into this scene");
+                        if preview_btn.clicked() {
+                            let mut st = state.lock();
+                            // Compute elapsed time to the start of this scene's morph
+                            let active: Vec<usize> = (0..st.scenes.len())
+                                .filter(|&j| st.scenes[j].active)
+                                .collect();
+                            let mut t = 0.0f32;
+                            for (ord, &idx) in active.iter().enumerate() {
+                                if idx == i {
+                                    // We're at the start of this scene's morph
+                                    st.arr_elapsed = t;
+                                    st.arr_playing = true;
+                                    break;
+                                }
+                                let s = &st.scenes[idx];
+                                if ord > 0 {
+                                    t += s.morph_secs;
+                                }
+                                t += s.hold_secs;
+                            }
+                        }
+                    }
+
+                    // Probability weight (shown when probabilistic mode is on)
+                    let arr_prob = state.lock().arr_probabilistic;
+                    if arr_prob {
+                        let mut prob_v = state.lock().scenes[i].transition_prob;
+                        if ui
+                            .add(
+                                DragValue::new(&mut prob_v)
+                                    .clamp_range(0.0..=3.0f32)
+                                    .prefix("P:")
+                                    .speed(0.05),
+                            )
+                            .changed()
+                        {
+                            state.lock().scenes[i].transition_prob = prob_v;
+                        }
+                    }
+
+                    // Capture button
+                    if ui
+                        .add(
+                            Button::new(RichText::new("Capture").color(Color32::WHITE))
+                                .fill(Color32::from_rgb(0, 80, 120))
+                                .min_size(Vec2::new(58.0, 22.0)),
+                        )
+                        .clicked()
+                    {
+                        let cfg = state.lock().config.clone();
+                        let mut st = state.lock();
+                        st.scenes[i].config = cfg;
+                        st.scenes[i].active = true;
+                    }
+
+                    // Load button
+                    if ui
+                        .add(
+                            Button::new(RichText::new("Load").color(Color32::WHITE))
+                                .fill(Color32::from_rgb(60, 40, 80))
+                                .min_size(Vec2::new(42.0, 22.0)),
+                        )
+                        .clicked()
+                    {
+                        let scene_cfg = state.lock().scenes[i].config.clone();
+                        let mut st = state.lock();
+                        st.config = scene_cfg;
+                        st.system_changed = true;
+                        st.mode_changed = true;
+                    }
+                }); // inner horizontal
+            }); // frame
     }
 
     ui.add_space(6.0);
     // Empty state hint
     let has_active = scenes_snapshot.iter().any(|s| s.active);
     if !has_active {
-        ui.label(RichText::new("Hit Generate to create an arrangement, or Capture your current sound into scenes.")
-            .color(AMBER).size(11.0).italics());
+        ui.label(
+            RichText::new(
+                "Hit Generate to create an arrangement, or Capture your current sound into scenes.",
+            )
+            .color(AMBER)
+            .size(11.0)
+            .italics(),
+        );
     } else {
-        ui.colored_label(GRAY_HINT, "Capture your current sound into a scene, set durations, then Play.");
+        ui.colored_label(
+            GRAY_HINT,
+            "Capture your current sound into a scene, set durations, then Play.",
+        );
     }
     ui.add_space(6.0);
 
@@ -4075,7 +5486,11 @@ fn build_bifurc_system(
         ("lorenz", "sigma") => Box::new(Lorenz::new(pval, lorenz.rho, lorenz.beta)),
         ("rossler", "c") => Box::new(Rossler::new(rossler.a, rossler.b, pval)),
         ("kuramoto", "coupling") => Box::new(Kuramoto::new(kuramoto.n_oscillators, pval)),
-        _ => Box::new(Lorenz::new(lorenz.sigma, pval.clamp(20.0, 50.0), lorenz.beta)),
+        _ => Box::new(Lorenz::new(
+            lorenz.sigma,
+            pval.clamp(20.0, 50.0),
+            lorenz.beta,
+        )),
     }
 }
 
@@ -4418,7 +5833,11 @@ fn draw_studio_tab(ui: &mut Ui, state: &SharedState) {
     });
 }
 
-fn draw_bifurc_diagram(ui: &mut Ui, bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>, state: &SharedState) {
+fn draw_bifurc_diagram(
+    ui: &mut Ui,
+    bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>,
+    state: &SharedState,
+) {
     let avail = ui.available_size();
     let (response, painter) = ui.allocate_painter(avail, Sense::hover());
     let rect = response.rect;
@@ -4426,30 +5845,48 @@ fn draw_bifurc_diagram(ui: &mut Ui, bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>, s
 
     let (is_2d, param1, param2) = {
         let st = state.lock();
-        (st.bifurc_2d_mode, st.bifurc_param.clone(), st.bifurc_param2.clone())
+        (
+            st.bifurc_2d_mode,
+            st.bifurc_param.clone(),
+            st.bifurc_param2.clone(),
+        )
     };
 
     if is_2d {
         // 2D heatmap: (p1, p2, chaos_metric)
         let data_2d_arc = state.lock().bifurc_data_2d.clone();
-        let data_2d = if let Some(d) = data_2d_arc.try_lock() { d.clone() } else { return; };
+        let data_2d = if let Some(d) = data_2d_arc.try_lock() {
+            d.clone()
+        } else {
+            return;
+        };
         if data_2d.is_empty() {
-            painter.text(rect.center(), Align2::CENTER_CENTER,
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
                 "Click 'Compute' to generate 2D bifurcation map",
-                FontId::proportional(16.0), Color32::from_rgb(80, 80, 120));
+                FontId::proportional(16.0),
+                Color32::from_rgb(80, 80, 120),
+            );
             return;
         }
-        let mut p1_min = f32::MAX; let mut p1_max = f32::MIN;
-        let mut p2_min = f32::MAX; let mut p2_max = f32::MIN;
-        let mut v_min = f32::MAX;  let mut v_max = f32::MIN;
+        let mut p1_min = f32::MAX;
+        let mut p1_max = f32::MIN;
+        let mut p2_min = f32::MAX;
+        let mut p2_max = f32::MIN;
+        let mut v_min = f32::MAX;
+        let mut v_max = f32::MIN;
         for &(p1, p2, v) in &data_2d {
-            p1_min = p1_min.min(p1); p1_max = p1_max.max(p1);
-            p2_min = p2_min.min(p2); p2_max = p2_max.max(p2);
-            v_min = v_min.min(v);    v_max = v_max.max(v);
+            p1_min = p1_min.min(p1);
+            p1_max = p1_max.max(p1);
+            p2_min = p2_min.min(p2);
+            p2_max = p2_max.max(p2);
+            v_min = v_min.min(v);
+            v_max = v_max.max(v);
         }
         let rp1 = (p1_max - p1_min).max(1e-3);
         let rp2 = (p2_max - p2_min).max(1e-3);
-        let rv  = (v_max - v_min).max(1e-9);
+        let rv = (v_max - v_min).max(1e-9);
         let pad = 30.0f32;
         let inner_w = rect.width() - 2.0 * pad;
         let inner_h = rect.height() - 2.0 * pad;
@@ -4461,39 +5898,71 @@ fn draw_bifurc_diagram(ui: &mut Ui, bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>, s
             let t = ((v - v_min) / rv).clamp(0.0, 1.0);
             // Color: deep blue (ordered) → cyan → white (chaotic)
             let col = if t < 0.5 {
-                lerp_color(Color32::from_rgb(10, 10, 80), Color32::from_rgb(0, 200, 255), t * 2.0)
+                lerp_color(
+                    Color32::from_rgb(10, 10, 80),
+                    Color32::from_rgb(0, 200, 255),
+                    t * 2.0,
+                )
             } else {
-                lerp_color(Color32::from_rgb(0, 200, 255), Color32::from_rgb(255, 240, 180), (t - 0.5) * 2.0)
+                lerp_color(
+                    Color32::from_rgb(0, 200, 255),
+                    Color32::from_rgb(255, 240, 180),
+                    (t - 0.5) * 2.0,
+                )
             };
             let sx = rect.left() + pad + ((p1 - p1_min) / rp1) * inner_w;
             let sy = rect.bottom() - pad - ((p2 - p2_min) / rp2) * inner_h;
             painter.rect_filled(
                 Rect::from_min_size(Pos2::new(sx, sy - cell_h), Vec2::new(cell_w, cell_h)),
-                0.0, col,
+                0.0,
+                col,
             );
         }
-        painter.text(rect.left_top() + Vec2::new(8.0, 8.0), Align2::LEFT_TOP,
+        painter.text(
+            rect.left_top() + Vec2::new(8.0, 8.0),
+            Align2::LEFT_TOP,
             format!("2D Bifurcation Map  ({} × {})", grid_size, grid_size),
-            FontId::proportional(12.0), Color32::from_rgb(120, 140, 180));
-        painter.text(rect.center_bottom() + Vec2::new(0.0, -12.0), Align2::CENTER_BOTTOM,
-            format!("x: {} ({:.1}..{:.1})   y: {} ({:.1}..{:.1})", param1, p1_min, p1_max, param2, p2_min, p2_max),
-            FontId::proportional(10.0), Color32::from_rgb(100, 120, 160));
+            FontId::proportional(12.0),
+            Color32::from_rgb(120, 140, 180),
+        );
+        painter.text(
+            rect.center_bottom() + Vec2::new(0.0, -12.0),
+            Align2::CENTER_BOTTOM,
+            format!(
+                "x: {} ({:.1}..{:.1})   y: {} ({:.1}..{:.1})",
+                param1, p1_min, p1_max, param2, p2_min, p2_max
+            ),
+            FontId::proportional(10.0),
+            Color32::from_rgb(100, 120, 160),
+        );
         return;
     }
 
     // 1D bifurcation diagram
-    let data = if let Some(d) = bifurc_data.try_lock() { d.clone() } else { return; };
+    let data = if let Some(d) = bifurc_data.try_lock() {
+        d.clone()
+    } else {
+        return;
+    };
     if data.is_empty() {
-        painter.text(rect.center(), Align2::CENTER_CENTER,
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
             "Click 'Compute' to generate bifurcation diagram",
-            FontId::proportional(16.0), Color32::from_rgb(80, 80, 120));
+            FontId::proportional(16.0),
+            Color32::from_rgb(80, 80, 120),
+        );
         return;
     }
-    let mut min_x = f32::MAX; let mut max_x = f32::MIN;
-    let mut min_y = f32::MAX; let mut max_y = f32::MIN;
+    let mut min_x = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut min_y = f32::MAX;
+    let mut max_y = f32::MIN;
     for &(x, y) in &data {
-        min_x = min_x.min(x); max_x = max_x.max(x);
-        min_y = min_y.min(y); max_y = max_y.max(y);
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
     }
     let rx = (max_x - min_x).max(1e-3);
     let ry = (max_y - min_y).max(1e-3);
@@ -4501,24 +5970,43 @@ fn draw_bifurc_diagram(ui: &mut Ui, bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>, s
     for &(x, y) in &data {
         let sx = rect.left() + pad + ((x - min_x) / rx) * (rect.width() - 2.0 * pad);
         let sy = rect.bottom() - pad - ((y - min_y) / ry) * (rect.height() - 2.0 * pad);
-        painter.circle_filled(Pos2::new(sx, sy), 1.0, Color32::from_rgba_premultiplied(0, 200, 255, 180));
+        painter.circle_filled(
+            Pos2::new(sx, sy),
+            1.0,
+            Color32::from_rgba_premultiplied(0, 200, 255, 180),
+        );
     }
-    painter.text(rect.left_top() + Vec2::new(8.0, 8.0), Align2::LEFT_TOP,
+    painter.text(
+        rect.left_top() + Vec2::new(8.0, 8.0),
+        Align2::LEFT_TOP,
         format!("Bifurcation Diagram  ({} points)", data.len()),
-        FontId::proportional(12.0), Color32::from_rgb(120, 140, 180));
-    painter.text(rect.center_bottom() + Vec2::new(0.0, -12.0), Align2::CENTER_BOTTOM,
+        FontId::proportional(12.0),
+        Color32::from_rgb(120, 140, 180),
+    );
+    painter.text(
+        rect.center_bottom() + Vec2::new(0.0, -12.0),
+        Align2::CENTER_BOTTOM,
         format!("{} = {:.3} → {:.3}", param1, min_x, max_x),
-        FontId::proportional(10.0), Color32::from_rgb(100, 120, 160));
-    painter.text(rect.left_center() + Vec2::new(12.0, 0.0), Align2::LEFT_CENTER,
+        FontId::proportional(10.0),
+        Color32::from_rgb(100, 120, 160),
+    );
+    painter.text(
+        rect.left_center() + Vec2::new(12.0, 0.0),
+        Align2::LEFT_CENTER,
         "x-state",
-        FontId::proportional(9.0), Color32::from_rgb(80, 100, 140));
+        FontId::proportional(9.0),
+        Color32::from_rgb(80, 100, 140),
+    );
 }
 
 /// Compute attractor basin: for each (x, y) initial condition on the grid, run the Lorenz
 /// system for 500 steps and measure whether it diverges or converges, storing a color proxy.
 fn compute_basin(
-    xlim: (f32, f32), ylim: (f32, f32), z_slice: f32,
-    resolution: usize, _system_name: &str,
+    xlim: (f32, f32),
+    ylim: (f32, f32),
+    z_slice: f32,
+    resolution: usize,
+    _system_name: &str,
     out: Arc<Mutex<Vec<(f32, f32, f32)>>>,
 ) {
     use rayon::prelude::*;
@@ -4529,23 +6017,37 @@ fn compute_basin(
         .map(|j| ylim.0 + (ylim.1 - ylim.0) * j as f32 / (resolution - 1).max(1) as f32)
         .collect();
 
-    let points: Vec<(f32, f32, f32)> = xs.par_iter().flat_map(|&x| {
-        ys.iter().map(|&y| {
-            let mut sys = crate::systems::Lorenz::new(10.0, 28.0, 2.667);
-            sys.set_state(&[x as f64, y as f64, z_slice as f64]);
-            let mut max_r = 0.0f64;
-            let mut diverged = false;
-            for _ in 0..500 {
-                sys.step(0.01);
-                let s = sys.state();
-                let r = (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt();
-                if r > 200.0 { diverged = true; break; }
-                if r > max_r { max_r = r; }
-            }
-            let color_val = if diverged { -1.0f32 } else { (max_r / 50.0).clamp(0.0, 1.0) as f32 };
-            (x, y, color_val)
-        }).collect::<Vec<_>>()
-    }).collect();
+    let points: Vec<(f32, f32, f32)> = xs
+        .par_iter()
+        .flat_map(|&x| {
+            ys.iter()
+                .map(|&y| {
+                    let mut sys = crate::systems::Lorenz::new(10.0, 28.0, 2.667);
+                    sys.set_state(&[x as f64, y as f64, z_slice as f64]);
+                    let mut max_r = 0.0f64;
+                    let mut diverged = false;
+                    for _ in 0..500 {
+                        sys.step(0.01);
+                        let s = sys.state();
+                        let r = (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt();
+                        if r > 200.0 {
+                            diverged = true;
+                            break;
+                        }
+                        if r > max_r {
+                            max_r = r;
+                        }
+                    }
+                    let color_val = if diverged {
+                        -1.0f32
+                    } else {
+                        (max_r / 50.0).clamp(0.0, 1.0) as f32
+                    };
+                    (x, y, color_val)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
     *out.lock() = points;
 }
@@ -4554,8 +6056,13 @@ fn compute_basin(
 fn draw_basin_tab(ui: &mut Ui, state: &SharedState) {
     let (computing, resolution, xlim, ylim, basin_arc) = {
         let st = state.lock();
-        (st.basin_computing, st.basin_resolution, st.basin_xlim, st.basin_ylim,
-         st.basin_data.clone())
+        (
+            st.basin_computing,
+            st.basin_resolution,
+            st.basin_xlim,
+            st.basin_ylim,
+            st.basin_data.clone(),
+        )
     };
 
     let avail = ui.available_size();
@@ -4575,15 +6082,21 @@ fn draw_basin_tab(ui: &mut Ui, state: &SharedState) {
             "Click 'Compute Basin' above to generate the attractor basin map"
         };
         painter.text(
-            rect.center(), Align2::CENTER_CENTER,
+            rect.center(),
+            Align2::CENTER_CENTER,
             msg,
-            FontId::proportional(16.0), Color32::from_rgb(80, 80, 120),
+            FontId::proportional(16.0),
+            Color32::from_rgb(80, 80, 120),
         );
         painter.text(
-            rect.center_bottom() + Vec2::new(0.0, -20.0), Align2::CENTER_BOTTOM,
-            format!("x-axis: {:.1} to {:.1}   y-axis: {:.1} to {:.1}   grid: {}x{}",
-                xlim.0, xlim.1, ylim.0, ylim.1, resolution, resolution),
-            FontId::proportional(10.0), Color32::from_rgb(60, 70, 100),
+            rect.center_bottom() + Vec2::new(0.0, -20.0),
+            Align2::CENTER_BOTTOM,
+            format!(
+                "x-axis: {:.1} to {:.1}   y-axis: {:.1} to {:.1}   grid: {}x{}",
+                xlim.0, xlim.1, ylim.0, ylim.1, resolution, resolution
+            ),
+            FontId::proportional(10.0),
+            Color32::from_rgb(60, 70, 100),
         );
         return;
     }
@@ -4595,7 +6108,7 @@ fn draw_basin_tab(ui: &mut Ui, state: &SharedState) {
 
     for &(x, y, v) in data.iter() {
         let px = rect.left() + (x - xlim.0) / x_range * rect.width();
-        let py = rect.top()  + (y - ylim.0) / y_range * rect.height();
+        let py = rect.top() + (y - ylim.0) / y_range * rect.height();
         let color = if v < 0.0 {
             Color32::from_rgb(200, 50, 50)
         } else {
@@ -4609,32 +6122,51 @@ fn draw_basin_tab(ui: &mut Ui, state: &SharedState) {
     }
 
     painter.text(
-        rect.left_top() + Vec2::new(6.0, 6.0), Align2::LEFT_TOP,
+        rect.left_top() + Vec2::new(6.0, 6.0),
+        Align2::LEFT_TOP,
         format!("Attractor Basin  ({}×{})", resolution, resolution),
-        FontId::proportional(12.0), Color32::from_rgb(120, 140, 180),
+        FontId::proportional(12.0),
+        Color32::from_rgb(120, 140, 180),
     );
     painter.text(
-        rect.center_bottom() + Vec2::new(0.0, -14.0), Align2::CENTER_BOTTOM,
-        format!("x: {:.1} to {:.1}    y: {:.1} to {:.1}", xlim.0, xlim.1, ylim.0, ylim.1),
-        FontId::proportional(10.0), Color32::from_rgb(90, 110, 150),
+        rect.center_bottom() + Vec2::new(0.0, -14.0),
+        Align2::CENTER_BOTTOM,
+        format!(
+            "x: {:.1} to {:.1}    y: {:.1} to {:.1}",
+            xlim.0, xlim.1, ylim.0, ylim.1
+        ),
+        FontId::proportional(10.0),
+        Color32::from_rgb(90, 110, 150),
     );
     painter.rect_filled(
-        egui::Rect::from_min_size(rect.right_top() + Vec2::new(-110.0, 8.0), Vec2::new(100.0, 14.0)),
-        2.0, Color32::from_rgb(200, 50, 50),
+        egui::Rect::from_min_size(
+            rect.right_top() + Vec2::new(-110.0, 8.0),
+            Vec2::new(100.0, 14.0),
+        ),
+        2.0,
+        Color32::from_rgb(200, 50, 50),
     );
     painter.text(
-        rect.right_top() + Vec2::new(-112.0, 8.0), Align2::RIGHT_TOP,
+        rect.right_top() + Vec2::new(-112.0, 8.0),
+        Align2::RIGHT_TOP,
         "diverges",
-        FontId::proportional(10.0), Color32::from_rgb(200, 50, 50),
+        FontId::proportional(10.0),
+        Color32::from_rgb(200, 50, 50),
     );
     painter.rect_filled(
-        egui::Rect::from_min_size(rect.right_top() + Vec2::new(-110.0, 28.0), Vec2::new(100.0, 14.0)),
-        2.0, Color32::from_rgb(0, 160, 255),
+        egui::Rect::from_min_size(
+            rect.right_top() + Vec2::new(-110.0, 28.0),
+            Vec2::new(100.0, 14.0),
+        ),
+        2.0,
+        Color32::from_rgb(0, 160, 255),
     );
     painter.text(
-        rect.right_top() + Vec2::new(-112.0, 28.0), Align2::RIGHT_TOP,
+        rect.right_top() + Vec2::new(-112.0, 28.0),
+        Align2::RIGHT_TOP,
         "attractor",
-        FontId::proportional(10.0), Color32::from_rgb(0, 200, 255),
+        FontId::proportional(10.0),
+        Color32::from_rgb(0, 200, 255),
     );
 }
 
@@ -4705,29 +6237,34 @@ fn draw_phase_portrait(
     let use_3d = auto_rotate || rotation_angle.abs() > 0.01;
     let cos_a = rotation_angle.cos();
     let sin_a = rotation_angle.sin();
-    let proj_pts: Vec<(f32, f32, f32, bool)> = points.iter().map(|&(x, y, z, s, c)| {
-        let (pa, pb) = if use_3d {
-            // Rotate around Y axis
-            let rx = x * cos_a + z * sin_a;
-            let rz = -x * sin_a + z * cos_a;
-            let d = 3.0f32;
-            let perspective = d / (d + rz * 0.3 + 1.0).max(0.1);
-            (rx * perspective, y * perspective)
-        } else {
-            match projection {
-                1 => (x, z), // XZ
-                2 => (y, z), // YZ
-                _ => (x, y), // XY
-            }
-        };
-        (pa, pb, s, c)
-    }).collect();
+    let proj_pts: Vec<(f32, f32, f32, bool)> = points
+        .iter()
+        .map(|&(x, y, z, s, c)| {
+            let (pa, pb) = if use_3d {
+                // Rotate around Y axis
+                let rx = x * cos_a + z * sin_a;
+                let rz = -x * sin_a + z * cos_a;
+                let d = 3.0f32;
+                let perspective = d / (d + rz * 0.3 + 1.0).max(0.1);
+                (rx * perspective, y * perspective)
+            } else {
+                match projection {
+                    1 => (x, z), // XZ
+                    2 => (y, z), // YZ
+                    _ => (x, y), // XY
+                }
+            };
+            (pa, pb, s, c)
+        })
+        .collect();
 
     // Compute bounds
     let (mut min_x, mut max_x, mut min_y, mut max_y) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
     for &(x, y, _, _) in &proj_pts {
-        min_x = min_x.min(x); max_x = max_x.max(x);
-        min_y = min_y.min(y); max_y = max_y.max(y);
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
     }
     let rx = (max_x - min_x).max(1e-3);
     let ry = (max_y - min_y).max(1e-3);
@@ -4743,8 +6280,20 @@ fn draw_phase_portrait(
     // Draw faint grid axes
     let origin = to_screen((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
     let grid_color = Color32::from_rgba_premultiplied(40, 40, 60, 80);
-    painter.line_segment([Pos2::new(rect.left(), origin.y), Pos2::new(rect.right(), origin.y)], Stroke::new(1.0, grid_color));
-    painter.line_segment([Pos2::new(origin.x, rect.top()), Pos2::new(origin.x, rect.bottom())], Stroke::new(1.0, grid_color));
+    painter.line_segment(
+        [
+            Pos2::new(rect.left(), origin.y),
+            Pos2::new(rect.right(), origin.y),
+        ],
+        Stroke::new(1.0, grid_color),
+    );
+    painter.line_segment(
+        [
+            Pos2::new(origin.x, rect.top()),
+            Pos2::new(origin.x, rect.bottom()),
+        ],
+        Stroke::new(1.0, grid_color),
+    );
 
     let n = proj_pts.len();
 
@@ -4766,11 +6315,34 @@ fn draw_phase_portrait(
                 // Each dot = 2 triangles (axis-aligned 2×2 pixel square)
                 let base = mesh.vertices.len() as u32;
                 let half = 1.0f32;
-                mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-half, -half), uv: egui::epaint::WHITE_UV, color: ink_col });
-                mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( half, -half), uv: egui::epaint::WHITE_UV, color: ink_col });
-                mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( half,  half), uv: egui::epaint::WHITE_UV, color: ink_col });
-                mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-half,  half), uv: egui::epaint::WHITE_UV, color: ink_col });
-                mesh.indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+                mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(-half, -half),
+                    uv: egui::epaint::WHITE_UV,
+                    color: ink_col,
+                });
+                mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(half, -half),
+                    uv: egui::epaint::WHITE_UV,
+                    color: ink_col,
+                });
+                mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(half, half),
+                    uv: egui::epaint::WHITE_UV,
+                    color: ink_col,
+                });
+                mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(-half, half),
+                    uv: egui::epaint::WHITE_UV,
+                    color: ink_col,
+                });
+                mesh.indices.extend_from_slice(&[
+                    base,
+                    base + 1,
+                    base + 2,
+                    base,
+                    base + 2,
+                    base + 3,
+                ]);
             }
         }
         if !mesh.vertices.is_empty() {
@@ -4789,18 +6361,64 @@ fn draw_phase_portrait(
                 let half_w = 0.6f32;
                 // Horizontal bar
                 let base = scar_mesh.vertices.len() as u32;
-                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-arm, -half_w), uv: egui::epaint::WHITE_UV, color: scar_col });
-                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( arm, -half_w), uv: egui::epaint::WHITE_UV, color: scar_col });
-                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( arm,  half_w), uv: egui::epaint::WHITE_UV, color: scar_col });
-                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-arm,  half_w), uv: egui::epaint::WHITE_UV, color: scar_col });
-                scar_mesh.indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+                scar_mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(-arm, -half_w),
+                    uv: egui::epaint::WHITE_UV,
+                    color: scar_col,
+                });
+                scar_mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(arm, -half_w),
+                    uv: egui::epaint::WHITE_UV,
+                    color: scar_col,
+                });
+                scar_mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(arm, half_w),
+                    uv: egui::epaint::WHITE_UV,
+                    color: scar_col,
+                });
+                scar_mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(-arm, half_w),
+                    uv: egui::epaint::WHITE_UV,
+                    color: scar_col,
+                });
+                scar_mesh.indices.extend_from_slice(&[
+                    base,
+                    base + 1,
+                    base + 2,
+                    base,
+                    base + 2,
+                    base + 3,
+                ]);
                 // Vertical bar
                 let base = scar_mesh.vertices.len() as u32;
-                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-half_w, -arm), uv: egui::epaint::WHITE_UV, color: scar_col });
-                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( half_w, -arm), uv: egui::epaint::WHITE_UV, color: scar_col });
-                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2( half_w,  arm), uv: egui::epaint::WHITE_UV, color: scar_col });
-                scar_mesh.vertices.push(egui::epaint::Vertex { pos: sp + egui::vec2(-half_w,  arm), uv: egui::epaint::WHITE_UV, color: scar_col });
-                scar_mesh.indices.extend_from_slice(&[base, base+1, base+2, base, base+2, base+3]);
+                scar_mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(-half_w, -arm),
+                    uv: egui::epaint::WHITE_UV,
+                    color: scar_col,
+                });
+                scar_mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(half_w, -arm),
+                    uv: egui::epaint::WHITE_UV,
+                    color: scar_col,
+                });
+                scar_mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(half_w, arm),
+                    uv: egui::epaint::WHITE_UV,
+                    color: scar_col,
+                });
+                scar_mesh.vertices.push(egui::epaint::Vertex {
+                    pos: sp + egui::vec2(-half_w, arm),
+                    uv: egui::epaint::WHITE_UV,
+                    color: scar_col,
+                });
+                scar_mesh.indices.extend_from_slice(&[
+                    base,
+                    base + 1,
+                    base + 2,
+                    base,
+                    base + 2,
+                    base + 3,
+                ]);
             }
         }
         if !scar_mesh.vertices.is_empty() {
@@ -4822,7 +6440,9 @@ fn draw_phase_portrait(
         let age_secs = captured_at.elapsed().as_secs_f32();
         let fade_start = 2.0f32;
         let fade_end = 10.0f32;
-        if age_secs > fade_end { continue; }
+        if age_secs > fade_end {
+            continue;
+        }
         // Fade alpha: full for first 2s, then fades to 0 over 8s
         let ghost_alpha = if age_secs < fade_start {
             40u8
@@ -4830,7 +6450,9 @@ fn draw_phase_portrait(
             let t = (age_secs - fade_start) / (fade_end - fade_start);
             (40.0 * (1.0 - t)) as u8
         };
-        if ghost_alpha == 0 { continue; }
+        if ghost_alpha == 0 {
+            continue;
+        }
         let ghost_col = Color32::from_rgba_premultiplied(
             (trail_color.r() as f32 * 0.5) as u8,
             (trail_color.g() as f32 * 0.5) as u8,
@@ -4866,10 +6488,20 @@ fn draw_phase_portrait(
                 // Right eye (cyan channel)
                 let p0r = Pos2::new(to_screen(x0, y0).x + sep_px, to_screen(x0, y0).y);
                 let p1r = Pos2::new(to_screen(x1, y1).x + sep_px, to_screen(x1, y1).y);
-                let a = if pass == 0 { (alpha as f32 * 0.3) as u8 } else { alpha };
+                let a = if pass == 0 {
+                    (alpha as f32 * 0.3) as u8
+                } else {
+                    alpha
+                };
                 let w_px = if pass == 0 { 3.0 } else { 1.2 };
-                let r_col = Color32::from_rgba_premultiplied((255.0 * recency * spd_bright) as u8, 0, 0, a);
-                let c_col = Color32::from_rgba_premultiplied(0, (200.0 * recency * spd_bright) as u8, (255.0 * recency * spd_bright) as u8, a);
+                let r_col =
+                    Color32::from_rgba_premultiplied((255.0 * recency * spd_bright) as u8, 0, 0, a);
+                let c_col = Color32::from_rgba_premultiplied(
+                    0,
+                    (200.0 * recency * spd_bright) as u8,
+                    (255.0 * recency * spd_bright) as u8,
+                    a,
+                );
                 painter.line_segment([p0l, p1l], Stroke::new(w_px, r_col));
                 painter.line_segment([p0r, p1r], Stroke::new(w_px, c_col));
             } else {
@@ -4922,7 +6554,11 @@ fn draw_phase_portrait(
         rect.left_top() + Vec2::new(6.0, 6.0),
         Vec2::new(210.0, 56.0),
     );
-    painter.rect_filled(info_bg, 6.0, Color32::from_rgba_premultiplied(8, 8, 20, 160));
+    painter.rect_filled(
+        info_bg,
+        6.0,
+        Color32::from_rgba_premultiplied(8, 8, 20, 160),
+    );
 
     let sys_display = system_display_name(system_name);
     painter.text(
@@ -4941,7 +6577,11 @@ fn draw_phase_portrait(
     );
 
     // Projection label
-    let proj_label = match projection { 1 => "XZ  plane", 2 => "YZ  plane", _ => "XY  plane" };
+    let proj_label = match projection {
+        1 => "XZ  plane",
+        2 => "YZ  plane",
+        _ => "XY  plane",
+    };
     painter.text(
         rect.left_top() + Vec2::new(12.0, 42.0),
         Align2::LEFT_TOP,
@@ -4957,12 +6597,15 @@ fn draw_phase_portrait(
         let dy = current_deriv[1] as f32;
         let mag = (dx * dx + dy * dy).sqrt().max(1e-6);
         let scale = 40.0f32;
-        let arrow_end = Pos2::new(
-            pos.x + (dx / mag) * scale,
-            pos.y - (dy / mag) * scale,
+        let arrow_end = Pos2::new(pos.x + (dx / mag) * scale, pos.y - (dy / mag) * scale);
+        painter.line_segment(
+            [pos, arrow_end],
+            Stroke::new(4.0, Color32::from_rgba_premultiplied(255, 200, 0, 40)),
         );
-        painter.line_segment([pos, arrow_end], Stroke::new(4.0, Color32::from_rgba_premultiplied(255, 200, 0, 40)));
-        painter.line_segment([pos, arrow_end], Stroke::new(1.5, Color32::from_rgb(255, 220, 0)));
+        painter.line_segment(
+            [pos, arrow_end],
+            Stroke::new(1.5, Color32::from_rgb(255, 220, 0)),
+        );
         painter.circle_filled(arrow_end, 3.0, Color32::from_rgb(255, 220, 0));
     }
 
@@ -4970,7 +6613,13 @@ fn draw_phase_portrait(
     let eq_text = equation_text(system_name);
     if !eq_text.is_empty() {
         let eq_pos = rect.left_bottom() + Vec2::new(8.0, -8.0);
-        painter.text(eq_pos, Align2::LEFT_BOTTOM, eq_text, FontId::monospace(10.0), Color32::from_rgba_premultiplied(150, 180, 255, 180));
+        painter.text(
+            eq_pos,
+            Align2::LEFT_BOTTOM,
+            eq_text,
+            FontId::monospace(10.0),
+            Color32::from_rgba_premultiplied(150, 180, 255, 180),
+        );
     }
 
     // State values — right side with subtle background
@@ -4981,11 +6630,26 @@ fn draw_phase_portrait(
             rect.right_top() + Vec2::new(-120.0, 6.0),
             Vec2::new(114.0, 8.0 + n_vars as f32 * 15.0),
         );
-        painter.rect_filled(state_bg, 6.0, Color32::from_rgba_premultiplied(8, 8, 20, 150));
-        for (i, (&val, name)) in current_state.iter().zip(var_names.iter()).enumerate().take(n_vars) {
+        painter.rect_filled(
+            state_bg,
+            6.0,
+            Color32::from_rgba_premultiplied(8, 8, 20, 150),
+        );
+        for (i, (&val, name)) in current_state
+            .iter()
+            .zip(var_names.iter())
+            .enumerate()
+            .take(n_vars)
+        {
             let text = format!("{} = {:+.3}", name, val);
             let pos = rect.right_top() + Vec2::new(-10.0, 12.0 + i as f32 * 15.0);
-            painter.text(pos, Align2::RIGHT_TOP, text, FontId::monospace(10.5), Color32::from_rgba_premultiplied(80, 210, 130, 220));
+            painter.text(
+                pos,
+                Align2::RIGHT_TOP,
+                text,
+                FontId::monospace(10.5),
+                Color32::from_rgba_premultiplied(80, 210, 130, 220),
+            );
         }
     }
 
@@ -5000,52 +6664,87 @@ fn draw_phase_portrait(
         };
         let edrift_text = format!("E-drift: {:.2e}", energy_error);
         let edrift_pos = rect.left_bottom() + Vec2::new(8.0, -26.0);
-        painter.text(edrift_pos, Align2::LEFT_BOTTOM, edrift_text, FontId::monospace(10.0), edrift_color);
+        painter.text(
+            edrift_pos,
+            Align2::LEFT_BOTTOM,
+            edrift_text,
+            FontId::monospace(10.0),
+            edrift_color,
+        );
     }
 }
 
-fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points: &[(f32, f32, f32, f32, bool)]) {
-    let mc_cyan   = egui::Color32::from_rgb(0, 200, 220);
-    let mc_green  = egui::Color32::from_rgb(0, 220, 100);
+fn draw_mixer_tab(
+    ui: &mut egui::Ui,
+    state: &crate::ui::SharedState,
+    viz_points: &[(f32, f32, f32, f32, bool)],
+) {
+    let mc_cyan = egui::Color32::from_rgb(0, 200, 220);
+    let mc_green = egui::Color32::from_rgb(0, 220, 100);
     let mc_orange = egui::Color32::from_rgb(255, 160, 40);
-    let mc_red    = egui::Color32::from_rgb(220, 60, 60);
-    let mc_gray   = egui::Color32::from_rgb(120, 120, 140);
+    let mc_red = egui::Color32::from_rgb(220, 60, 60);
+    let mc_gray = egui::Color32::from_rgb(120, 120, 140);
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add_space(8.0);
 
         // ── Xrun / audio health indicator (#21) ──────────────────────────
         {
-            let xrun_count = state.lock().xrun_counter.load(std::sync::atomic::Ordering::Relaxed);
+            let xrun_count = state
+                .lock()
+                .xrun_counter
+                .load(std::sync::atomic::Ordering::Relaxed);
             if xrun_count > 0 {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("⚠ {} xrun{}", xrun_count, if xrun_count == 1 { "" } else { "s" }))
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "⚠ {} xrun{}",
+                            xrun_count,
+                            if xrun_count == 1 { "" } else { "s" }
+                        ))
                         .color(mc_red)
-                        .size(13.0));
+                        .size(13.0),
+                    );
                     if ui.small_button("Reset").clicked() {
-                        state.lock().xrun_counter.store(0, std::sync::atomic::Ordering::Relaxed);
+                        state
+                            .lock()
+                            .xrun_counter
+                            .store(0, std::sync::atomic::Ordering::Relaxed);
                     }
                 });
-                ui.label(egui::RichText::new("Audio stream errors detected — check CPU load or buffer size")
-                    .color(mc_gray).size(10.0));
+                ui.label(
+                    egui::RichText::new(
+                        "Audio stream errors detected — check CPU load or buffer size",
+                    )
+                    .color(mc_gray)
+                    .size(10.0),
+                );
             }
         }
         ui.add_space(4.0);
 
         // ── Save Clip button ──────────────────────────────────────────────
         ui.horizontal(|ui| {
-            if ui.add(egui::Button::new(
-                egui::RichText::new("📸 Save Clip (60s audio + portrait)").color(egui::Color32::BLACK))
-                .fill(egui::Color32::from_rgb(220, 180, 40))
-                .min_size(egui::Vec2::new(280.0, 32.0))
-            ).clicked() {
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("📸 Save Clip (60s audio + portrait)")
+                            .color(egui::Color32::BLACK),
+                    )
+                    .fill(egui::Color32::from_rgb(220, 180, 40))
+                    .min_size(egui::Vec2::new(280.0, 32.0)),
+                )
+                .clicked()
+            {
                 let sr = state.lock().sample_rate;
                 let cb = state.lock().clip_buffer.clone();
                 let trail = viz_points.to_vec();
                 // LEGACY: compute state hash for .sig companion file
                 let state_hash: u64 = {
                     let st = state.lock();
-                    st.current_state.iter().fold(0u64, |acc, &v| acc.wrapping_add(v.to_bits()))
+                    st.current_state
+                        .iter()
+                        .fold(0u64, |acc, &v| acc.wrapping_add(v.to_bits()))
                 };
                 std::thread::spawn(move || {
                     let wav_result = save_clip(&cb, sr);
@@ -5069,45 +6768,58 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
                 ui.label(egui::RichText::new(&status).color(mc_green).size(11.0));
             }
         });
-        ui.label(egui::RichText::new("Clips saved to clips/ folder — share-ready WAV + phase portrait PNG").color(mc_gray).size(10.0));
+        ui.label(
+            egui::RichText::new(
+                "Clips saved to clips/ folder — share-ready WAV + phase portrait PNG",
+            )
+            .color(mc_gray)
+            .size(10.0),
+        );
         ui.add_space(4.0);
 
         // ── Export SVG + Lossless WAV buttons ────────────────────────
         ui.horizontal(|ui| {
-            if ui.add(egui::Button::new(
-                egui::RichText::new("🖼 Export SVG").color(egui::Color32::BLACK))
-                .fill(egui::Color32::from_rgb(0, 180, 220))
-                .min_size(egui::Vec2::new(140.0, 28.0))
-            ).clicked() {
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("🖼 Export SVG").color(egui::Color32::BLACK),
+                    )
+                    .fill(egui::Color32::from_rgb(0, 180, 220))
+                    .min_size(egui::Vec2::new(140.0, 28.0)),
+                )
+                .clicked()
+            {
                 let trail = viz_points.to_vec();
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default().as_secs();
+                    .unwrap_or_default()
+                    .as_secs();
                 let dir = std::path::PathBuf::from("clips");
                 let _ = std::fs::create_dir_all(&dir);
                 let svg_path = dir.join(format!("portrait_{}.svg", ts));
                 let svg_path_str = svg_path.to_string_lossy().into_owned();
-                std::thread::spawn(move || {
-                    match save_portrait_svg(&trail, 0, &svg_path_str) {
-                        Ok(()) => log::info!("SVG portrait saved: {}", svg_path_str),
-                        Err(e) => log::error!("SVG export failed: {e}"),
-                    }
+                std::thread::spawn(move || match save_portrait_svg(&trail, 0, &svg_path_str) {
+                    Ok(()) => log::info!("SVG portrait saved: {}", svg_path_str),
+                    Err(e) => log::error!("SVG export failed: {e}"),
                 });
                 state.lock().clip_status = "Exporting SVG...".into();
             }
 
-            if ui.add(egui::Button::new(
-                egui::RichText::new("💾 Lossless WAV").color(egui::Color32::BLACK))
-                .fill(egui::Color32::from_rgb(100, 220, 140))
-                .min_size(egui::Vec2::new(140.0, 28.0))
-            ).clicked() {
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("💾 Lossless WAV").color(egui::Color32::BLACK),
+                    )
+                    .fill(egui::Color32::from_rgb(100, 220, 140))
+                    .min_size(egui::Vec2::new(140.0, 28.0)),
+                )
+                .clicked()
+            {
                 let sr = state.lock().sample_rate;
                 let cb = state.lock().clip_buffer.clone();
-                std::thread::spawn(move || {
-                    match save_clip_wav_32bit(&cb, sr) {
-                        Ok(path) => log::info!("Lossless WAV saved: {}", path),
-                        Err(e) => log::error!("Lossless WAV export failed: {e}"),
-                    }
+                std::thread::spawn(move || match save_clip_wav_32bit(&cb, sr) {
+                    Ok(path) => log::info!("Lossless WAV saved: {}", path),
+                    Err(e) => log::error!("Lossless WAV export failed: {e}"),
                 });
                 state.lock().clip_status = "Saving lossless WAV...".into();
             }
@@ -5131,21 +6843,33 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(label).color(col).size(11.0));
                     let bar_height = 80.0;
-                    let bar_width  = 18.0;
+                    let bar_width = 18.0;
                     let (resp, painter) = ui.allocate_painter(
-                        egui::Vec2::new(bar_width, bar_height), egui::Sense::hover());
+                        egui::Vec2::new(bar_width, bar_height),
+                        egui::Sense::hover(),
+                    );
                     let r = resp.rect;
                     painter.rect_filled(r, 2.0, egui::Color32::from_rgb(20, 20, 30));
                     let filled = peak.clamp(0.0, 1.0) * bar_height;
-                    let fill_rect = egui::Rect::from_min_max(
-                        egui::Pos2::new(r.min.x, r.max.y - filled),
-                        r.max,
-                    );
-                    let bar_col = if peak > 0.9 { mc_red } else if peak > 0.7 { mc_orange } else { col };
+                    let fill_rect =
+                        egui::Rect::from_min_max(egui::Pos2::new(r.min.x, r.max.y - filled), r.max);
+                    let bar_col = if peak > 0.9 {
+                        mc_red
+                    } else if peak > 0.7 {
+                        mc_orange
+                    } else {
+                        col
+                    };
                     painter.rect_filled(fill_rect, 1.0, bar_col);
-                    ui.label(egui::RichText::new(format!("{:.0}%", peak * 100.0)).size(9.0).color(mc_gray));
+                    ui.label(
+                        egui::RichText::new(format!("{:.0}%", peak * 100.0))
+                            .size(9.0)
+                            .color(mc_gray),
+                    );
                 });
-                if i < 3 { ui.add_space(8.0); }
+                if i < 3 {
+                    ui.add_space(8.0);
+                }
             }
         });
         ui.add_space(8.0);
@@ -5153,28 +6877,58 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
         ui.add_space(6.0);
 
         // ── Layer 0 (Main) Controls ───────────────────────────────────────
-        ui.label(egui::RichText::new("Layer 0 — Main System").color(mc_green).strong());
+        ui.label(
+            egui::RichText::new("Layer 0 — Main System")
+                .color(mc_green)
+                .strong(),
+        );
         ui.horizontal(|ui| {
             let mut st = state.lock();
             ui.add(egui::Slider::new(&mut st.layer0_level, 0.0..=1.5).text("Level"));
             ui.add(egui::Slider::new(&mut st.layer0_pan, -1.0..=1.0).text("Pan"));
-            let mc = if st.layer0_mute { mc_red } else { egui::Color32::from_rgb(40, 60, 40) };
-            if ui.add(egui::Button::new(egui::RichText::new("M").color(egui::Color32::WHITE))
-                .fill(mc).min_size(egui::Vec2::new(28.0, 28.0))).clicked() {
+            let mc = if st.layer0_mute {
+                mc_red
+            } else {
+                egui::Color32::from_rgb(40, 60, 40)
+            };
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("M").color(egui::Color32::WHITE))
+                        .fill(mc)
+                        .min_size(egui::Vec2::new(28.0, 28.0)),
+                )
+                .clicked()
+            {
                 st.layer0_mute = !st.layer0_mute;
             }
         });
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("ADSR Envelope (triggered by arpeggiator / KS events)").color(mc_cyan).size(11.0));
+        ui.label(
+            egui::RichText::new("ADSR Envelope (triggered by arpeggiator / KS events)")
+                .color(mc_cyan)
+                .size(11.0),
+        );
         {
             let mut st = state.lock();
             ui.horizontal(|ui| {
-                ui.add(egui::Slider::new(&mut st.adsr_attack_ms,  1.0..=2000.0).text("Attack ms").logarithmic(true));
-                ui.add(egui::Slider::new(&mut st.adsr_decay_ms,   1.0..=2000.0).text("Decay ms").logarithmic(true));
+                ui.add(
+                    egui::Slider::new(&mut st.adsr_attack_ms, 1.0..=2000.0)
+                        .text("Attack ms")
+                        .logarithmic(true),
+                );
+                ui.add(
+                    egui::Slider::new(&mut st.adsr_decay_ms, 1.0..=2000.0)
+                        .text("Decay ms")
+                        .logarithmic(true),
+                );
             });
             ui.horizontal(|ui| {
-                ui.add(egui::Slider::new(&mut st.adsr_sustain,    0.0..=1.0).text("Sustain"));
-                ui.add(egui::Slider::new(&mut st.adsr_release_ms, 10.0..=5000.0).text("Release ms").logarithmic(true));
+                ui.add(egui::Slider::new(&mut st.adsr_sustain, 0.0..=1.0).text("Sustain"));
+                ui.add(
+                    egui::Slider::new(&mut st.adsr_release_ms, 10.0..=5000.0)
+                        .text("Release ms")
+                        .logarithmic(true),
+                );
             });
         }
         ui.add_space(8.0);
@@ -5184,7 +6938,11 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
         // ── Extra Polyphony Layers ────────────────────────────────────────
         for li in 0..2usize {
             let label_col = if li == 0 { mc_cyan } else { mc_orange };
-            ui.label(egui::RichText::new(format!("Layer {} — Additional System", li + 1)).color(label_col).strong());
+            ui.label(
+                egui::RichText::new(format!("Layer {} — Additional System", li + 1))
+                    .color(label_col)
+                    .strong(),
+            );
 
             let (preset_name, active) = {
                 let st = state.lock();
@@ -5194,16 +6952,29 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
 
             ui.horizontal(|ui| {
                 let mut act = active;
-                if ui.checkbox(&mut act, egui::RichText::new("Active").color(egui::Color32::WHITE)).changed() {
+                if ui
+                    .checkbox(
+                        &mut act,
+                        egui::RichText::new("Active").color(egui::Color32::WHITE),
+                    )
+                    .changed()
+                {
                     let mut st = state.lock();
                     st.poly_layers[li].active = act;
                     st.poly_layers[li].changed = true;
                 }
                 egui::ComboBox::new(format!("layer_preset_{}", li), "Preset")
-                    .selected_text(if preset_name.is_empty() { "Select…" } else { &preset_name })
+                    .selected_text(if preset_name.is_empty() {
+                        "Select…"
+                    } else {
+                        &preset_name
+                    })
                     .show_ui(ui, |ui| {
                         for preset in crate::patches::PRESETS {
-                            if ui.selectable_label(preset_name == preset.name, preset.name).clicked() {
+                            if ui
+                                .selectable_label(preset_name == preset.name, preset.name)
+                                .clicked()
+                            {
                                 let mut st = state.lock();
                                 st.poly_layers[li].preset_name = preset.name.to_string();
                                 st.poly_layers[li].active = true;
@@ -5218,20 +6989,42 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
                     let mut st = state.lock();
                     let d = &mut st.poly_layers[li];
                     ui.add(egui::Slider::new(&mut d.level, 0.0..=1.5).text("Level"));
-                    ui.add(egui::Slider::new(&mut d.pan,   -1.0..=1.0).text("Pan"));
-                    let mc = if d.mute { mc_red } else { egui::Color32::from_rgb(40, 60, 40) };
-                    if ui.add(egui::Button::new(egui::RichText::new("M").color(egui::Color32::WHITE))
-                        .fill(mc).min_size(egui::Vec2::new(28.0, 28.0))).clicked() {
+                    ui.add(egui::Slider::new(&mut d.pan, -1.0..=1.0).text("Pan"));
+                    let mc = if d.mute {
+                        mc_red
+                    } else {
+                        egui::Color32::from_rgb(40, 60, 40)
+                    };
+                    if ui
+                        .add(
+                            egui::Button::new(egui::RichText::new("M").color(egui::Color32::WHITE))
+                                .fill(mc)
+                                .min_size(egui::Vec2::new(28.0, 28.0)),
+                        )
+                        .clicked()
+                    {
                         d.mute = !d.mute;
                     }
                 });
                 ui.horizontal(|ui| {
                     let mut st = state.lock();
                     let d = &mut st.poly_layers[li];
-                    ui.add(egui::Slider::new(&mut d.adsr_attack_ms,  1.0..=2000.0).text("A ms").logarithmic(true));
-                    ui.add(egui::Slider::new(&mut d.adsr_decay_ms,   1.0..=2000.0).text("D ms").logarithmic(true));
-                    ui.add(egui::Slider::new(&mut d.adsr_sustain,    0.0..=1.0).text("S"));
-                    ui.add(egui::Slider::new(&mut d.adsr_release_ms, 10.0..=5000.0).text("R ms").logarithmic(true));
+                    ui.add(
+                        egui::Slider::new(&mut d.adsr_attack_ms, 1.0..=2000.0)
+                            .text("A ms")
+                            .logarithmic(true),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut d.adsr_decay_ms, 1.0..=2000.0)
+                            .text("D ms")
+                            .logarithmic(true),
+                    );
+                    ui.add(egui::Slider::new(&mut d.adsr_sustain, 0.0..=1.0).text("S"));
+                    ui.add(
+                        egui::Slider::new(&mut d.adsr_release_ms, 10.0..=5000.0)
+                            .text("R ms")
+                            .logarithmic(true),
+                    );
                 });
             }
             ui.add_space(4.0);
@@ -5240,13 +7033,24 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
         }
 
         // ── Audio Sidechain ───────────────────────────────────────────────
-        ui.label(egui::RichText::new("Audio Sidechain Input").color(mc_orange).strong());
-        ui.label(egui::RichText::new("Modulate parameters from mic/line-in audio energy").color(mc_gray).size(10.0));
+        ui.label(
+            egui::RichText::new("Audio Sidechain Input")
+                .color(mc_orange)
+                .strong(),
+        );
+        ui.label(
+            egui::RichText::new("Modulate parameters from mic/line-in audio energy")
+                .color(mc_gray)
+                .size(10.0),
+        );
         ui.add_space(4.0);
         {
             let mut st = state.lock();
             ui.horizontal(|ui| {
-                ui.checkbox(&mut st.sidechain_enabled, egui::RichText::new("Enable").color(egui::Color32::WHITE));
+                ui.checkbox(
+                    &mut st.sidechain_enabled,
+                    egui::RichText::new("Enable").color(egui::Color32::WHITE),
+                );
                 egui::ComboBox::new("sc_target", "Target")
                     .selected_text(&st.sidechain_target)
                     .show_ui(ui, |ui| {
@@ -5260,13 +7064,16 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
                 let sc_level = *st.sidechain_level_shared.lock();
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Input:").color(mc_gray).size(11.0));
-                    let (resp, painter) = ui.allocate_painter(
-                        egui::Vec2::new(200.0, 12.0), egui::Sense::hover());
+                    let (resp, painter) =
+                        ui.allocate_painter(egui::Vec2::new(200.0, 12.0), egui::Sense::hover());
                     let r = resp.rect;
                     painter.rect_filled(r, 2.0, egui::Color32::from_rgb(20, 20, 30));
                     let filled = sc_level.clamp(0.0, 1.0) * r.width();
                     if filled > 0.0 {
-                        let fill_r = egui::Rect::from_min_max(r.min, egui::Pos2::new(r.min.x + filled, r.max.y));
+                        let fill_r = egui::Rect::from_min_max(
+                            r.min,
+                            egui::Pos2::new(r.min.x + filled, r.max.y),
+                        );
                         painter.rect_filled(fill_r, 1.0, mc_orange);
                     }
                 });
@@ -5278,15 +7085,29 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
         ui.add_space(6.0);
 
         // ── Spectral Freeze ───────────────────────────────────────────────
-        ui.label(egui::RichText::new("Spectral Freeze").color(egui::Color32::from_rgb(100, 200, 255)).strong());
+        ui.label(
+            egui::RichText::new("Spectral Freeze")
+                .color(egui::Color32::from_rgb(100, 200, 255))
+                .strong(),
+        );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             let mut st = state.lock();
             let freeze_active = st.spectral_freeze_active;
-            let freeze_color = if freeze_active { egui::Color32::from_rgb(40, 140, 220) } else { egui::Color32::from_rgb(40, 40, 70) };
-            if ui.add(egui::Button::new(egui::RichText::new("FREEZE").color(egui::Color32::WHITE))
-                .fill(freeze_color).min_size(egui::Vec2::new(80.0, 28.0)))
-                .on_hover_text("Capture live spectral content from the attractor").clicked() {
+            let freeze_color = if freeze_active {
+                egui::Color32::from_rgb(40, 140, 220)
+            } else {
+                egui::Color32::from_rgb(40, 40, 70)
+            };
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("FREEZE").color(egui::Color32::WHITE))
+                        .fill(freeze_color)
+                        .min_size(egui::Vec2::new(80.0, 28.0)),
+                )
+                .on_hover_text("Capture live spectral content from the attractor")
+                .clicked()
+            {
                 // Capture real live partials from the attractor (populated by sim thread)
                 let live = st.spectral_live_partials;
                 let base = st.config.sonification.base_frequency as f32;
@@ -5295,18 +7116,32 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
                 for i in 0..16 {
                     freqs[i] = base * (i + 1) as f32;
                     // Use live partial amplitude if available, else fall back to harmonic series
-                    amps[i] = if live[i] > 0.0 { live[i] } else { 1.0 / (i + 1) as f32 * 0.5 };
+                    amps[i] = if live[i] > 0.0 {
+                        live[i]
+                    } else {
+                        1.0 / (i + 1) as f32 * 0.5
+                    };
                 }
                 st.spectral_freeze_freqs = freqs;
                 st.spectral_freeze_amps = amps;
                 st.spectral_freeze_active = true;
             }
-            if ui.add(egui::Button::new(egui::RichText::new("CLEAR").color(egui::Color32::WHITE))
-                .fill(egui::Color32::from_rgb(80, 40, 40)).min_size(egui::Vec2::new(60.0, 28.0))).clicked() {
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("CLEAR").color(egui::Color32::WHITE))
+                        .fill(egui::Color32::from_rgb(80, 40, 40))
+                        .min_size(egui::Vec2::new(60.0, 28.0)),
+                )
+                .clicked()
+            {
                 st.spectral_freeze_active = false;
             }
             let status = if freeze_active { "FROZEN" } else { "Off" };
-            ui.label(egui::RichText::new(status).color(if freeze_active { mc_cyan } else { mc_gray }).size(12.0));
+            ui.label(
+                egui::RichText::new(status)
+                    .color(if freeze_active { mc_cyan } else { mc_gray })
+                    .size(12.0),
+            );
         });
         // Show frozen partial amplitudes as a mini bar graph when frozen
         {
@@ -5317,9 +7152,17 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
                 let spacing = 2.0f32;
                 let n = st.spectral_freeze_amps.len().min(16);
                 let total_w = n as f32 * (bar_w + spacing);
-                let (resp, painter) = ui.allocate_painter(egui::Vec2::new(total_w, bar_h_max + 4.0), egui::Sense::hover());
+                let (resp, painter) = ui.allocate_painter(
+                    egui::Vec2::new(total_w, bar_h_max + 4.0),
+                    egui::Sense::hover(),
+                );
                 let r = resp.rect;
-                let max_amp = st.spectral_freeze_amps.iter().copied().fold(0.0f32, f32::max).max(1e-6);
+                let max_amp = st
+                    .spectral_freeze_amps
+                    .iter()
+                    .copied()
+                    .fold(0.0f32, f32::max)
+                    .max(1e-6);
                 for (j, &amp_v) in st.spectral_freeze_amps.iter().take(n).enumerate() {
                     let norm = (amp_v / max_amp).clamp(0.0, 1.0);
                     let bh = norm * bar_h_max;
@@ -5338,15 +7181,32 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
         ui.add_space(6.0);
 
         // ── Replay Recording ──────────────────────────────────────────────
-        ui.label(egui::RichText::new("Replay Recording").color(egui::Color32::from_rgb(220, 120, 40)).strong());
+        ui.label(
+            egui::RichText::new("Replay Recording")
+                .color(egui::Color32::from_rgb(220, 120, 40))
+                .strong(),
+        );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             let mut st = state.lock();
             let rec = st.replay_recording;
             let play = st.replay_playing;
-            let rec_color = if rec { mc_red } else { egui::Color32::from_rgb(140, 60, 60) };
-            if ui.add(egui::Button::new(egui::RichText::new(if rec { "STOP REC" } else { "REC" }).color(egui::Color32::WHITE))
-                .fill(rec_color).min_size(egui::Vec2::new(70.0, 28.0))).clicked() {
+            let rec_color = if rec {
+                mc_red
+            } else {
+                egui::Color32::from_rgb(140, 60, 60)
+            };
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new(if rec { "STOP REC" } else { "REC" })
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(rec_color)
+                    .min_size(egui::Vec2::new(70.0, 28.0)),
+                )
+                .clicked()
+            {
                 if rec {
                     st.replay_recording = false;
                     // Auto-save to replays/latest.msr
@@ -5360,9 +7220,22 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
                     st.replay_start_time = std::time::Instant::now();
                 }
             }
-            let play_color = if play { mc_green } else { egui::Color32::from_rgb(40, 100, 40) };
-            if ui.add(egui::Button::new(egui::RichText::new(if play { "STOP" } else { "PLAY FILE" }).color(egui::Color32::WHITE))
-                .fill(play_color).min_size(egui::Vec2::new(80.0, 28.0))).clicked() {
+            let play_color = if play {
+                mc_green
+            } else {
+                egui::Color32::from_rgb(40, 100, 40)
+            };
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new(if play { "STOP" } else { "PLAY FILE" })
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(play_color)
+                    .min_size(egui::Vec2::new(80.0, 28.0)),
+                )
+                .clicked()
+            {
                 if play {
                     st.replay_playing = false;
                     st.replay_play_pos = 0;
@@ -5377,7 +7250,11 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
                 }
             }
             let n = st.replay_events.len();
-            ui.label(egui::RichText::new(format!("{n} events")).color(mc_gray).size(11.0));
+            ui.label(
+                egui::RichText::new(format!("{n} events"))
+                    .color(mc_gray)
+                    .size(11.0),
+            );
         });
 
         ui.add_space(8.0);
@@ -5386,54 +7263,123 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
 
         // ── Looper ────────────────────────────────────────────────────────
         // item 9: looper REC captures intent; audio playback not yet wired to the audio thread.
-        ui.label(egui::RichText::new("Looper  (recording only — playback coming soon)").color(egui::Color32::from_rgb(200, 100, 255)).strong());
+        ui.label(
+            egui::RichText::new("Looper  (recording only — playback coming soon)")
+                .color(egui::Color32::from_rgb(200, 100, 255))
+                .strong(),
+        );
         ui.add_space(4.0);
         {
             let mut st = state.lock();
             ui.horizontal(|ui| {
                 let rec = st.looper_recording;
-                let rec_color = if rec { mc_red } else { egui::Color32::from_rgb(140, 60, 60) };
-                if ui.add(egui::Button::new(egui::RichText::new(if rec { "STOP" } else { "REC" }).color(egui::Color32::WHITE))
-                    .fill(rec_color).min_size(egui::Vec2::new(60.0, 28.0))).clicked() {
+                let rec_color = if rec {
+                    mc_red
+                } else {
+                    egui::Color32::from_rgb(140, 60, 60)
+                };
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(if rec { "STOP" } else { "REC" })
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(rec_color)
+                        .min_size(egui::Vec2::new(60.0, 28.0)),
+                    )
+                    .clicked()
+                {
                     st.looper_recording = !rec;
                 }
                 ui.label(egui::RichText::new("Bars:").color(mc_gray));
                 for bars in [1u32, 2, 4, 8] {
                     let sel = st.looper_bars == bars;
-                    let c = if sel { mc_cyan } else { egui::Color32::from_rgb(40, 40, 70) };
-                    if ui.add(egui::Button::new(egui::RichText::new(bars.to_string()).color(egui::Color32::WHITE))
-                        .fill(c).min_size(egui::Vec2::new(28.0, 24.0))).clicked() {
+                    let c = if sel {
+                        mc_cyan
+                    } else {
+                        egui::Color32::from_rgb(40, 40, 70)
+                    };
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(bars.to_string()).color(egui::Color32::WHITE),
+                            )
+                            .fill(c)
+                            .min_size(egui::Vec2::new(28.0, 24.0)),
+                        )
+                        .clicked()
+                    {
                         st.looper_bars = bars;
                     }
                 }
-                ui.add(egui::Slider::new(&mut st.looper_bpm, 60.0..=200.0).text("BPM").integer());
+                ui.add(
+                    egui::Slider::new(&mut st.looper_bpm, 60.0..=200.0)
+                        .text("BPM")
+                        .integer(),
+                );
             });
             ui.add_space(4.0);
             // Layer list
             let n_layers = st.looper_layers.len();
             if n_layers == 0 {
-                ui.label(egui::RichText::new("No loops recorded — hit REC to start").color(mc_gray).size(11.0).italics());
+                ui.label(
+                    egui::RichText::new("No loops recorded — hit REC to start")
+                        .color(mc_gray)
+                        .size(11.0)
+                        .italics(),
+                );
             }
             for i in 0..n_layers {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("L{}", i + 1)).color(mc_gray).size(11.0));
+                    ui.label(
+                        egui::RichText::new(format!("L{}", i + 1))
+                            .color(mc_gray)
+                            .size(11.0),
+                    );
                     let active = st.looper_layers[i].active;
-                    let ac = if active { mc_green } else { egui::Color32::from_rgb(40, 40, 70) };
-                    if ui.add(egui::Button::new(egui::RichText::new(if active { "ON" } else { "OFF" }).color(egui::Color32::WHITE))
-                        .fill(ac).min_size(egui::Vec2::new(36.0, 22.0))).clicked() {
+                    let ac = if active {
+                        mc_green
+                    } else {
+                        egui::Color32::from_rgb(40, 40, 70)
+                    };
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(if active { "ON" } else { "OFF" })
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(ac)
+                            .min_size(egui::Vec2::new(36.0, 22.0)),
+                        )
+                        .clicked()
+                    {
                         st.looper_layers[i].active = !active;
                     }
-                    ui.add(egui::Slider::new(&mut st.looper_layers[i].level, 0.0..=1.0).text("Vol"));
-                    if ui.add(egui::Button::new(egui::RichText::new("X").color(egui::Color32::WHITE))
-                        .fill(mc_red).min_size(egui::Vec2::new(22.0, 22.0))).clicked() {
+                    ui.add(
+                        egui::Slider::new(&mut st.looper_layers[i].level, 0.0..=1.0).text("Vol"),
+                    );
+                    if ui
+                        .add(
+                            egui::Button::new(egui::RichText::new("X").color(egui::Color32::WHITE))
+                                .fill(mc_red)
+                                .min_size(egui::Vec2::new(22.0, 22.0)),
+                        )
+                        .clicked()
+                    {
                         st.looper_layers.remove(i);
                         // Break since we modified the vec
                         return;
                     }
                 });
             }
-            if ui.add(egui::Button::new(egui::RichText::new("CLEAR ALL").color(egui::Color32::WHITE))
-                .fill(egui::Color32::from_rgb(80, 40, 40)).min_size(egui::Vec2::new(90.0, 24.0))).clicked() {
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("CLEAR ALL").color(egui::Color32::WHITE))
+                        .fill(egui::Color32::from_rgb(80, 40, 40))
+                        .min_size(egui::Vec2::new(90.0, 24.0)),
+                )
+                .clicked()
+            {
                 st.looper_layers.clear();
             }
         }
@@ -5442,8 +7388,12 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
 
 fn save_replay_file(events: &[crate::ui::ReplayEvent], path: &str) -> anyhow::Result<()> {
     use std::io::Write;
-    let dir = std::path::Path::new(path).parent().unwrap_or(std::path::Path::new("."));
-    if !dir.exists() { std::fs::create_dir_all(dir)?; }
+    let dir = std::path::Path::new(path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    if !dir.exists() {
+        std::fs::create_dir_all(dir)?;
+    }
     let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
     // Header: sample_rate u32, version u8
     f.write_all(&44100u32.to_le_bytes())?;
@@ -5468,13 +7418,23 @@ fn load_replay_file(path: &str) -> anyhow::Result<Vec<crate::ui::ReplayEvent>> {
     let mut events = Vec::new();
     loop {
         let mut ts_buf = [0u8; 4];
-        if f.read_exact(&mut ts_buf).is_err() { break; }
+        if f.read_exact(&mut ts_buf).is_err() {
+            break;
+        }
         let timestamp_ms = u32::from_le_bytes(ts_buf);
-        if f.read_exact(&mut buf1).is_err() { break; }
+        if f.read_exact(&mut buf1).is_err() {
+            break;
+        }
         let param_id = buf1[0];
-        if f.read_exact(&mut buf4).is_err() { break; }
+        if f.read_exact(&mut buf4).is_err() {
+            break;
+        }
         let value = f32::from_le_bytes(buf4);
-        events.push(crate::ui::ReplayEvent { timestamp_ms, param_id, value });
+        events.push(crate::ui::ReplayEvent {
+            timestamp_ms,
+            param_id,
+            value,
+        });
     }
     Ok(events)
 }
@@ -5510,7 +7470,9 @@ fn equation_text(system: &str) -> &'static str {
         "lorenz" => "x' = s(y-x)\ny' = x(r-z)-y\nz' = xy-bz",
         "rossler" => "x' = -y-z\ny' = x+ay\nz' = b+z(x-c)",
         "double_pendulum" => "th1'' = f(th1,th2,w1,w2)\nth2'' = g(th1,th2,w1,w2)",
-        "geodesic_torus" => "phi'' = -2(r sin(th)/(R+r cos(th)))phi'th'\nth'' = (R+r cos(th))sin(th)/r * phi'^2",
+        "geodesic_torus" => {
+            "phi'' = -2(r sin(th)/(R+r cos(th)))phi'th'\nth'' = (R+r cos(th))sin(th)/r * phi'^2"
+        }
         "kuramoto" => "th'_i = w_i + K/N sum_j sin(th_j-th_i)",
         "three_body" => "r''_i = G sum_j m_j(r_j-r_i)/|r_j-r_i|^3",
         _ => "",
@@ -5621,10 +7583,20 @@ fn draw_poincare_tab(ui: &mut Ui, state: &SharedState) {
     );
 
     // Axis labels
-    painter.text(Pos2::new(plot_rect.center().x, plot_rect.bottom() + 16.0),
-        Align2::CENTER_TOP, "x", FontId::proportional(12.0), Color32::from_rgb(160, 190, 220));
-    painter.text(Pos2::new(plot_rect.left() - 18.0, plot_rect.center().y),
-        Align2::CENTER_CENTER, "y", FontId::proportional(12.0), Color32::from_rgb(160, 190, 220));
+    painter.text(
+        Pos2::new(plot_rect.center().x, plot_rect.bottom() + 16.0),
+        Align2::CENTER_TOP,
+        "x",
+        FontId::proportional(12.0),
+        Color32::from_rgb(160, 190, 220),
+    );
+    painter.text(
+        Pos2::new(plot_rect.left() - 18.0, plot_rect.center().y),
+        Align2::CENTER_CENTER,
+        "y",
+        FontId::proportional(12.0),
+        Color32::from_rgb(160, 190, 220),
+    );
 
     // Scatter plot
     let dot_radius = 2.0f32;
@@ -5669,25 +7641,43 @@ fn draw_math_view(
     let mut y = rect.top() + 20.0;
     let x = rect.left() + 20.0;
 
-    painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
+    painter.text(
+        Pos2::new(x, y),
+        Align2::LEFT_TOP,
         system_display_name(system_name),
         FontId::proportional(20.0),
-        Color32::from_rgb(120, 195, 255));
+        Color32::from_rgb(120, 195, 255),
+    );
     y += 32.0;
 
     let eq_lines = equation_lines(system_name);
-    painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
-        "Equations of Motion:", FontId::proportional(13.0), Color32::from_rgb(150, 150, 200));
+    painter.text(
+        Pos2::new(x, y),
+        Align2::LEFT_TOP,
+        "Equations of Motion:",
+        FontId::proportional(13.0),
+        Color32::from_rgb(150, 150, 200),
+    );
     y += 20.0;
     for line in &eq_lines {
-        painter.text(Pos2::new(x + 10.0, y), Align2::LEFT_TOP,
-            line, FontId::monospace(12.0), Color32::from_rgb(180, 210, 255));
+        painter.text(
+            Pos2::new(x + 10.0, y),
+            Align2::LEFT_TOP,
+            line,
+            FontId::monospace(12.0),
+            Color32::from_rgb(180, 210, 255),
+        );
         y += 18.0;
     }
     y += 15.0;
 
-    painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
-        "State  ->  dx/dt", FontId::proportional(13.0), Color32::from_rgb(150, 150, 200));
+    painter.text(
+        Pos2::new(x, y),
+        Align2::LEFT_TOP,
+        "State  ->  dx/dt",
+        FontId::proportional(13.0),
+        Color32::from_rgb(150, 150, 200),
+    );
     y += 20.0;
     let var_names = dim_names(system_name);
     for (i, &val) in current_state.iter().enumerate().take(8) {
@@ -5702,31 +7692,53 @@ fn draw_math_view(
         let bar_color = hue_to_color(hue, 0.6);
         painter.rect_filled(bar_rect, 2.0, bar_color);
 
-        painter.text(Pos2::new(x + 130.0, y), Align2::LEFT_TOP,
-            state_text, FontId::monospace(11.0), Color32::from_rgb(200, 220, 200));
-        painter.text(Pos2::new(x + 280.0, y), Align2::LEFT_TOP,
-            deriv_text, FontId::monospace(11.0), Color32::from_rgb(220, 200, 100));
+        painter.text(
+            Pos2::new(x + 130.0, y),
+            Align2::LEFT_TOP,
+            state_text,
+            FontId::monospace(11.0),
+            Color32::from_rgb(200, 220, 200),
+        );
+        painter.text(
+            Pos2::new(x + 280.0, y),
+            Align2::LEFT_TOP,
+            deriv_text,
+            FontId::monospace(11.0),
+            Color32::from_rgb(220, 200, 100),
+        );
         y += 16.0;
     }
 
     y += 15.0;
-    painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
+    painter.text(
+        Pos2::new(x, y),
+        Align2::LEFT_TOP,
         format!("Chaos Level: {:.1}%", chaos_level * 100.0),
-        FontId::proportional(13.0), Color32::from_rgb(150, 150, 200));
+        FontId::proportional(13.0),
+        Color32::from_rgb(150, 150, 200),
+    );
     y += 20.0;
     let meter_w = (mid_x - x - 40.0).max(100.0);
     let meter_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(meter_w, 16.0));
     painter.rect_filled(meter_rect, 4.0, Color32::from_rgb(20, 20, 40));
     let fill_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(meter_w * chaos_level, 16.0));
-    let chaos_color = lerp_color(Color32::from_rgb(0, 100, 255), Color32::from_rgb(255, 30, 30), chaos_level);
+    let chaos_color = lerp_color(
+        Color32::from_rgb(0, 100, 255),
+        Color32::from_rgb(255, 30, 30),
+        chaos_level,
+    );
     painter.rect_filled(fill_rect, 4.0, chaos_color);
 
     // Lyapunov exponent spectrum
     if !lyapunov_spectrum.is_empty() {
         y += 20.0;
-        painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
+        painter.text(
+            Pos2::new(x, y),
+            Align2::LEFT_TOP,
             "Lyapunov Spectrum:",
-            FontId::proportional(13.0), Color32::from_rgb(150, 150, 200));
+            FontId::proportional(13.0),
+            Color32::from_rgb(150, 150, 200),
+        );
         y += 20.0;
         let half_w = (mid_x - x - 40.0).max(60.0) * 0.5;
         let center_x = x + half_w;
@@ -5745,9 +7757,13 @@ fn draw_math_view(
             let bar_rect = Rect::from_min_size(Pos2::new(bar_x, y + 2.0), Vec2::new(bar_len, 12.0));
             painter.rect_filled(bar_rect, 2.0, bar_color);
             let sign = if lambda >= 0.0 { "+" } else { "" };
-            painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
+            painter.text(
+                Pos2::new(x, y),
+                Align2::LEFT_TOP,
                 format!("λ{} = {}{:.4}", i + 1, sign, lambda),
-                FontId::monospace(11.0), bar_color);
+                FontId::monospace(11.0),
+                bar_color,
+            );
             y += 16.0;
         }
         y += 4.0;
@@ -5756,7 +7772,9 @@ fn draw_math_view(
             let mut sum = 0.0f64;
             let mut ky_j = 0usize;
             for (j, &lam) in lyapunov_spectrum.iter().enumerate() {
-                if sum + lam < 0.0 { break; }
+                if sum + lam < 0.0 {
+                    break;
+                }
                 sum += lam;
                 ky_j = j + 1;
             }
@@ -5764,9 +7782,13 @@ fn draw_math_view(
                 let last_neg = lyapunov_spectrum[ky_j];
                 if last_neg.abs() > 1e-12 {
                     let d_ky = ky_j as f64 + sum / last_neg.abs();
-                    painter.text(Pos2::new(x, y), Align2::LEFT_TOP,
+                    painter.text(
+                        Pos2::new(x, y),
+                        Align2::LEFT_TOP,
                         format!("D_KY ≈ {:.3}  (Kaplan-Yorke dim.)", d_ky),
-                        FontId::monospace(11.0), Color32::from_rgb(180, 180, 100));
+                        FontId::monospace(11.0),
+                        Color32::from_rgb(180, 180, 100),
+                    );
                     y += 16.0;
                 }
             }
@@ -5776,12 +7798,12 @@ fn draw_math_view(
     if !attractor_type.is_empty() && attractor_type != "unknown" {
         y += 6.0;
         let atype_color = match attractor_type {
-            "chaos"       => Color32::from_rgb(255, 90, 60),
-            "hyperchaos"  => Color32::from_rgb(255, 40, 160),
+            "chaos" => Color32::from_rgb(255, 90, 60),
+            "hyperchaos" => Color32::from_rgb(255, 40, 160),
             "limit_cycle" => Color32::from_rgb(60, 200, 120),
-            "torus"       => Color32::from_rgb(80, 180, 255),
+            "torus" => Color32::from_rgb(80, 180, 255),
             "fixed_point" => Color32::from_rgb(200, 200, 200),
-            _             => Color32::from_rgb(180, 180, 100),
+            _ => Color32::from_rgb(180, 180, 100),
         };
         painter.text(
             Pos2::new(x, y),
@@ -5849,10 +7871,7 @@ fn draw_math_view(
         let _ = y; // suppress unused warning
     }
 
-    let right_rect = Rect::from_min_max(
-        Pos2::new(mid_x + 10.0, rect.top() + 10.0),
-        rect.max,
-    );
+    let right_rect = Rect::from_min_max(Pos2::new(mid_x + 10.0, rect.top() + 10.0), rect.max);
 
     if system_name == "kuramoto" && !kuramoto_phases.is_empty() {
         draw_kuramoto_circle(&painter, right_rect, kuramoto_phases, order_param);
@@ -5868,7 +7887,11 @@ fn draw_math_view(
             Pos2::new(mid_x - 10.0, rect.max.y - 10.0),
         );
         painter.rect_filled(graph_rect, 3.0, Color32::from_rgb(8, 12, 28));
-        painter.rect_stroke(graph_rect, 3.0, Stroke::new(1.0, Color32::from_rgb(40, 50, 80)));
+        painter.rect_stroke(
+            graph_rect,
+            3.0,
+            Stroke::new(1.0, Color32::from_rgb(40, 50, 80)),
+        );
         painter.text(
             Pos2::new(graph_rect.left() + 4.0, graph_rect.top() + 2.0),
             Align2::LEFT_TOP,
@@ -5881,7 +7904,10 @@ fn draw_math_view(
         let mut dx = graph_rect.left();
         while dx < graph_rect.right() {
             painter.line_segment(
-                [Pos2::new(dx, zero_y), Pos2::new((dx + 6.0).min(graph_rect.right()), zero_y)],
+                [
+                    Pos2::new(dx, zero_y),
+                    Pos2::new((dx + 6.0).min(graph_rect.right()), zero_y),
+                ],
                 Stroke::new(1.0, Color32::from_rgba_premultiplied(80, 80, 140, 180)),
             );
             dx += 12.0;
@@ -5905,7 +7931,10 @@ fn draw_math_view(
                     .clamp(graph_rect.top(), graph_rect.bottom());
                 let y1 = (zero_y - (lam / max_abs) * (graph_rect.height() * 0.45))
                     .clamp(graph_rect.top(), graph_rect.bottom());
-                painter.line_segment([Pos2::new(x0, y0), Pos2::new(x1, y1)], Stroke::new(1.5, color));
+                painter.line_segment(
+                    [Pos2::new(x0, y0), Pos2::new(x1, y1)],
+                    Stroke::new(1.5, color),
+                );
             }
         }
     }
@@ -5915,14 +7944,31 @@ fn draw_kuramoto_circle(painter: &Painter, rect: Rect, phases: &[f64], order_par
     let center = rect.center();
     let radius = (rect.width().min(rect.height()) * 0.4).min(160.0);
 
-    painter.circle_stroke(center, radius, Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 50, 80, 150)));
-    painter.circle_stroke(center, radius * 0.5, Stroke::new(0.5, Color32::from_rgba_premultiplied(30, 30, 60, 100)));
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 50, 80, 150)),
+    );
+    painter.circle_stroke(
+        center,
+        radius * 0.5,
+        Stroke::new(0.5, Color32::from_rgba_premultiplied(30, 30, 60, 100)),
+    );
 
-    painter.text(center + Vec2::new(0.0, -radius - 16.0), Align2::CENTER_BOTTOM,
-        "Kuramoto Phase Circle", FontId::proportional(13.0), Color32::from_rgb(150, 150, 200));
-    painter.text(center + Vec2::new(0.0, radius + 8.0), Align2::CENTER_TOP,
+    painter.text(
+        center + Vec2::new(0.0, -radius - 16.0),
+        Align2::CENTER_BOTTOM,
+        "Kuramoto Phase Circle",
+        FontId::proportional(13.0),
+        Color32::from_rgb(150, 150, 200),
+    );
+    painter.text(
+        center + Vec2::new(0.0, radius + 8.0),
+        Align2::CENTER_TOP,
         format!("Order parameter r = {:.3}", order_param),
-        FontId::proportional(11.0), Color32::from_rgb(200, 200, 100));
+        FontId::proportional(11.0),
+        Color32::from_rgb(200, 200, 100),
+    );
 
     let n = phases.len();
     for (i, &phase) in phases.iter().enumerate() {
@@ -5930,18 +7976,27 @@ fn draw_kuramoto_circle(painter: &Painter, rect: Rect, phases: &[f64], order_par
         let py = center.y - radius * phase.sin() as f32;
         let hue = i as f32 / n as f32;
         let col = hue_to_color(hue, 0.9);
-        painter.circle_filled(Pos2::new(px, py), 9.0, Color32::from_rgba_premultiplied(col.r(), col.g(), col.b(), 60));
+        painter.circle_filled(
+            Pos2::new(px, py),
+            9.0,
+            Color32::from_rgba_premultiplied(col.r(), col.g(), col.b(), 60),
+        );
         painter.circle_filled(Pos2::new(px, py), 5.0, col);
     }
 
-    let (sin_sum, cos_sum): (f64, f64) = phases.iter().fold((0.0, 0.0), |(s, c), &ph| (s + ph.sin(), c + ph.cos()));
+    let (sin_sum, cos_sum): (f64, f64) = phases
+        .iter()
+        .fold((0.0, 0.0), |(s, c), &ph| (s + ph.sin(), c + ph.cos()));
     let mean_phase = sin_sum.atan2(cos_sum) as f32;
     let r = order_param as f32;
     let arrow_end = Pos2::new(
         center.x + radius * r * mean_phase.cos(),
         center.y - radius * r * mean_phase.sin(),
     );
-    painter.line_segment([center, arrow_end], Stroke::new(3.0, Color32::from_rgb(255, 220, 0)));
+    painter.line_segment(
+        [center, arrow_end],
+        Stroke::new(3.0, Color32::from_rgb(255, 220, 0)),
+    );
     painter.circle_filled(arrow_end, 5.0, Color32::from_rgb(255, 220, 0));
     painter.circle_filled(center, 3.0, Color32::from_rgb(200, 200, 200));
 }
@@ -5950,16 +8005,31 @@ fn draw_phase_clock(painter: &Painter, rect: Rect, state: &[f64], deriv: &[f64])
     let center = rect.center();
     let radius = (rect.width().min(rect.height()) * 0.38).min(150.0);
 
-    painter.circle_stroke(center, radius, Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 50, 80, 150)));
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 50, 80, 150)),
+    );
 
-    painter.text(center + Vec2::new(0.0, -radius - 16.0), Align2::CENTER_BOTTOM,
-        "Phase Velocity", FontId::proportional(13.0), Color32::from_rgb(150, 150, 200));
+    painter.text(
+        center + Vec2::new(0.0, -radius - 16.0),
+        Align2::CENTER_BOTTOM,
+        "Phase Velocity",
+        FontId::proportional(13.0),
+        Color32::from_rgb(150, 150, 200),
+    );
 
     for i in 0..12 {
         let a = i as f32 * std::f32::consts::TAU / 12.0;
-        let inner = Pos2::new(center.x + (radius - 8.0) * a.cos(), center.y - (radius - 8.0) * a.sin());
+        let inner = Pos2::new(
+            center.x + (radius - 8.0) * a.cos(),
+            center.y - (radius - 8.0) * a.sin(),
+        );
         let outer = Pos2::new(center.x + radius * a.cos(), center.y - radius * a.sin());
-        painter.line_segment([inner, outer], Stroke::new(1.0, Color32::from_rgba_premultiplied(60, 60, 100, 150)));
+        painter.line_segment(
+            [inner, outer],
+            Stroke::new(1.0, Color32::from_rgba_premultiplied(60, 60, 100, 150)),
+        );
     }
 
     if state.len() >= 2 && deriv.len() >= 2 {
@@ -5976,7 +8046,10 @@ fn draw_phase_clock(painter: &Painter, rect: Rect, state: &[f64], deriv: &[f64])
             center.x + radius * 0.8 * angle.cos(),
             center.y - radius * 0.8 * angle.sin(),
         );
-        painter.line_segment([center, pos_end], Stroke::new(2.0, Color32::from_rgb(0, 180, 255)));
+        painter.line_segment(
+            [center, pos_end],
+            Stroke::new(2.0, Color32::from_rgb(0, 180, 255)),
+        );
         painter.circle_filled(pos_end, 4.0, Color32::from_rgb(0, 200, 255));
 
         let vel_scale = (dmag / 100.0).clamp(0.0, 1.0);
@@ -5984,12 +8057,19 @@ fn draw_phase_clock(painter: &Painter, rect: Rect, state: &[f64], deriv: &[f64])
             center.x + radius * vel_scale * dangle.cos(),
             center.y - radius * vel_scale * dangle.sin(),
         );
-        painter.line_segment([center, vel_end], Stroke::new(2.0, Color32::from_rgb(255, 200, 0)));
+        painter.line_segment(
+            [center, vel_end],
+            Stroke::new(2.0, Color32::from_rgb(255, 200, 0)),
+        );
         painter.circle_filled(vel_end, 4.0, Color32::from_rgb(255, 220, 0));
 
-        painter.text(center + Vec2::new(0.0, radius + 8.0), Align2::CENTER_TOP,
+        painter.text(
+            center + Vec2::new(0.0, radius + 8.0),
+            Align2::CENTER_TOP,
             format!("|v| = {:.2}", dmag),
-            FontId::proportional(11.0), Color32::from_rgb(200, 200, 100));
+            FontId::proportional(11.0),
+            Color32::from_rgb(200, 200, 100),
+        );
     }
 
     painter.circle_filled(center, 3.0, Color32::from_rgb(200, 200, 200));

@@ -4,7 +4,7 @@ use super::DynamicalSystem;
 /// dx/dt = β*x(t-τ)/(1 + x(t-τ)^n) - γ*x
 pub struct MackeyGlass {
     history: Vec<f64>,
-    head: usize,       // index of oldest value (= x(t-τ))
+    head: usize, // index of oldest value (= x(t-τ))
     buf_len: usize,
     current_x: f64,
     pub beta: f64,
@@ -76,10 +76,18 @@ impl MackeyGlass {
 }
 
 impl DynamicalSystem for MackeyGlass {
-    fn state(&self) -> &[f64] { &self.observable }
-    fn dimension(&self) -> usize { 3 }
-    fn name(&self) -> &str { "mackey_glass" }
-    fn speed(&self) -> f64 { self.speed }
+    fn state(&self) -> &[f64] {
+        &self.observable
+    }
+    fn dimension(&self) -> usize {
+        3
+    }
+    fn name(&self) -> &str {
+        "mackey_glass"
+    }
+    fn speed(&self) -> f64 {
+        self.speed
+    }
 
     fn deriv_at(&self, _state: &[f64]) -> Vec<f64> {
         vec![0.0; 3]
@@ -114,8 +122,12 @@ impl DynamicalSystem for MackeyGlass {
             if v.is_finite() {
                 self.current_x = v;
                 self.prev_deriv = 0.0;
-                for slot in &mut self.history { *slot = v; }
-                for o in &mut self.observable { *o = v; }
+                for slot in &mut self.history {
+                    *slot = v;
+                }
+                for o in &mut self.observable {
+                    *o = v;
+                }
             }
         }
     }

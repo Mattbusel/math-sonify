@@ -3,12 +3,14 @@
 //! Renders the horizontal timeline bar showing scenes, morph segments, and a playhead
 //! in the ARRANGE tab.
 
-use egui::{Color32, FontId, Pos2, Sense, Stroke, Vec2, Align2};
-use crate::arrangement::{Scene, total_duration};
+use crate::arrangement::{total_duration, Scene};
+use egui::{Align2, Color32, FontId, Pos2, Sense, Stroke, Vec2};
 
 pub(crate) fn draw_arrangement_timeline(ui: &mut egui::Ui, scenes: &[Scene], elapsed: f32) {
     let total = total_duration(scenes);
-    if total < 0.001 { return; }
+    if total < 0.001 {
+        return;
+    }
 
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::hover());
     let painter = ui.painter();
@@ -35,19 +37,33 @@ pub(crate) fn draw_arrangement_timeline(ui: &mut egui::Ui, scenes: &[Scene], ela
         // Morph segment (darker), skip for first scene
         if ord > 0 {
             let w = rect.width() * scene.morph_secs / total;
-            let r = egui::Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(w, rect.height()));
-            painter.rect_filled(r, 0.0, Color32::from_rgba_premultiplied(col.r()/3, col.g()/3, col.b()/3, 200));
+            let r =
+                egui::Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(w, rect.height()));
+            painter.rect_filled(
+                r,
+                0.0,
+                Color32::from_rgba_premultiplied(col.r() / 3, col.g() / 3, col.b() / 3, 200),
+            );
             x += w;
         }
 
         // Hold segment
         let w = rect.width() * scene.hold_secs / total;
         let r = egui::Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(w, rect.height()));
-        painter.rect_filled(r, 0.0, Color32::from_rgba_premultiplied(col.r(), col.g(), col.b(), 200));
+        painter.rect_filled(
+            r,
+            0.0,
+            Color32::from_rgba_premultiplied(col.r(), col.g(), col.b(), 200),
+        );
 
         // Scene name label
-        painter.text(Pos2::new(x + 4.0, rect.center().y), Align2::LEFT_CENTER,
-            &scene.name, FontId::proportional(10.0), Color32::WHITE);
+        painter.text(
+            Pos2::new(x + 4.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            &scene.name,
+            FontId::proportional(10.0),
+            Color32::WHITE,
+        );
 
         x += w;
     }

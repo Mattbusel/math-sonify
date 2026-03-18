@@ -1,20 +1,25 @@
 /// Integration tests for math-sonify.
 use math_sonify_plugin::{
     config::{Config, SonificationConfig},
-    systems::{DynamicalSystem, Lorenz, Rossler, DoublePendulum, Kuramoto, ThreeBody,
-              Duffing, CoupledMapLattice, HenonMap, MackeyGlass},
     sonification::{
-        Scale, SonifMode, DirectMapping, Sonification,
-        quantize_to_scale, chord_intervals_for,
+        chord_intervals_for, quantize_to_scale, DirectMapping, Scale, SonifMode, Sonification,
+    },
+    systems::{
+        CoupledMapLattice, DoublePendulum, Duffing, DynamicalSystem, HenonMap, Kuramoto, Lorenz,
+        MackeyGlass, Rossler, ThreeBody,
     },
 };
 
-fn all_finite(s: &[f64]) -> bool { s.iter().all(|v| v.is_finite()) }
+fn all_finite(s: &[f64]) -> bool {
+    s.iter().all(|v| v.is_finite())
+}
 
 #[test]
 fn lorenz_stays_on_attractor() {
     let mut sys = Lorenz::new(10.0, 28.0, 2.6667);
-    for _ in 0..50_000 { sys.step(0.001); }
+    for _ in 0..50_000 {
+        sys.step(0.001);
+    }
     let s = sys.state();
     assert!(all_finite(s));
     assert!(s[0].abs() < 30.0 && s[1].abs() < 30.0 && s[2] > 0.0 && s[2] < 60.0);
@@ -23,30 +28,49 @@ fn lorenz_stays_on_attractor() {
 #[test]
 fn lorenz_z_stays_positive() {
     let mut sys = Lorenz::new(10.0, 28.0, 2.6667);
-    for _ in 0..5_000 { sys.step(0.001); }
-    for _ in 0..20_000 { sys.step(0.001); assert!(sys.state()[2] > 0.0); }
+    for _ in 0..5_000 {
+        sys.step(0.001);
+    }
+    for _ in 0..20_000 {
+        sys.step(0.001);
+        assert!(sys.state()[2] > 0.0);
+    }
 }
 
 #[test]
 fn lorenz_deterministic_trajectory() {
-    let (mut s1, mut s2) = (Lorenz::new(10.0, 28.0, 2.6667), Lorenz::new(10.0, 28.0, 2.6667));
-    for _ in 0..1_000 { s1.step(0.001); s2.step(0.001); }
-    for (a, b) in s1.state().iter().zip(s2.state().iter()) { assert!((a - b).abs() < 1e-14); }
+    let (mut s1, mut s2) = (
+        Lorenz::new(10.0, 28.0, 2.6667),
+        Lorenz::new(10.0, 28.0, 2.6667),
+    );
+    for _ in 0..1_000 {
+        s1.step(0.001);
+        s2.step(0.001);
+    }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-14);
+    }
 }
 
 #[test]
 fn lorenz_zero_dt_no_change() {
     let mut sys = Lorenz::new(10.0, 28.0, 2.6667);
-    for _ in 0..100 { sys.step(0.001); }
+    for _ in 0..100 {
+        sys.step(0.001);
+    }
     let before: Vec<f64> = sys.state().to_vec();
     sys.step(0.0);
-    for (a, b) in before.iter().zip(sys.state().iter()) { assert!((a - b).abs() < 1e-14); }
+    for (a, b) in before.iter().zip(sys.state().iter()) {
+        assert!((a - b).abs() < 1e-14);
+    }
 }
 
 #[test]
 fn rossler_stays_bounded() {
     let mut sys = Rossler::new(0.2, 0.2, 5.7);
-    for _ in 0..30_000 { sys.step(0.001); }
+    for _ in 0..30_000 {
+        sys.step(0.001);
+    }
     let s = sys.state();
     assert!(all_finite(s) && s[0].abs() < 15.0 && s[1].abs() < 15.0 && s[2] > 0.0 && s[2] < 25.0);
 }
@@ -54,8 +78,13 @@ fn rossler_stays_bounded() {
 #[test]
 fn rossler_z_stays_positive() {
     let mut sys = Rossler::new(0.2, 0.2, 5.7);
-    for _ in 0..5_000 { sys.step(0.001); }
-    for _ in 0..10_000 { sys.step(0.001); assert!(sys.state()[2] > 0.0); }
+    for _ in 0..5_000 {
+        sys.step(0.001);
+    }
+    for _ in 0..10_000 {
+        sys.step(0.001);
+        assert!(sys.state()[2] > 0.0);
+    }
 }
 
 #[test]
@@ -72,7 +101,9 @@ fn double_pendulum_energy_conserved_small_angles() {
         t - (m1 + m2) * g * l1 * th1.cos() - m2 * g * l2 * th2.cos()
     };
     let e0 = hamiltonian(sys.state());
-    for _ in 0..10_000 { sys.step(0.001); }
+    for _ in 0..10_000 {
+        sys.step(0.001);
+    }
     let e1 = hamiltonian(sys.state());
     assert!(((e1 - e0) / e0.abs()).abs() < 0.02);
 }
@@ -90,14 +121,18 @@ fn double_pendulum_state_stays_finite_and_bounded() {
 #[test]
 fn kuramoto_below_critical_coupling_stays_incoherent() {
     let mut sys = Kuramoto::new(16, 0.1);
-    for _ in 0..20_000 { sys.step(0.01); }
+    for _ in 0..20_000 {
+        sys.step(0.01);
+    }
     assert!(sys.order_parameter() < 0.5);
 }
 
 #[test]
 fn kuramoto_above_critical_coupling_synchronizes() {
     let mut sys = Kuramoto::new(16, 5.0);
-    for _ in 0..50_000 { sys.step(0.01); }
+    for _ in 0..50_000 {
+        sys.step(0.01);
+    }
     assert!(sys.order_parameter() > 0.5);
 }
 
@@ -105,7 +140,9 @@ fn kuramoto_above_critical_coupling_synchronizes() {
 fn kuramoto_order_parameter_always_in_unit_interval() {
     for &k in &[0.0_f64, 0.5, 1.0, 2.0, 10.0, 50.0] {
         let mut sys = Kuramoto::new(8, k);
-        for _ in 0..5_000 { sys.step(0.01); }
+        for _ in 0..5_000 {
+            sys.step(0.01);
+        }
         let r = sys.order_parameter();
         assert!(r >= 0.0 && r <= 1.0 + 1e-9, "K={} r={}", k, r);
     }
@@ -114,16 +151,25 @@ fn kuramoto_order_parameter_always_in_unit_interval() {
 #[test]
 fn three_body_energy_conserved() {
     let mut sys = ThreeBody::new([1.0, 1.0, 1.0]);
-    for _ in 0..10_000 { sys.step(0.001); }
+    for _ in 0..10_000 {
+        sys.step(0.001);
+    }
     assert!(sys.energy_error < 0.01);
 }
 
 #[test]
 fn quantize_to_scale_always_audible_range() {
     let scales = [
-        Scale::Pentatonic, Scale::Chromatic, Scale::JustIntonation,
-        Scale::Microtonal, Scale::Edo19, Scale::Edo31, Scale::Edo24,
-        Scale::WholeTone, Scale::Phrygian, Scale::Lydian,
+        Scale::Pentatonic,
+        Scale::Chromatic,
+        Scale::JustIntonation,
+        Scale::Microtonal,
+        Scale::Edo19,
+        Scale::Edo31,
+        Scale::Edo24,
+        Scale::WholeTone,
+        Scale::Phrygian,
+        Scale::Lydian,
     ];
     for &scale in &scales {
         for i in 0..=200 {
@@ -155,9 +201,16 @@ fn quantize_to_scale_t_zero_equals_base() {
 #[test]
 fn quantize_to_scale_all_scales_finite_positive() {
     let scales = [
-        Scale::Pentatonic, Scale::Chromatic, Scale::JustIntonation,
-        Scale::Microtonal, Scale::Edo19, Scale::Edo31, Scale::Edo24,
-        Scale::WholeTone, Scale::Phrygian, Scale::Lydian,
+        Scale::Pentatonic,
+        Scale::Chromatic,
+        Scale::JustIntonation,
+        Scale::Microtonal,
+        Scale::Edo19,
+        Scale::Edo31,
+        Scale::Edo24,
+        Scale::WholeTone,
+        Scale::Phrygian,
+        Scale::Lydian,
     ];
     for &scale in &scales {
         for i in 0..=50 {
@@ -191,7 +244,9 @@ fn polyphony_all_voices_finite_and_non_negative() {
     let mut mapper = DirectMapping::new();
     let cfg = SonificationConfig::default();
     let state = vec![5.0_f64, -10.0, 3.14, 0.5];
-    for _ in 0..20 { mapper.map(&state, 2.0, &cfg); }
+    for _ in 0..20 {
+        mapper.map(&state, 2.0, &cfg);
+    }
     let p = mapper.map(&state, 2.0, &cfg);
     for i in 0..4 {
         assert!(p.freqs[i].is_finite() && p.freqs[i] >= 0.0);
@@ -239,20 +294,29 @@ fn config_round_trip_lossless() {
     let mut r: Config = toml::from_str(&s).expect("deserialize");
     r.validate();
     assert!((orig.lorenz.sigma - r.lorenz.sigma).abs() < 1e-9);
-    assert!((orig.rossler.c   - r.rossler.c).abs()   < 1e-9);
+    assert!((orig.rossler.c - r.rossler.c).abs() < 1e-9);
     assert_eq!(orig.system.name, r.system.name);
 }
 
 #[test]
 fn sonif_mode_display_non_empty() {
-    for mode in &[SonifMode::Direct, SonifMode::Orbital, SonifMode::Granular,
-                  SonifMode::Spectral, SonifMode::FM, SonifMode::Vocal, SonifMode::Waveguide] {
+    for mode in &[
+        SonifMode::Direct,
+        SonifMode::Orbital,
+        SonifMode::Granular,
+        SonifMode::Spectral,
+        SonifMode::FM,
+        SonifMode::Vocal,
+        SonifMode::Waveguide,
+    ] {
         assert!(!format!("{}", mode).is_empty());
     }
 }
 
 #[test]
-fn sonif_mode_default_is_direct() { assert_eq!(SonifMode::default(), SonifMode::Direct); }
+fn sonif_mode_default_is_direct() {
+    assert_eq!(SonifMode::default(), SonifMode::Direct);
+}
 
 #[test]
 fn chord_intervals_major_and_minor() {
@@ -275,7 +339,7 @@ fn chord_intervals_unknown_returns_zeros() {
 // Synthesis DSP integration tests (no audio device required)
 // ---------------------------------------------------------------------------
 
-use math_sonify_plugin::synth::{Oscillator, OscShape};
+use math_sonify_plugin::synth::{OscShape, Oscillator};
 
 /// Render `duration_secs` of mono audio at `sample_rate` from a sine oscillator.
 fn render_sine(freq_hz: f32, sample_rate: f32, duration_secs: f32) -> Vec<f32> {
@@ -300,9 +364,12 @@ fn test_stereo_buffer_equal_channels() {
     let mono = render_sine(440.0, 44100.0, 1.0);
     // Interleave: L = mono[i], R = mono[i] * 0.9 (simulated pan).
     let stereo: Vec<f32> = mono.iter().flat_map(|&s| [s, s * 0.9]).collect();
-    let n_left  = stereo.iter().step_by(2).count();
+    let n_left = stereo.iter().step_by(2).count();
     let n_right = stereo.iter().skip(1).step_by(2).count();
-    assert_eq!(n_left, n_right, "Left and right channels have different sample counts");
+    assert_eq!(
+        n_left, n_right,
+        "Left and right channels have different sample counts"
+    );
 }
 
 #[test]
@@ -315,7 +382,9 @@ fn test_two_oscillators_higher_amplitude() {
     let mut osc2a = Oscillator::new(440.0, OscShape::Sine, 44100.0);
 
     // Single oscillator peak.
-    let single_peak = (0..n).map(|_| osc1a.next_sample().abs()).fold(0.0_f32, f32::max);
+    let single_peak = (0..n)
+        .map(|_| osc1a.next_sample().abs())
+        .fold(0.0_f32, f32::max);
 
     // Two oscillators (in phase — same initial phase = 0).
     let double_peak = (0..n)
@@ -323,9 +392,12 @@ fn test_two_oscillators_higher_amplitude() {
         .fold(0.0_f32, f32::max);
 
     // The sum should be roughly twice the individual peak (within 5% tolerance).
-    assert!(double_peak > single_peak * 1.8,
+    assert!(
+        double_peak > single_peak * 1.8,
         "Two in-phase oscillators should nearly double amplitude: single={}, double={}",
-        single_peak, double_peak);
+        single_peak,
+        double_peak
+    );
 }
 
 #[test]
@@ -334,12 +406,17 @@ fn test_direct_mapping_produces_non_zero_freqs() {
     let mut mapper = DirectMapping::new();
     let mut lorenz = math_sonify_plugin::systems::Lorenz::new(10.0, 28.0, 2.6667);
     // Warm up the attractor.
-    for _ in 0..1000 { lorenz.step(0.001); }
+    for _ in 0..1000 {
+        lorenz.step(0.001);
+    }
     let config = SonificationConfig::default();
     let params = mapper.map(lorenz.state(), 10.0, &config);
     // At least one voice should have a non-zero frequency.
     let any_nonzero = params.freqs.iter().any(|&f| f > 0.0);
-    assert!(any_nonzero, "DirectMapping should produce non-zero frequencies from Lorenz state");
+    assert!(
+        any_nonzero,
+        "DirectMapping should produce non-zero frequencies from Lorenz state"
+    );
 }
 
 // --- Bifurcation Boundary Tests ---
@@ -351,7 +428,9 @@ fn lorenz_below_chaos_onset_is_periodic() {
     // rho=20.0 is below the chaos onset at ~24.74; expect periodic/fixed-point behaviour.
     let mut sys = Lorenz::new(10.0, 20.0, 2.6667);
     // Warm up transient
-    for _ in 0..2000 { sys.step(0.001); }
+    for _ in 0..2000 {
+        sys.step(0.001);
+    }
     // Record trajectory and check for near-repeat OR low z variance
     let mut history: Vec<[f64; 3]> = Vec::with_capacity(5000);
     let mut found_repeat = false;
@@ -363,8 +442,14 @@ fn lorenz_below_chaos_onset_is_periodic() {
         // Check if current position is within 0.5 of any previous position
         if !found_repeat {
             for &prev in &history {
-                let dist = ((cur[0]-prev[0]).powi(2)+(cur[1]-prev[1]).powi(2)+(cur[2]-prev[2]).powi(2)).sqrt();
-                if dist < 0.5 { found_repeat = true; break; }
+                let dist = ((cur[0] - prev[0]).powi(2)
+                    + (cur[1] - prev[1]).powi(2)
+                    + (cur[2] - prev[2]).powi(2))
+                .sqrt();
+                if dist < 0.5 {
+                    found_repeat = true;
+                    break;
+                }
             }
         }
         history.push(cur);
@@ -376,19 +461,26 @@ fn lorenz_below_chaos_onset_is_periodic() {
     assert!(
         found_repeat || z_var < 10.0,
         "lorenz rho=20 should be periodic/fixed-point: found_repeat={}, z_var={}",
-        found_repeat, z_var
+        found_repeat,
+        z_var
     );
 }
 
 #[test]
 fn lorenz_at_chaos_onset_rho_24_74() {
     let mut sys = Lorenz::new(10.0, 24.74, 2.6667);
-    for _ in 0..3000 { sys.step(0.001); }
+    for _ in 0..3000 {
+        sys.step(0.001);
+    }
     let s = sys.state();
     assert!(all_finite(s), "state became non-finite at rho=24.74");
     assert!(s[0].abs() <= 40.0, "x out of range at rho=24.74: {}", s[0]);
     assert!(s[1].abs() <= 40.0, "y out of range at rho=24.74: {}", s[1]);
-    assert!(s[2] >= 0.0 && s[2] <= 80.0, "z out of range at rho=24.74: {}", s[2]);
+    assert!(
+        s[2] >= 0.0 && s[2] <= 80.0,
+        "z out of range at rho=24.74: {}",
+        s[2]
+    );
 }
 
 #[test]
@@ -397,7 +489,9 @@ fn lorenz_above_chaos_onset_is_chaotic() {
     // must diverge.  Warm up to attractor first, then perturb and track peak separation.
     let mut sys1 = Lorenz::new(10.0, 28.0, 2.6667);
     // Warm up to bring state onto the attractor
-    for _ in 0..5000 { sys1.step(0.001); }
+    for _ in 0..5000 {
+        sys1.step(0.001);
+    }
     let mut sys2 = Lorenz::new(10.0, 28.0, 2.6667);
     // Copy attractor state from sys1 into sys2 with a small perturbation on x
     let warm_state = sys1.state().to_vec();
@@ -410,27 +504,44 @@ fn lorenz_above_chaos_onset_is_chaotic() {
         sys2.step(0.001);
         let s1 = sys1.state();
         let s2 = sys2.state();
-        let d = ((s1[0]-s2[0]).powi(2)+(s1[1]-s2[1]).powi(2)+(s1[2]-s2[2]).powi(2)).sqrt();
-        if d > max_dist { max_dist = d; }
+        let d =
+            ((s1[0] - s2[0]).powi(2) + (s1[1] - s2[1]).powi(2) + (s1[2] - s2[2]).powi(2)).sqrt();
+        if d > max_dist {
+            max_dist = d;
+        }
     }
     // With max Lyapunov ~0.9 and perturbation 1e-4, the trajectories saturate at
     // the attractor diameter (~30) within ~15 sim-time units.
-    assert!(max_dist > 1.0, "lorenz rho=28 should show Lyapunov divergence, max_dist={}", max_dist);
+    assert!(
+        max_dist > 1.0,
+        "lorenz rho=28 should show Lyapunov divergence, max_dist={}",
+        max_dist
+    );
 }
 
 #[test]
 fn lorenz_sigma_at_boundary_min() {
     let mut sys = Lorenz::new(0.1, 28.0, 2.6667);
-    for _ in 0..1000 { sys.step(0.001); }
-    assert!(all_finite(sys.state()), "state non-finite at sigma=0.1 (config min)");
+    for _ in 0..1000 {
+        sys.step(0.001);
+    }
+    assert!(
+        all_finite(sys.state()),
+        "state non-finite at sigma=0.1 (config min)"
+    );
 }
 
 #[test]
 fn lorenz_rho_at_boundary_max() {
     let mut sys = Lorenz::new(10.0, 200.0, 2.6667);
-    for _ in 0..500 { sys.step(0.001); }
+    for _ in 0..500 {
+        sys.step(0.001);
+    }
     // Must not produce NaN/inf; may be strongly chaotic but must stay finite
-    assert!(all_finite(sys.state()), "state non-finite at rho=200.0 (config max)");
+    assert!(
+        all_finite(sys.state()),
+        "state non-finite at rho=200.0 (config max)"
+    );
 }
 
 // ── Rossler ─────────────────────────────────────────────────────────────────
@@ -439,17 +550,25 @@ fn lorenz_rho_at_boundary_max() {
 fn rossler_periodic_low_c() {
     // c=3.0 gives period-1 limit cycle (below chaos)
     let mut sys = Rossler::new(0.2, 0.2, 3.0);
-    for _ in 0..5000 { sys.step(0.001); }
+    for _ in 0..5000 {
+        sys.step(0.001);
+    }
     let s = sys.state();
     assert!(all_finite(s), "state non-finite at c=3.0");
-    assert!(s[2] < 20.0, "z exceeds 20.0 at c=3.0 (should be periodic): {}", s[2]);
+    assert!(
+        s[2] < 20.0,
+        "z exceeds 20.0 at c=3.0 (should be periodic): {}",
+        s[2]
+    );
 }
 
 #[test]
 fn rossler_chaotic_high_c() {
     // c=5.7 (default, chaotic) — x/y variance must be significant
     let mut sys = Rossler::new(0.2, 0.2, 5.7);
-    for _ in 0..2000 { sys.step(0.001); } // warm up
+    for _ in 0..2000 {
+        sys.step(0.001);
+    } // warm up
     let mut samples: Vec<f64> = Vec::with_capacity(5000);
     for _ in 0..5000 {
         sys.step(0.001);
@@ -457,14 +576,23 @@ fn rossler_chaotic_high_c() {
     }
     let mean = samples.iter().sum::<f64>() / samples.len() as f64;
     let var = samples.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / samples.len() as f64;
-    assert!(var > 1.0, "rossler c=5.7 x-variance should be > 1.0, got {}", var);
+    assert!(
+        var > 1.0,
+        "rossler c=5.7 x-variance should be > 1.0, got {}",
+        var
+    );
 }
 
 #[test]
 fn rossler_c_at_boundary_max() {
     let mut sys = Rossler::new(0.2, 0.2, 20.0);
-    for _ in 0..1000 { sys.step(0.001); }
-    assert!(all_finite(sys.state()), "state non-finite at c=20.0 (boundary max)");
+    for _ in 0..1000 {
+        sys.step(0.001);
+    }
+    assert!(
+        all_finite(sys.state()),
+        "state non-finite at c=20.0 (boundary max)"
+    );
 }
 
 // ── Kuramoto ─────────────────────────────────────────────────────────────────
@@ -473,10 +601,20 @@ fn rossler_c_at_boundary_max() {
 fn kuramoto_just_below_critical_coupling() {
     // K=0.9 is just below K_c=1.0; should remain largely incoherent
     let mut sys = Kuramoto::new(16, 0.9);
-    for _ in 0..2000 { sys.step(0.01); }
+    for _ in 0..2000 {
+        sys.step(0.01);
+    }
     let r = sys.order_parameter();
-    assert!(r >= 0.0 && r <= 1.0 + 1e-9, "order parameter out of [0,1]: {}", r);
-    assert!(r < 0.7, "kuramoto K=0.9 should be incoherent (r < 0.7), got r={}", r);
+    assert!(
+        r >= 0.0 && r <= 1.0 + 1e-9,
+        "order parameter out of [0,1]: {}",
+        r
+    );
+    assert!(
+        r < 0.7,
+        "kuramoto K=0.9 should be incoherent (r < 0.7), got r={}",
+        r
+    );
 }
 
 #[test]
@@ -484,20 +622,39 @@ fn kuramoto_just_above_critical_coupling() {
     // K=1.1 is just above K_c=1.0; partial synchronization should emerge.
     // Very close to the boundary so synchronization is weak; threshold is 0.3.
     let mut sys = Kuramoto::new(16, 1.1);
-    for _ in 0..5000 { sys.step(0.01); }
+    for _ in 0..5000 {
+        sys.step(0.01);
+    }
     let r = sys.order_parameter();
-    assert!(r >= 0.0 && r <= 1.0 + 1e-9, "order parameter out of [0,1]: {}", r);
-    assert!(r > 0.3, "kuramoto K=1.1 should show partial sync (r > 0.3), got r={}", r);
+    assert!(
+        r >= 0.0 && r <= 1.0 + 1e-9,
+        "order parameter out of [0,1]: {}",
+        r
+    );
+    assert!(
+        r > 0.3,
+        "kuramoto K=1.1 should show partial sync (r > 0.3), got r={}",
+        r
+    );
 }
 
 #[test]
 fn kuramoto_exactly_at_critical_coupling() {
     let mut sys = Kuramoto::new(16, 1.0);
-    for _ in 0..2000 { sys.step(0.01); }
+    for _ in 0..2000 {
+        sys.step(0.01);
+    }
     let s = sys.state();
-    assert!(all_finite(s), "kuramoto state non-finite at K=1.0 (exact critical coupling)");
+    assert!(
+        all_finite(s),
+        "kuramoto state non-finite at K=1.0 (exact critical coupling)"
+    );
     let r = sys.order_parameter();
-    assert!(r >= 0.0 && r <= 1.0 + 1e-9, "order parameter out of [0,1] at K=1.0: {}", r);
+    assert!(
+        r >= 0.0 && r <= 1.0 + 1e-9,
+        "order parameter out of [0,1] at K=1.0: {}",
+        r
+    );
 }
 
 // ── Duffing ──────────────────────────────────────────────────────────────────
@@ -507,26 +664,41 @@ fn duffing_small_forcing_periodic() {
     // Small forcing amplitude gamma=0.1 should give periodic, bounded behaviour
     let mut sys = Duffing::new();
     sys.gamma = 0.1;
-    for _ in 0..3000 { sys.step(0.01); }
+    for _ in 0..3000 {
+        sys.step(0.01);
+    }
     let s = sys.state();
     assert!(all_finite(s), "duffing state non-finite at gamma=0.1");
-    assert!(s[1].abs() <= 5.0, "duffing velocity out of [-5,5] at gamma=0.1: {}", s[1]);
+    assert!(
+        s[1].abs() <= 5.0,
+        "duffing velocity out of [-5,5] at gamma=0.1: {}",
+        s[1]
+    );
 }
 
 #[test]
 fn duffing_chaotic_forcing() {
     // gamma=0.5 (default chaos) — x must not be stuck at a fixed point
     let mut sys = Duffing::new(); // defaults: gamma=0.5
-    for _ in 0..1000 { sys.step(0.01); } // warm up
+    for _ in 0..1000 {
+        sys.step(0.01);
+    } // warm up
     let mut xs: Vec<f64> = Vec::with_capacity(3000);
     for _ in 0..3000 {
         sys.step(0.01);
         xs.push(sys.state()[0]);
     }
-    assert!(all_finite(sys.state()), "duffing state non-finite at gamma=0.5");
+    assert!(
+        all_finite(sys.state()),
+        "duffing state non-finite at gamma=0.5"
+    );
     let mean = xs.iter().sum::<f64>() / xs.len() as f64;
     let var = xs.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / xs.len() as f64;
-    assert!(var > 0.1, "duffing gamma=0.5 x-variance should be > 0.1, got {}", var);
+    assert!(
+        var > 0.1,
+        "duffing gamma=0.5 x-variance should be > 0.1, got {}",
+        var
+    );
 }
 
 // ── CML ───────────────────────────────────────────────────────────────────────
@@ -535,29 +707,44 @@ fn duffing_chaotic_forcing() {
 fn cml_periodic_r_below_chaos() {
     // r=3.0 is period-2 (below logistic chaos onset ~3.57)
     let mut sys = CoupledMapLattice::new(3.0, 0.35);
-    for _ in 0..2000 { sys.step(0.001); }
+    for _ in 0..2000 {
+        sys.step(0.001);
+    }
     let s = sys.state();
-    assert!(s.iter().all(|&v| v.is_finite() && v >= 0.0 && v <= 1.0),
-        "CML sites out of [0,1] at r=3.0: {:?}", &s[..4]);
+    assert!(
+        s.iter().all(|&v| v.is_finite() && v >= 0.0 && v <= 1.0),
+        "CML sites out of [0,1] at r=3.0: {:?}",
+        &s[..4]
+    );
 }
 
 #[test]
 fn cml_chaotic_r_at_max() {
     // r=4.0 is fully chaotic logistic map
     let mut sys = CoupledMapLattice::new(4.0, 0.35);
-    for _ in 0..2000 { sys.step(0.001); }
+    for _ in 0..2000 {
+        sys.step(0.001);
+    }
     let s = sys.state();
-    assert!(s.iter().all(|&v| v.is_finite() && v >= 0.0 && v <= 1.0),
-        "CML sites out of [0,1] at r=4.0: {:?}", &s[..4]);
+    assert!(
+        s.iter().all(|&v| v.is_finite() && v >= 0.0 && v <= 1.0),
+        "CML sites out of [0,1] at r=4.0: {:?}",
+        &s[..4]
+    );
 }
 
 #[test]
 fn cml_r_at_config_max() {
     // boundary r=4.0 — verify no panic or NaN
     let mut sys = CoupledMapLattice::new(4.0, 0.35);
-    for _ in 0..2000 { sys.step(0.001); }
+    for _ in 0..2000 {
+        sys.step(0.001);
+    }
     let s = sys.state();
-    assert!(s.iter().all(|v| v.is_finite()), "CML produced NaN/inf at r=4.0 (config max)");
+    assert!(
+        s.iter().all(|v| v.is_finite()),
+        "CML produced NaN/inf at r=4.0 (config max)"
+    );
 }
 
 // ── Henon Map ─────────────────────────────────────────────────────────────────
@@ -566,7 +753,9 @@ fn cml_r_at_config_max() {
 fn henon_canonical_parameters_bounded() {
     // a=1.4, b=0.3 — canonical strange attractor; skip first 1000 as transient
     let mut sys = HenonMap::new(); // defaults: a=1.4, b=0.3
-    for _ in 0..1000 { sys.step(0.001); } // transient
+    for _ in 0..1000 {
+        sys.step(0.001);
+    } // transient
     for _ in 0..10000 {
         sys.step(0.001);
         let s = sys.state();
@@ -599,7 +788,9 @@ fn henon_b_at_zero() {
     // b=0.0 — degenerate (area-contracting = 0); must stay finite for 500 steps
     let mut sys = HenonMap::new();
     sys.b = 0.0;
-    for _ in 0..500 { sys.step(0.001); }
+    for _ in 0..500 {
+        sys.step(0.001);
+    }
     // b=0 means y_new = 0 always; x_new = 1 - a*x^2 (1-D logistic-like)
     // With a=1.4 this may converge to a fixed point or oscillate
     assert!(sys.state()[1].is_finite(), "henon y non-finite at b=0.0");
@@ -614,20 +805,32 @@ fn mackey_glass_stable_low_tau() {
     sys.tau = 5.0;
     // Rebuild history buffer for new tau (re-create the system with overridden tau is simplest)
     // The MackeyGlass::new() starts with tau=17; we override then step to let it settle
-    for _ in 0..2000 { sys.step(0.5); }
+    for _ in 0..2000 {
+        sys.step(0.5);
+    }
     let s = sys.state();
     assert!(all_finite(s), "mackey-glass state non-finite at tau=5.0");
-    assert!(s[0] >= 0.0 && s[0] <= 5.0, "mackey-glass x out of [0,5] at tau=5.0: {}", s[0]);
+    assert!(
+        s[0] >= 0.0 && s[0] <= 5.0,
+        "mackey-glass x out of [0,5] at tau=5.0: {}",
+        s[0]
+    );
 }
 
 #[test]
 fn mackey_glass_chaotic_high_tau() {
     // tau=17.0 (default, chaotic) — bounded chaos, should remain in [0, 5]
     let mut sys = MackeyGlass::new(); // tau=17 default
-    for _ in 0..2000 { sys.step(0.5); }
+    for _ in 0..2000 {
+        sys.step(0.5);
+    }
     let s = sys.state();
     assert!(all_finite(s), "mackey-glass state non-finite at tau=17.0");
-    assert!(s[0] >= 0.0 && s[0] <= 5.0, "mackey-glass x out of [0,5] at tau=17.0: {}", s[0]);
+    assert!(
+        s[0] >= 0.0 && s[0] <= 5.0,
+        "mackey-glass x out of [0,5] at tau=17.0: {}",
+        s[0]
+    );
 }
 
 // --- Latency SLA Tests ---
@@ -641,7 +844,8 @@ fn sim_tick_completes_within_control_period_budget() {
     let mut sys = Lorenz::new(10.0, 28.0, 2.6667);
 
     let start = Instant::now();
-    for _ in 0..120 { // one second of ticks at 120 Hz
+    for _ in 0..120 {
+        // one second of ticks at 120 Hz
         sys.step(0.001);
     }
     let elapsed = start.elapsed();
@@ -670,7 +874,8 @@ fn audio_buffer_renders_within_latency_budget() {
     assert!(
         elapsed.as_micros() < budget_us,
         "512-sample buffer render took {}us, exceeds {}us latency budget",
-        elapsed.as_micros(), budget_us
+        elapsed.as_micros(),
+        budget_us
     );
 }
 
@@ -692,7 +897,9 @@ fn ten_consecutive_buffers_render_within_budget() {
         assert!(
             elapsed.as_micros() < budget_us,
             "buffer {} render took {}us, exceeds {}us latency budget",
-            buf_idx, elapsed.as_micros(), budget_us
+            buf_idx,
+            elapsed.as_micros(),
+            budget_us
         );
     }
 }
@@ -707,11 +914,11 @@ fn synthesis_modes_all_meet_latency_sla() {
 
     // All modes use the Oscillator DSP path at their core; test each OscShape
     let shapes = [
-        ("Sine",     OscShape::Sine),
-        ("Square",   OscShape::Square),
-        ("Saw",      OscShape::Saw),
+        ("Sine", OscShape::Sine),
+        ("Square", OscShape::Square),
+        ("Saw", OscShape::Saw),
         ("Triangle", OscShape::Triangle),
-        ("Noise",    OscShape::Noise),
+        ("Noise", OscShape::Noise),
     ];
 
     for (name, shape) in &shapes {
@@ -724,7 +931,9 @@ fn synthesis_modes_all_meet_latency_sla() {
         assert!(
             elapsed.as_micros() < budget_us,
             "shape {} render took {}us, exceeds {}us latency budget",
-            name, elapsed.as_micros(), budget_us
+            name,
+            elapsed.as_micros(),
+            budget_us
         );
     }
 }

@@ -1,4 +1,4 @@
-use super::{DynamicalSystem, rk4};
+use super::{rk4, DynamicalSystem};
 
 /// Rossler attractor (Rossler 1976) -- a three-dimensional spiral strange attractor.
 ///
@@ -31,24 +31,36 @@ impl Rossler {
     /// # Returns
     /// A `Rossler` instance ready for integration.
     pub fn new(a: f64, b: f64, c: f64) -> Self {
-        Self { state: vec![1.0, 0.0, 0.0], a, b, c, speed: 0.0 }
+        Self {
+            state: vec![1.0, 0.0, 0.0],
+            a,
+            b,
+            c,
+            speed: 0.0,
+        }
     }
 
     fn deriv(s: &[f64], a: f64, b: f64, c: f64) -> Vec<f64> {
-        vec![
-            -s[1] - s[2],
-            s[0] + a * s[1],
-            b + s[2] * (s[0] - c),
-        ]
+        vec![-s[1] - s[2], s[0] + a * s[1], b + s[2] * (s[0] - c)]
     }
 }
 
 impl DynamicalSystem for Rossler {
-    fn state(&self) -> &[f64] { &self.state }
-    fn dimension(&self) -> usize { 3 }
-    fn name(&self) -> &str { "Rössler" }
-    fn speed(&self) -> f64 { self.speed }
-    fn deriv_at(&self, state: &[f64]) -> Vec<f64> { Self::deriv(state, self.a, self.b, self.c) }
+    fn state(&self) -> &[f64] {
+        &self.state
+    }
+    fn dimension(&self) -> usize {
+        3
+    }
+    fn name(&self) -> &str {
+        "Rössler"
+    }
+    fn speed(&self) -> f64 {
+        self.speed
+    }
+    fn deriv_at(&self, state: &[f64]) -> Vec<f64> {
+        Self::deriv(state, self.a, self.b, self.c)
+    }
 
     /// Advances the attractor state by one RK4 integration step.
     ///
@@ -58,8 +70,13 @@ impl DynamicalSystem for Rossler {
         let (a, b, c) = (self.a, self.b, self.c);
         let prev = self.state.clone();
         rk4(&mut self.state, dt, |s| Self::deriv(s, a, b, c));
-        let ds: f64 = self.state.iter().zip(prev.iter())
-            .map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
+        let ds: f64 = self
+            .state
+            .iter()
+            .zip(prev.iter())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f64>()
+            .sqrt();
         self.speed = ds / dt;
     }
 }
@@ -76,8 +93,13 @@ mod tests {
         sys.step(0.001);
         let after = sys.state();
         assert!(
-            before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15),
-            "State did not change after step: {:?} -> {:?}", before, after
+            before
+                .iter()
+                .zip(after.iter())
+                .any(|(a, b)| (a - b).abs() > 1e-15),
+            "State did not change after step: {:?} -> {:?}",
+            before,
+            after
         );
     }
 
@@ -90,10 +112,15 @@ mod tests {
             sys.step(0.001);
         }
         let s = sys.state();
-        assert!(s.iter().all(|v| v.is_finite()), "State contains NaN/Inf: {:?}", s);
+        assert!(
+            s.iter().all(|v| v.is_finite()),
+            "State contains NaN/Inf: {:?}",
+            s
+        );
         assert!(
             s[0].abs() < 30.0 && s[1].abs() < 30.0,
-            "x/y out of expected bounds after 1000 steps: {:?}", s
+            "x/y out of expected bounds after 1000 steps: {:?}",
+            s
         );
     }
 }

@@ -108,11 +108,15 @@ pub(crate) fn draw_waveform(
     let ds_len = display_samples.len();
     let w = rect.width();
 
-    let pts: Vec<Pos2> = display_samples.iter().enumerate().map(|(i, &s)| {
-        let x = rect.left() + (i as f32 / ds_len as f32) * w;
-        let y = cy - s.clamp(-1.0, 1.0) * (rect.height() * 0.42);
-        Pos2::new(x, y)
-    }).collect();
+    let pts: Vec<Pos2> = display_samples
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            let x = rect.left() + (i as f32 / ds_len as f32) * w;
+            let y = cy - s.clamp(-1.0, 1.0) * (rect.height() * 0.42);
+            Pos2::new(x, y)
+        })
+        .collect();
 
     // Glow pass (wide, dim)
     for seg in pts.windows(2) {
@@ -161,8 +165,7 @@ pub(crate) fn draw_waveform(
             let mut re = 0.0f32;
             let mut im = 0.0f32;
             for (k, &s) in display_samples.iter().take(n_dft).enumerate() {
-                let angle =
-                    -2.0 * std::f32::consts::PI * freq_bin as f32 * k as f32 / n_dft as f32;
+                let angle = -2.0 * std::f32::consts::PI * freq_bin as f32 * k as f32 / n_dft as f32;
                 re += s * angle.cos();
                 im += s * angle.sin();
             }
@@ -190,7 +193,9 @@ pub(crate) fn hz_to_note_name(hz: f32) -> String {
     if hz < 16.0 {
         return "---".into();
     }
-    let note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    let note_names = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
     let semitones_from_a4 = 12.0 * (hz / 440.0).log2();
     let midi = (69.0 + semitones_from_a4).round() as i32;
     let octave = (midi / 12) - 1;
@@ -255,10 +260,8 @@ pub(crate) fn draw_note_map(
         let y = y_start + i as f32 * spacing;
         let bar_w = (level * 80.0).max(4.0);
 
-        let bar_rect = Rect::from_min_size(
-            Pos2::new(x - bar_w * 0.5, y),
-            Vec2::new(bar_w, bar_h * 0.6),
-        );
+        let bar_rect =
+            Rect::from_min_size(Pos2::new(x - bar_w * 0.5, y), Vec2::new(bar_w, bar_h * 0.6));
         painter.rect_filled(bar_rect, 3.0, voice_colors[i]);
 
         painter.text(
@@ -277,10 +280,8 @@ pub(crate) fn draw_note_map(
                 let chord_freq = freq * 2.0f32.powf(interval / 12.0);
                 let cx = freq_to_x(chord_freq);
                 let cy = y - (k as f32 + 1.0) * (bar_h * 0.5 + 4.0);
-                let chord_bar = Rect::from_min_size(
-                    Pos2::new(cx - 20.0, cy),
-                    Vec2::new(40.0, bar_h * 0.4),
-                );
+                let chord_bar =
+                    Rect::from_min_size(Pos2::new(cx - 20.0, cy), Vec2::new(40.0, bar_h * 0.4));
                 painter.rect_filled(chord_bar, 2.0, chord_color);
                 painter.text(
                     Pos2::new(cx, cy - 2.0),

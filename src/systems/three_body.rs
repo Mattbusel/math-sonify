@@ -30,13 +30,19 @@ impl ThreeBody {
         // Scaled figure-8 ICs for unit masses
         let state = vec![
             // positions
-            -0.970_004_36,  0.243_087_53,
-             0.970_004_36, -0.243_087_53,
-             0.0,           0.0,
+            -0.970_004_36,
+            0.243_087_53,
+            0.970_004_36,
+            -0.243_087_53,
+            0.0,
+            0.0,
             // velocities
-             0.932_407_37 / 2.0,  0.864_731_46 / 2.0,
-             0.932_407_37 / 2.0,  0.864_731_46 / 2.0,
-            -0.932_407_37,        -0.864_731_46,
+            0.932_407_37 / 2.0,
+            0.864_731_46 / 2.0,
+            0.932_407_37 / 2.0,
+            0.864_731_46 / 2.0,
+            -0.932_407_37,
+            -0.864_731_46,
         ];
         let g = 1.0;
         let initial_energy = Self::compute_hamiltonian(&state, &masses, g);
@@ -81,7 +87,9 @@ impl ThreeBody {
         let mut ay = [0.0f64; 3];
         for i in 0..3 {
             for j in 0..3 {
-                if i == j { continue; }
+                if i == j {
+                    continue;
+                }
                 let (xi, yi) = pos(i);
                 let (xj, yj) = pos(j);
                 let dx = xj - xi;
@@ -101,10 +109,18 @@ impl ThreeBody {
 }
 
 impl DynamicalSystem for ThreeBody {
-    fn state(&self) -> &[f64] { &self.state }
-    fn dimension(&self) -> usize { 12 }
-    fn name(&self) -> &str { "Three-Body" }
-    fn speed(&self) -> f64 { self.speed }
+    fn state(&self) -> &[f64] {
+        &self.state
+    }
+    fn dimension(&self) -> usize {
+        12
+    }
+    fn name(&self) -> &str {
+        "Three-Body"
+    }
+    fn speed(&self) -> f64 {
+        self.speed
+    }
     fn deriv_at(&self, state: &[f64]) -> Vec<f64> {
         let accel = Self::accelerations(state, &self.masses, self.g);
         let mut d = Vec::with_capacity(12);
@@ -115,7 +131,9 @@ impl DynamicalSystem for ThreeBody {
         d
     }
 
-    fn energy_error(&self) -> Option<f64> { Some(self.energy_error) }
+    fn energy_error(&self) -> Option<f64> {
+        Some(self.energy_error)
+    }
 
     fn step(&mut self, dt: f64) {
         let prev = self.state.clone();
@@ -137,8 +155,13 @@ impl DynamicalSystem for ThreeBody {
             self.state[6 + i] += 0.5 * dt * accel2[i];
         }
 
-        let ds: f64 = self.state.iter().zip(prev.iter())
-            .map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
+        let ds: f64 = self
+            .state
+            .iter()
+            .zip(prev.iter())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f64>()
+            .sqrt();
         self.speed = ds / dt;
 
         // Update energy conservation error

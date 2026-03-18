@@ -1,4 +1,4 @@
-use super::{DynamicalSystem, rk4};
+use super::{rk4, DynamicalSystem};
 
 /// Van der Pol self-sustaining limit-cycle oscillator.
 ///
@@ -17,23 +17,29 @@ pub struct VanDerPol {
 impl VanDerPol {
     /// Create a Van der Pol oscillator with default nonlinearity μ = 2.0.
     pub fn new() -> Self {
-        Self { state: vec![2.0, 0.0], mu: 2.0 }
+        Self {
+            state: vec![2.0, 0.0],
+            mu: 2.0,
+        }
     }
 
     fn deriv(state: &[f64], mu: f64) -> Vec<f64> {
         let x = state[0];
         let y = state[1];
-        vec![
-            y,
-            mu * (1.0 - x * x) * y - x,
-        ]
+        vec![y, mu * (1.0 - x * x) * y - x]
     }
 }
 
 impl DynamicalSystem for VanDerPol {
-    fn state(&self) -> &[f64] { &self.state }
-    fn dimension(&self) -> usize { 2 }
-    fn name(&self) -> &str { "Van der Pol" }
+    fn state(&self) -> &[f64] {
+        &self.state
+    }
+    fn dimension(&self) -> usize {
+        2
+    }
+    fn name(&self) -> &str {
+        "Van der Pol"
+    }
 
     fn step(&mut self, dt: f64) {
         let mu = self.mu;

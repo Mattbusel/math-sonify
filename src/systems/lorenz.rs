@@ -1,4 +1,4 @@
-use super::{DynamicalSystem, rk4};
+use super::{rk4, DynamicalSystem};
 
 /// Lorenz attractor (Lorenz 1963) -- the classic strange attractor.
 ///
@@ -49,15 +49,27 @@ impl Lorenz {
 }
 
 impl DynamicalSystem for Lorenz {
-    fn state(&self) -> &[f64] { &self.state }
-    fn dimension(&self) -> usize { 3 }
-    fn name(&self) -> &str { "Lorenz" }
-    fn speed(&self) -> f64 { self.speed }
-    fn deriv_at(&self, state: &[f64]) -> Vec<f64> { Self::deriv(state, self.sigma, self.rho, self.beta) }
+    fn state(&self) -> &[f64] {
+        &self.state
+    }
+    fn dimension(&self) -> usize {
+        3
+    }
+    fn name(&self) -> &str {
+        "Lorenz"
+    }
+    fn speed(&self) -> f64 {
+        self.speed
+    }
+    fn deriv_at(&self, state: &[f64]) -> Vec<f64> {
+        Self::deriv(state, self.sigma, self.rho, self.beta)
+    }
     fn set_state(&mut self, s: &[f64]) {
         let n = self.state.len().min(s.len());
         for i in 0..n {
-            if s[i].is_finite() { self.state[i] = s[i]; }
+            if s[i].is_finite() {
+                self.state[i] = s[i];
+            }
         }
     }
 
@@ -70,8 +82,13 @@ impl DynamicalSystem for Lorenz {
         let prev = self.state.clone();
         rk4(&mut self.state, dt, |s| Self::deriv(s, sigma, rho, beta));
         // Estimate speed as |Δstate|/dt
-        let ds: f64 = self.state.iter().zip(prev.iter())
-            .map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
+        let ds: f64 = self
+            .state
+            .iter()
+            .zip(prev.iter())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f64>()
+            .sqrt();
         self.speed = ds / dt;
     }
 }
@@ -89,8 +106,13 @@ mod tests {
         let after = sys.state();
         // At least one component must change after a non-zero step
         assert!(
-            before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15),
-            "State did not change after step: {:?} -> {:?}", before, after
+            before
+                .iter()
+                .zip(after.iter())
+                .any(|(a, b)| (a - b).abs() > 1e-15),
+            "State did not change after step: {:?} -> {:?}",
+            before,
+            after
         );
     }
 
@@ -106,7 +128,12 @@ mod tests {
         let s2 = sys2.state();
         assert_eq!(s1.len(), s2.len());
         for (a, b) in s1.iter().zip(s2.iter()) {
-            assert!((a - b).abs() < 1e-15, "Non-deterministic output: {} vs {}", a, b);
+            assert!(
+                (a - b).abs() < 1e-15,
+                "Non-deterministic output: {} vs {}",
+                a,
+                b
+            );
         }
     }
 
@@ -117,7 +144,12 @@ mod tests {
         sys.step(0.0);
         let after = sys.state();
         for (a, b) in before.iter().zip(after.iter()) {
-            assert!((a - b).abs() < 1e-15, "State changed with dt=0: {} -> {}", a, b);
+            assert!(
+                (a - b).abs() < 1e-15,
+                "State changed with dt=0: {} -> {}",
+                a,
+                b
+            );
         }
     }
 

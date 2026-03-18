@@ -16,70 +16,149 @@ pub struct SystemEntry {
 }
 
 pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
-    SystemEntry { name: "lorenz",              display_name: "Lorenz",           description: "Classic butterfly attractor" },
-    SystemEntry { name: "rossler",             display_name: "Rossler",          description: "Spiral attractor" },
-    SystemEntry { name: "double_pendulum",     display_name: "Double Pendulum",  description: "Gravitational chaos" },
-    SystemEntry { name: "geodesic_torus",      display_name: "Geodesic Torus",   description: "Ergodic irrational winding" },
-    SystemEntry { name: "kuramoto",            display_name: "Kuramoto",         description: "8 coupled oscillators" },
-    SystemEntry { name: "three_body",          display_name: "Three Body",       description: "Gravitational three-body problem" },
-    SystemEntry { name: "duffing",             display_name: "Duffing",          description: "Driven nonlinear oscillator" },
-    SystemEntry { name: "van_der_pol",         display_name: "Van der Pol",      description: "Self-sustaining limit cycle" },
-    SystemEntry { name: "halvorsen",           display_name: "Halvorsen",        description: "Cyclic symmetry attractor" },
-    SystemEntry { name: "aizawa",              display_name: "Aizawa",           description: "Six-parameter torus-like attractor" },
-    SystemEntry { name: "chua",                display_name: "Chua",             description: "Electronic circuit chaos" },
-    SystemEntry { name: "hindmarsh_rose",      display_name: "Hindmarsh-Rose",   description: "Neuron firing model" },
-    SystemEntry { name: "coupled_map_lattice", display_name: "CML",              description: "Spatiotemporal chaos" },
-    SystemEntry { name: "mackey_glass",        display_name: "Mackey-Glass",     description: "Delay differential equation" },
-    SystemEntry { name: "nose_hoover",         display_name: "Nose-Hoover",      description: "Conservative chaos" },
-    SystemEntry { name: "sprott_b",            display_name: "Sprott B",         description: "Minimal algebraically simple attractor" },
-    SystemEntry { name: "henon_map",           display_name: "Henon Map",        description: "Discrete-time map" },
-    SystemEntry { name: "lorenz96",            display_name: "Lorenz 96",        description: "Weather prediction model" },
-    SystemEntry { name: "custom",              display_name: "Custom ODE",       description: "Type your own 3-variable ODEs" },
-    SystemEntry { name: "fractional_lorenz",   display_name: "Fractional Lorenz",description: "Lorenz with fractional-order derivatives" },
+    SystemEntry {
+        name: "lorenz",
+        display_name: "Lorenz",
+        description: "Classic butterfly attractor",
+    },
+    SystemEntry {
+        name: "rossler",
+        display_name: "Rossler",
+        description: "Spiral attractor",
+    },
+    SystemEntry {
+        name: "double_pendulum",
+        display_name: "Double Pendulum",
+        description: "Gravitational chaos",
+    },
+    SystemEntry {
+        name: "geodesic_torus",
+        display_name: "Geodesic Torus",
+        description: "Ergodic irrational winding",
+    },
+    SystemEntry {
+        name: "kuramoto",
+        display_name: "Kuramoto",
+        description: "8 coupled oscillators",
+    },
+    SystemEntry {
+        name: "three_body",
+        display_name: "Three Body",
+        description: "Gravitational three-body problem",
+    },
+    SystemEntry {
+        name: "duffing",
+        display_name: "Duffing",
+        description: "Driven nonlinear oscillator",
+    },
+    SystemEntry {
+        name: "van_der_pol",
+        display_name: "Van der Pol",
+        description: "Self-sustaining limit cycle",
+    },
+    SystemEntry {
+        name: "halvorsen",
+        display_name: "Halvorsen",
+        description: "Cyclic symmetry attractor",
+    },
+    SystemEntry {
+        name: "aizawa",
+        display_name: "Aizawa",
+        description: "Six-parameter torus-like attractor",
+    },
+    SystemEntry {
+        name: "chua",
+        display_name: "Chua",
+        description: "Electronic circuit chaos",
+    },
+    SystemEntry {
+        name: "hindmarsh_rose",
+        display_name: "Hindmarsh-Rose",
+        description: "Neuron firing model",
+    },
+    SystemEntry {
+        name: "coupled_map_lattice",
+        display_name: "CML",
+        description: "Spatiotemporal chaos",
+    },
+    SystemEntry {
+        name: "mackey_glass",
+        display_name: "Mackey-Glass",
+        description: "Delay differential equation",
+    },
+    SystemEntry {
+        name: "nose_hoover",
+        display_name: "Nose-Hoover",
+        description: "Conservative chaos",
+    },
+    SystemEntry {
+        name: "sprott_b",
+        display_name: "Sprott B",
+        description: "Minimal algebraically simple attractor",
+    },
+    SystemEntry {
+        name: "henon_map",
+        display_name: "Henon Map",
+        description: "Discrete-time map",
+    },
+    SystemEntry {
+        name: "lorenz96",
+        display_name: "Lorenz 96",
+        description: "Weather prediction model",
+    },
+    SystemEntry {
+        name: "custom",
+        display_name: "Custom ODE",
+        description: "Type your own 3-variable ODEs",
+    },
+    SystemEntry {
+        name: "fractional_lorenz",
+        display_name: "Fractional Lorenz",
+        description: "Lorenz with fractional-order derivatives",
+    },
 ];
 
-
-pub mod lorenz;
-pub mod custom_ode;
-pub mod fractional_lorenz;
-pub mod rossler;
-pub mod double_pendulum;
-pub mod geodesic_torus;
-pub mod kuramoto;
-pub mod three_body;
-pub mod duffing;
-pub mod van_der_pol;
-pub mod halvorsen;
 pub mod aizawa;
 pub mod chua;
-pub mod hindmarsh_rose;
 pub mod coupled_map_lattice;
+pub mod custom_ode;
+pub mod double_pendulum;
+pub mod duffing;
+pub mod fractional_lorenz;
+pub mod geodesic_torus;
+pub mod halvorsen;
+pub mod henon_map;
+pub mod hindmarsh_rose;
+pub mod kuramoto;
+pub mod lorenz;
+pub mod lorenz96;
 pub mod mackey_glass;
 pub mod nose_hoover;
+pub mod rossler;
 pub mod sprott_b;
-pub mod henon_map;
-pub mod lorenz96;
+pub mod three_body;
+pub mod van_der_pol;
 
-pub use lorenz::Lorenz;
-pub use custom_ode::{CustomOde, validate_exprs};
-pub use fractional_lorenz::FractionalLorenz;
-pub use rossler::Rossler;
-pub use double_pendulum::DoublePendulum;
-pub use geodesic_torus::GeodesicTorus;
-pub use kuramoto::Kuramoto;
-pub use three_body::ThreeBody;
-pub use duffing::Duffing;
-pub use van_der_pol::VanDerPol;
-pub use halvorsen::Halvorsen;
 pub use aizawa::Aizawa;
 pub use chua::Chua;
-pub use hindmarsh_rose::HindmarshRose;
 pub use coupled_map_lattice::CoupledMapLattice;
+pub use custom_ode::{validate_exprs, CustomOde};
+pub use double_pendulum::DoublePendulum;
+pub use duffing::Duffing;
+pub use fractional_lorenz::FractionalLorenz;
+pub use geodesic_torus::GeodesicTorus;
+pub use halvorsen::Halvorsen;
+pub use henon_map::HenonMap;
+pub use hindmarsh_rose::HindmarshRose;
+pub use kuramoto::Kuramoto;
+pub use lorenz::Lorenz;
+pub use lorenz96::Lorenz96;
 pub use mackey_glass::MackeyGlass;
 pub use nose_hoover::NoseHoover;
+pub use rossler::Rossler;
 pub use sprott_b::SprottB;
-pub use henon_map::HenonMap;
-pub use lorenz96::Lorenz96;
+pub use three_body::ThreeBody;
+pub use van_der_pol::VanDerPol;
 
 /// A continuous-time dynamical system that can be stepped forward.
 pub trait DynamicalSystem: Send {
@@ -110,7 +189,9 @@ pub trait DynamicalSystem: Send {
     fn set_state(&mut self, _s: &[f64]) {}
 
     /// Return current energy conservation error (relative), if applicable.
-    fn energy_error(&self) -> Option<f64> { None }
+    fn energy_error(&self) -> Option<f64> {
+        None
+    }
 }
 
 /// Runge-Kutta 4 helper. Integrates `f(state) -> derivative` by dt.
@@ -140,29 +221,57 @@ where
 {
     let n = state.len();
     let k1 = f(state);
-    let s2: Vec<f64> = (0..n).map(|i| state[i] + dt * (1.0/5.0) * k1[i]).collect();
+    let s2: Vec<f64> = (0..n)
+        .map(|i| state[i] + dt * (1.0 / 5.0) * k1[i])
+        .collect();
     let k2 = f(&s2);
-    let s3: Vec<f64> = (0..n).map(|i| state[i] + dt * (3.0/40.0 * k1[i] + 9.0/40.0 * k2[i])).collect();
+    let s3: Vec<f64> = (0..n)
+        .map(|i| state[i] + dt * (3.0 / 40.0 * k1[i] + 9.0 / 40.0 * k2[i]))
+        .collect();
     let k3 = f(&s3);
-    let s4: Vec<f64> = (0..n).map(|i| state[i] + dt * (44.0/45.0 * k1[i] - 56.0/15.0 * k2[i] + 32.0/9.0 * k3[i])).collect();
+    let s4: Vec<f64> = (0..n)
+        .map(|i| state[i] + dt * (44.0 / 45.0 * k1[i] - 56.0 / 15.0 * k2[i] + 32.0 / 9.0 * k3[i]))
+        .collect();
     let k4 = f(&s4);
-    let s5: Vec<f64> = (0..n).map(|i| state[i] + dt * (19372.0/6561.0 * k1[i] - 25360.0/2187.0 * k2[i] + 64448.0/6561.0 * k3[i] - 212.0/729.0 * k4[i])).collect();
+    let s5: Vec<f64> = (0..n)
+        .map(|i| {
+            state[i]
+                + dt * (19372.0 / 6561.0 * k1[i] - 25360.0 / 2187.0 * k2[i]
+                    + 64448.0 / 6561.0 * k3[i]
+                    - 212.0 / 729.0 * k4[i])
+        })
+        .collect();
     let k5 = f(&s5);
-    let s6: Vec<f64> = (0..n).map(|i| state[i] + dt * (9017.0/3168.0 * k1[i] - 355.0/33.0 * k2[i] + 46732.0/5247.0 * k3[i] + 49.0/176.0 * k4[i] - 5103.0/18656.0 * k5[i])).collect();
+    let s6: Vec<f64> = (0..n)
+        .map(|i| {
+            state[i]
+                + dt * (9017.0 / 3168.0 * k1[i] - 355.0 / 33.0 * k2[i]
+                    + 46732.0 / 5247.0 * k3[i]
+                    + 49.0 / 176.0 * k4[i]
+                    - 5103.0 / 18656.0 * k5[i])
+        })
+        .collect();
     let k6 = f(&s6);
     // 4th-order solution
     for i in 0..n {
-        state[i] += dt * (35.0/384.0 * k1[i] + 500.0/1113.0 * k3[i] + 125.0/192.0 * k4[i]
-            - 2187.0/6784.0 * k5[i] + 11.0/84.0 * k6[i]);
+        state[i] += dt
+            * (35.0 / 384.0 * k1[i] + 500.0 / 1113.0 * k3[i] + 125.0 / 192.0 * k4[i]
+                - 2187.0 / 6784.0 * k5[i]
+                + 11.0 / 84.0 * k6[i]);
     }
     // 5th-order uses FSAL (k7 = f at new state)
     let k7 = f(state);
     let err: f64 = {
-        let sum_sq: f64 = (0..n).map(|i| {
-            let e = dt * (71.0/57600.0 * k1[i] - 71.0/16695.0 * k3[i] + 71.0/1920.0 * k4[i]
-                - 17253.0/339200.0 * k5[i] + 22.0/525.0 * k6[i] - 1.0/40.0 * k7[i]);
-            e * e
-        }).sum();
+        let sum_sq: f64 = (0..n)
+            .map(|i| {
+                let e = dt
+                    * (71.0 / 57600.0 * k1[i] - 71.0 / 16695.0 * k3[i] + 71.0 / 1920.0 * k4[i]
+                        - 17253.0 / 339200.0 * k5[i]
+                        + 22.0 / 525.0 * k6[i]
+                        - 1.0 / 40.0 * k7[i]);
+                e * e
+            })
+            .sum();
         (sum_sq / n as f64).sqrt()
     };
     let next_dt = if err > 1e-15 {
@@ -194,7 +303,9 @@ where
             steps += 1;
         }
         dt = next_dt.clamp(total_dt * 1e-6, total_dt);
-        if steps > 100_000 { break; }
+        if steps > 100_000 {
+            break;
+        }
     }
     steps
 }
@@ -221,14 +332,20 @@ where
     F: Fn(&[f64]) -> Vec<f64>,
 {
     let n = n_exponents.min(dim);
-    if n == 0 || dim == 0 { return Vec::new(); }
+    if n == 0 || dim == 0 {
+        return Vec::new();
+    }
     let mut state = initial_state.to_vec();
     // Orthonormal basis for tangent space (identity columns)
-    let mut q: Vec<Vec<f64>> = (0..n).map(|i| {
-        let mut v = vec![0.0; dim];
-        if i < dim { v[i] = 1.0; }
-        v
-    }).collect();
+    let mut q: Vec<Vec<f64>> = (0..n)
+        .map(|i| {
+            let mut v = vec![0.0; dim];
+            if i < dim {
+                v[i] = 1.0;
+            }
+            v
+        })
+        .collect();
     let eps = 1e-8;
     let mut log_sum = vec![0.0f64; n];
     for _ in 0..n_steps {
@@ -236,8 +353,11 @@ where
         rk4(&mut state, dt, f);
         // Evolve each tangent vector via linearized flow (finite-difference Jacobian)
         for pv in &mut q {
-            let mut perturbed: Vec<f64> = state_old.iter().zip(pv.iter())
-                .map(|(&s, &p)| s + eps * p).collect();
+            let mut perturbed: Vec<f64> = state_old
+                .iter()
+                .zip(pv.iter())
+                .map(|(&s, &p)| s + eps * p)
+                .collect();
             rk4(&mut perturbed, dt, f);
             for i in 0..dim {
                 pv[i] = (perturbed[i] - state[i]) / eps;
@@ -248,11 +368,15 @@ where
             let norm = q[i].iter().map(|&v| v * v).sum::<f64>().sqrt();
             if norm > 1e-15 {
                 log_sum[i] += norm.ln();
-                for j in 0..dim { q[i][j] /= norm; }
+                for j in 0..dim {
+                    q[i][j] /= norm;
+                }
             }
             for j in (i + 1)..n {
                 let dot: f64 = q[i].iter().zip(q[j].iter()).map(|(&a, &b)| a * b).sum();
-                for k in 0..dim { q[j][k] -= dot * q[i][k]; }
+                for k in 0..dim {
+                    q[j][k] -= dot * q[i][k];
+                }
             }
         }
     }
@@ -294,7 +418,9 @@ where
             } else {
                 0.5
             };
-            let cross_state: Vec<f64> = prev.iter().zip(state.iter())
+            let cross_state: Vec<f64> = prev
+                .iter()
+                .zip(state.iter())
                 .map(|(&p, &s)| p + t_cross * (s - p))
                 .collect();
             crossings.push(cross_state);
@@ -307,12 +433,7 @@ where
 /// Ground-truth validation: compare RK4 vs RK45 trajectory divergence over time.
 /// Runs both integrators from the same initial condition for `n_steps` steps.
 /// Returns the RMS state divergence at the final step.
-pub fn compare_integrators<F>(
-    initial_state: &[f64],
-    dt: f64,
-    n_steps: usize,
-    f: &F,
-) -> f64
+pub fn compare_integrators<F>(initial_state: &[f64], dt: f64, n_steps: usize, f: &F) -> f64
 where
     F: Fn(&[f64]) -> Vec<f64>,
 {
@@ -322,8 +443,12 @@ where
         rk4(&mut s_rk4, dt, f);
         integrate_adaptive(&mut s_rk45, dt, 1e-8, |s| f(s));
     }
-    let rms: f64 = s_rk4.iter().zip(s_rk45.iter())
-        .map(|(a, b)| (a - b).powi(2)).sum::<f64>() / s_rk4.len() as f64;
+    let rms: f64 = s_rk4
+        .iter()
+        .zip(s_rk45.iter())
+        .map(|(a, b)| (a - b).powi(2))
+        .sum::<f64>()
+        / s_rk4.len() as f64;
     rms.sqrt()
 }
 
@@ -342,23 +467,35 @@ pub fn kmeans_cluster(
     let n = trajectory.len();
     let d = use_dims.min(trajectory[0].len());
     // Initialize centroids: evenly-spaced points from trajectory
-    let mut centroids: Vec<Vec<f64>> = (0..k).map(|i| {
-        let idx = (i * n) / k;
-        trajectory[idx][..d].to_vec()
-    }).collect();
+    let mut centroids: Vec<Vec<f64>> = (0..k)
+        .map(|i| {
+            let idx = (i * n) / k;
+            trajectory[idx][..d].to_vec()
+        })
+        .collect();
     let mut labels = vec![0usize; n];
     for _ in 0..max_iter {
         // Assignment step
         let mut changed = false;
         for (i, point) in trajectory.iter().enumerate() {
-            let best = (0..k).min_by(|&a, &b| {
-                let da: f64 = centroids[a].iter().zip(&point[..d])
-                    .map(|(c, p)| (c - p).powi(2)).sum();
-                let db: f64 = centroids[b].iter().zip(&point[..d])
-                    .map(|(c, p)| (c - p).powi(2)).sum();
-                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-            }).unwrap_or(0);
-            if labels[i] != best { changed = true; }
+            let best = (0..k)
+                .min_by(|&a, &b| {
+                    let da: f64 = centroids[a]
+                        .iter()
+                        .zip(&point[..d])
+                        .map(|(c, p)| (c - p).powi(2))
+                        .sum();
+                    let db: f64 = centroids[b]
+                        .iter()
+                        .zip(&point[..d])
+                        .map(|(c, p)| (c - p).powi(2))
+                        .sum();
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or(0);
+            if labels[i] != best {
+                changed = true;
+            }
             labels[i] = best;
         }
         // Update centroids
@@ -366,15 +503,21 @@ pub fn kmeans_cluster(
         let mut counts = vec![0usize; k];
         for (i, point) in trajectory.iter().enumerate() {
             let c = labels[i];
-            for j in 0..d { sums[c][j] += point[j]; }
+            for j in 0..d {
+                sums[c][j] += point[j];
+            }
             counts[c] += 1;
         }
         for c in 0..k {
             if counts[c] > 0 {
-                for j in 0..d { centroids[c][j] = sums[c][j] / counts[c] as f64; }
+                for j in 0..d {
+                    centroids[c][j] = sums[c][j] / counts[c] as f64;
+                }
             }
         }
-        if !changed { break; }
+        if !changed {
+            break;
+        }
     }
     (centroids, labels)
 }
@@ -427,9 +570,8 @@ where
                     let ratio = last_interval / prev_interval;
                     if (ratio - 1.0).abs() < 0.05 {
                         // Stable period detected — return average
-                        let avg = crossing_times.windows(2)
-                            .map(|w| w[1] - w[0])
-                            .sum::<f64>() / (crossing_times.len() - 1) as f64;
+                        let avg = crossing_times.windows(2).map(|w| w[1] - w[0]).sum::<f64>()
+                            / (crossing_times.len() - 1) as f64;
                         return Some(avg);
                     }
                 }
@@ -443,12 +585,7 @@ where
 /// Find a fixed point of the system near `guess` using Newton's method on f(x)=0.
 /// Returns `Some(fixed_point)` if converged within `tol` in `max_iter` iterations,
 /// or `None` if diverged.
-pub fn find_fixed_point<F>(
-    guess: &[f64],
-    tol: f64,
-    max_iter: usize,
-    f: &F,
-) -> Option<Vec<f64>>
+pub fn find_fixed_point<F>(guess: &[f64], tol: f64, max_iter: usize, f: &F) -> Option<Vec<f64>>
 where
     F: Fn(&[f64]) -> Vec<f64>,
 {
@@ -459,10 +596,14 @@ where
         let fx = f(&x);
         // Check convergence
         let fnorm: f64 = fx.iter().map(|&v| v * v).sum::<f64>().sqrt();
-        if fnorm < tol { return Some(x); }
+        if fnorm < tol {
+            return Some(x);
+        }
         // Divergence check
         let xnorm: f64 = x.iter().map(|&v| v * v).sum::<f64>().sqrt();
-        if xnorm > 1e6 { return None; }
+        if xnorm > 1e6 {
+            return None;
+        }
         // Build numerical Jacobian n×n
         let mut jac = vec![vec![0.0f64; n]; n];
         for j in 0..n {
@@ -475,40 +616,59 @@ where
         }
         // Solve J * dx = -fx via Gaussian elimination (in-place augmented matrix)
         // Augmented matrix: [J | -fx]
-        let mut aug: Vec<Vec<f64>> = (0..n).map(|i| {
-            let mut row = jac[i].clone();
-            row.push(-fx[i]);
-            row
-        }).collect();
+        let mut aug: Vec<Vec<f64>> = (0..n)
+            .map(|i| {
+                let mut row = jac[i].clone();
+                row.push(-fx[i]);
+                row
+            })
+            .collect();
         for col in 0..n {
             // Find pivot
             let pivot = (col..n).max_by(|&a, &b| {
-                aug[a][col].abs().partial_cmp(&aug[b][col].abs()).unwrap_or(std::cmp::Ordering::Equal)
+                aug[a][col]
+                    .abs()
+                    .partial_cmp(&aug[b][col].abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })?;
             aug.swap(col, pivot);
             let diag = aug[col][col];
-            if diag.abs() < 1e-15 { return None; }
-            for k in col..=n { aug[col][k] /= diag; }
+            if diag.abs() < 1e-15 {
+                return None;
+            }
+            for k in col..=n {
+                aug[col][k] /= diag;
+            }
             for row in 0..n {
                 if row != col {
                     let factor = aug[row][col];
-                    for k in col..=n { aug[row][k] -= factor * aug[col][k]; }
+                    for k in col..=n {
+                        aug[row][k] -= factor * aug[col][k];
+                    }
                 }
             }
         }
         // dx is in aug[i][n]
-        for i in 0..n { x[i] += aug[i][n]; }
+        for i in 0..n {
+            x[i] += aug[i][n];
+        }
     }
     // Final check
     let fx = f(&x);
     let fnorm: f64 = fx.iter().map(|&v| v * v).sum::<f64>().sqrt();
-    if fnorm < tol { Some(x) } else { None }
+    if fnorm < tol {
+        Some(x)
+    } else {
+        None
+    }
 }
 
 /// Classify the attractor type from its Lyapunov spectrum.
 /// Returns one of: "fixed_point", "limit_cycle", "torus", "chaos", "hyperchaos", "unknown"
 pub fn classify_attractor(lyapunov: &[f64]) -> &'static str {
-    if lyapunov.is_empty() { return "unknown"; }
+    if lyapunov.is_empty() {
+        return "unknown";
+    }
     let positive_count = lyapunov.iter().filter(|&&l| l > 0.01).count();
     let near_zero_count = lyapunov.iter().filter(|&&l| l.abs() < 0.01).count();
     let all_negative = lyapunov.iter().all(|&l| l < 0.0);
@@ -535,7 +695,9 @@ pub fn classify_attractor(lyapunov: &[f64]) -> &'static str {
 /// `order`: embedding dimension (3–7 typical). `delay`: time delay in samples.
 /// Returns entropy in nats, normalized to [0,1] by dividing by ln(order!).
 pub fn permutation_entropy(trajectory: &[f64], order: usize, delay: usize) -> f64 {
-    if order < 2 || trajectory.is_empty() { return 0.0; }
+    if order < 2 || trajectory.is_empty() {
+        return 0.0;
+    }
     let delay = delay.max(1);
     let window = order * delay;
     // Number of windows
@@ -551,17 +713,29 @@ pub fn permutation_entropy(trajectory: &[f64], order: usize, delay: usize) -> f6
         let pattern: Vec<f64> = (0..order).map(|k| trajectory[start + k * delay]).collect();
         // Argsort
         let mut idx: Vec<usize> = (0..order).collect();
-        idx.sort_by(|&a, &b| pattern[a].partial_cmp(&pattern[b]).unwrap_or(std::cmp::Ordering::Equal));
+        idx.sort_by(|&a, &b| {
+            pattern[a]
+                .partial_cmp(&pattern[b])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         *counts.entry(idx).or_insert(0) += 1;
     }
     let total = n_windows as f64;
-    let entropy: f64 = counts.values()
-        .map(|&c| { let p = c as f64 / total; -p * p.ln() })
+    let entropy: f64 = counts
+        .values()
+        .map(|&c| {
+            let p = c as f64 / total;
+            -p * p.ln()
+        })
         .sum();
     // Normalize by ln(order!)
     let factorial: f64 = (1..=order).map(|k| k as f64).product();
     let max_entropy = factorial.ln();
-    if max_entropy > 1e-15 { entropy / max_entropy } else { 0.0 }
+    if max_entropy > 1e-15 {
+        entropy / max_entropy
+    } else {
+        0.0
+    }
 }
 
 /// Estimate the correlation dimension of an attractor from a trajectory.
@@ -570,27 +744,39 @@ pub fn permutation_entropy(trajectory: &[f64], order: usize, delay: usize) -> f6
 /// Returns estimated dimension D.
 pub fn correlation_dimension(trajectory: &[Vec<f64>], n_pairs: usize) -> f64 {
     let n = trajectory.len();
-    if n < 2 || n_pairs == 0 { return 0.0; }
+    if n < 2 || n_pairs == 0 {
+        return 0.0;
+    }
     // Sample random pairs using a simple LCG
     #[allow(clippy::unreadable_literal)]
     let mut seed: u64 = 12_345_678_901_234_567;
     let lcg_next = |s: &mut u64| -> usize {
         #[allow(clippy::unreadable_literal)]
-        { *s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407); }
+        {
+            *s = s
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+        }
         (*s >> 33) as usize
     };
     let mut distances: Vec<f64> = Vec::with_capacity(n_pairs);
     for _ in 0..n_pairs {
         let i = lcg_next(&mut seed) % n;
         let j = lcg_next(&mut seed) % n;
-        if i == j { continue; }
-        let dist: f64 = trajectory[i].iter().zip(trajectory[j].iter())
+        if i == j {
+            continue;
+        }
+        let dist: f64 = trajectory[i]
+            .iter()
+            .zip(trajectory[j].iter())
             .map(|(&a, &b)| (a - b) * (a - b))
             .sum::<f64>()
             .sqrt();
         distances.push(dist);
     }
-    if distances.is_empty() { return 0.0; }
+    if distances.is_empty() {
+        return 0.0;
+    }
     distances.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let total = distances.len();
     let r1_idx = total / 10;
@@ -599,8 +785,7 @@ pub fn correlation_dimension(trajectory: &[Vec<f64>], n_pairs: usize) -> f64 {
     let r2 = distances[r2_idx.min(total - 1)];
     let c1 = distances.iter().filter(|&&d| d < r1).count() as f64;
     let c2 = distances.iter().filter(|&&d| d < r2).count() as f64;
-    let dim = (c2.max(1.0).ln() - c1.max(1.0).ln())
-        / ((r2 / r1.max(1e-10)).max(1e-10).ln());
+    let dim = (c2.max(1.0).ln() - c1.max(1.0).ln()) / ((r2 / r1.max(1e-10)).max(1e-10).ln());
     dim.clamp(0.0, 20.0)
 }
 
@@ -640,11 +825,7 @@ pub fn safe_param_path(
 /// `params`: baseline parameter values. `output_fn`: closure taking a param slice,
 /// returning a scalar metric. `delta`: relative perturbation (e.g. 0.1 for 10%).
 /// Returns sensitivity index for each parameter (larger = more influential).
-pub fn morris_sensitivity<F>(
-    params: &[f64],
-    delta: f64,
-    output_fn: F,
-) -> Vec<f64>
+pub fn morris_sensitivity<F>(params: &[f64], delta: f64, output_fn: F) -> Vec<f64>
 where
     F: Fn(&[f64]) -> f64,
 {
@@ -712,8 +893,7 @@ pub fn yoshida4<Fv, Fa>(
     dt: f64,
     velocity: Fv,
     force: Fa,
-)
-where
+) where
     Fv: Fn(&[f64]) -> Vec<f64>,
     Fa: Fn(&[f64]) -> Vec<f64>,
 {
@@ -729,22 +909,36 @@ where
     // Step 1
     let n = q_idx.len();
     let v = velocity(state);
-    for i in 0..n { state[q_idx[i]] += c1 * dt * v[i]; }
+    for i in 0..n {
+        state[q_idx[i]] += c1 * dt * v[i];
+    }
     let f = force(state);
-    for i in 0..n { state[p_idx[i]] += d1 * dt * f[i]; }
+    for i in 0..n {
+        state[p_idx[i]] += d1 * dt * f[i];
+    }
     // Step 2
     let v = velocity(state);
-    for i in 0..n { state[q_idx[i]] += c2 * dt * v[i]; }
+    for i in 0..n {
+        state[q_idx[i]] += c2 * dt * v[i];
+    }
     let f = force(state);
-    for i in 0..n { state[p_idx[i]] += d2 * dt * f[i]; }
+    for i in 0..n {
+        state[p_idx[i]] += d2 * dt * f[i];
+    }
     // Step 3 (mirror of step 1)
     let v = velocity(state);
-    for i in 0..n { state[q_idx[i]] += c2 * dt * v[i]; }
+    for i in 0..n {
+        state[q_idx[i]] += c2 * dt * v[i];
+    }
     let f = force(state);
-    for i in 0..n { state[p_idx[i]] += d1 * dt * f[i]; }
+    for i in 0..n {
+        state[p_idx[i]] += d1 * dt * f[i];
+    }
     // Final half-drift
     let v = velocity(state);
-    for i in 0..n { state[q_idx[i]] += c1 * dt * v[i]; }
+    for i in 0..n {
+        state[q_idx[i]] += c1 * dt * v[i];
+    }
 }
 
 /// Estimate transfer entropy from time series X → Y (information flow from X to Y).
@@ -754,14 +948,18 @@ where
 /// `n_bins`: number of histogram bins per dimension.
 /// Returns T_{X→Y} in nats (>0 means X drives Y, 0 means no coupling).
 pub fn transfer_entropy(x: &[f64], y: &[f64], lag: usize, n_bins: usize) -> f64 {
-    if x.len() != y.len() || x.len() < lag + 2 || n_bins < 2 { return 0.0; }
+    if x.len() != y.len() || x.len() < lag + 2 || n_bins < 2 {
+        return 0.0;
+    }
     let n = n_bins;
     // Normalize to [0, 1] then bin
     let normalize = |v: &[f64]| -> Vec<usize> {
         let lo = v.iter().cloned().fold(f64::INFINITY, f64::min);
         let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let range = (hi - lo).max(1e-15);
-        v.iter().map(|&val| ((val - lo) / range * (n as f64 - 1e-9)).floor() as usize).collect()
+        v.iter()
+            .map(|&val| ((val - lo) / range * (n as f64 - 1e-9)).floor() as usize)
+            .collect()
     };
     let xb = normalize(x);
     let yb = normalize(y);
@@ -795,20 +993,37 @@ pub fn transfer_entropy(x: &[f64], y: &[f64], lag: usize, n_bins: usize) -> f64 
     let total_y = len as f64 + n as f64;
 
     let entropy = |counts: &[f64], total: f64| -> f64 {
-        counts.iter().map(|&c| {
-            let p = (c + 1.0) / total;
-            -p * p.ln()
-        }).sum::<f64>()
+        counts
+            .iter()
+            .map(|&c| {
+                let p = (c + 1.0) / total;
+                -p * p.ln()
+            })
+            .sum::<f64>()
     };
 
     // H(y_future, y_past)
-    let h_yfy = entropy(&hist_yfy.iter().flatten().cloned().collect::<Vec<_>>(), total_yfy);
+    let h_yfy = entropy(
+        &hist_yfy.iter().flatten().cloned().collect::<Vec<_>>(),
+        total_yfy,
+    );
     // H(y_past)
     let h_y = entropy(&hist_y, total_y);
     // H(y_future, y_past, x_past)
-    let h3 = entropy(&hist3.iter().flatten().flatten().cloned().collect::<Vec<_>>(), total3);
+    let h3 = entropy(
+        &hist3
+            .iter()
+            .flatten()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>(),
+        total3,
+    );
     // H(y_past, x_past)
-    let h_yx = entropy(&hist_yx.iter().flatten().cloned().collect::<Vec<_>>(), total_yx);
+    let h_yx = entropy(
+        &hist_yx.iter().flatten().cloned().collect::<Vec<_>>(),
+        total_yx,
+    );
 
     // T = H(yf,yp) - H(yp) - H(yf,yp,xp) + H(yp,xp)
     let te = h_yfy - h_y - h3 + h_yx;
@@ -821,13 +1036,17 @@ pub fn transfer_entropy(x: &[f64], y: &[f64], lag: usize, n_bins: usize) -> f64 
 /// Returns mutual information in nats.
 #[allow(clippy::similar_names)]
 pub fn mutual_information(x: &[f64], y: &[f64], n_bins: usize) -> f64 {
-    if x.len() != y.len() || x.is_empty() || n_bins < 2 { return 0.0; }
+    if x.len() != y.len() || x.is_empty() || n_bins < 2 {
+        return 0.0;
+    }
     let n = n_bins;
     let normalize = |v: &[f64]| -> Vec<usize> {
         let lo = v.iter().cloned().fold(f64::INFINITY, f64::min);
         let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let range = (hi - lo).max(1e-15);
-        v.iter().map(|&val| ((val - lo) / range * (n as f64 - 1e-9)).floor() as usize).collect()
+        v.iter()
+            .map(|&val| ((val - lo) / range * (n as f64 - 1e-9)).floor() as usize)
+            .collect()
     };
     let xb = normalize(x);
     let yb = normalize(y);
@@ -847,9 +1066,28 @@ pub fn mutual_information(x: &[f64], y: &[f64], n_bins: usize) -> f64 {
     let total_y = len + n as f64;
     let total_xy = len + (n * n) as f64;
 
-    let h_x: f64 = hist_x.iter().map(|&c| { let p = (c + 1.0) / total_x; -p * p.ln() }).sum();
-    let h_y: f64 = hist_y.iter().map(|&c| { let p = (c + 1.0) / total_y; -p * p.ln() }).sum();
-    let h_xy: f64 = hist_xy.iter().flatten().map(|&c| { let p = (c + 1.0) / total_xy; -p * p.ln() }).sum();
+    let h_x: f64 = hist_x
+        .iter()
+        .map(|&c| {
+            let p = (c + 1.0) / total_x;
+            -p * p.ln()
+        })
+        .sum();
+    let h_y: f64 = hist_y
+        .iter()
+        .map(|&c| {
+            let p = (c + 1.0) / total_y;
+            -p * p.ln()
+        })
+        .sum();
+    let h_xy: f64 = hist_xy
+        .iter()
+        .flatten()
+        .map(|&c| {
+            let p = (c + 1.0) / total_xy;
+            -p * p.ln()
+        })
+        .sum();
 
     (h_x + h_y - h_xy).max(0.0)
 }
@@ -858,11 +1096,11 @@ pub fn mutual_information(x: &[f64], y: &[f64], n_bins: usize) -> f64 {
 /// Returns `RqaResult` with determinism, laminarity, and average diagonal line length.
 #[derive(Debug, Clone)]
 pub struct RqaResult {
-    pub recurrence_rate: f64,   // fraction of recurrent points
-    pub determinism: f64,       // fraction of recurrent points in diagonal lines >= min_line
-    pub laminarity: f64,        // fraction of recurrent points in vertical lines >= min_line
-    pub avg_diag_len: f64,      // average diagonal line length
-    pub entropy_diag: f64,      // Shannon entropy of diagonal line lengths
+    pub recurrence_rate: f64, // fraction of recurrent points
+    pub determinism: f64,     // fraction of recurrent points in diagonal lines >= min_line
+    pub laminarity: f64,      // fraction of recurrent points in vertical lines >= min_line
+    pub avg_diag_len: f64,    // average diagonal line length
+    pub entropy_diag: f64,    // Shannon entropy of diagonal line lengths
 }
 
 pub fn recurrence_quantification(
@@ -872,13 +1110,24 @@ pub fn recurrence_quantification(
 ) -> RqaResult {
     let raw_n = trajectory.len();
     if raw_n < 2 {
-        return RqaResult { recurrence_rate: 0.0, determinism: 0.0, laminarity: 0.0, avg_diag_len: 0.0, entropy_diag: 0.0 };
+        return RqaResult {
+            recurrence_rate: 0.0,
+            determinism: 0.0,
+            laminarity: 0.0,
+            avg_diag_len: 0.0,
+            entropy_diag: 0.0,
+        };
     }
     // Cap at 200 points
     let max_n = 200usize;
     let (traj, n) = if raw_n > max_n {
         let step = raw_n / max_n;
-        let sub: Vec<Vec<f64>> = trajectory.iter().step_by(step).take(max_n).cloned().collect();
+        let sub: Vec<Vec<f64>> = trajectory
+            .iter()
+            .step_by(step)
+            .take(max_n)
+            .cloned()
+            .collect();
         let len = sub.len();
         (sub, len)
     } else {
@@ -889,7 +1138,9 @@ pub fn recurrence_quantification(
     let mut recur = vec![vec![false; n]; n];
     for i in 0..n {
         for j in 0..n {
-            let dist: f64 = traj[i].iter().zip(traj[j].iter())
+            let dist: f64 = traj[i]
+                .iter()
+                .zip(traj[j].iter())
                 .map(|(&a, &b)| (a - b) * (a - b))
                 .sum::<f64>()
                 .sqrt();
@@ -912,30 +1163,48 @@ pub fn recurrence_quantification(
             if recur[i_start + k][j_start + k] {
                 run += 1;
             } else {
-                if run >= min_line { diag_lengths.push(run); }
+                if run >= min_line {
+                    diag_lengths.push(run);
+                }
                 run = 0;
             }
         }
-        if run >= min_line { diag_lengths.push(run); }
+        if run >= min_line {
+            diag_lengths.push(run);
+        }
     }
 
     let diag_rec_points: usize = diag_lengths.iter().sum();
-    let determinism = if rec_sum > 0 { diag_rec_points as f64 / rec_sum as f64 } else { 0.0 };
+    let determinism = if rec_sum > 0 {
+        diag_rec_points as f64 / rec_sum as f64
+    } else {
+        0.0
+    };
     let avg_diag_len = if !diag_lengths.is_empty() {
         diag_rec_points as f64 / diag_lengths.len() as f64
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     // Shannon entropy of diagonal line lengths
     let max_len = diag_lengths.iter().cloned().max().unwrap_or(0);
     let entropy_diag = if max_len >= min_line {
         let mut len_counts = vec![0usize; max_len + 1];
-        for &l in &diag_lengths { len_counts[l] += 1; }
+        for &l in &diag_lengths {
+            len_counts[l] += 1;
+        }
         let total_dl = diag_lengths.len() as f64;
-        len_counts.iter().filter(|&&c| c > 0).map(|&c| {
-            let p = c as f64 / total_dl;
-            -p * p.ln()
-        }).sum()
-    } else { 0.0 };
+        len_counts
+            .iter()
+            .filter(|&&c| c > 0)
+            .map(|&c| {
+                let p = c as f64 / total_dl;
+                -p * p.ln()
+            })
+            .sum()
+    } else {
+        0.0
+    };
 
     // Vertical lines (laminarity)
     let mut vert_rec_points = 0usize;
@@ -945,15 +1214,29 @@ pub fn recurrence_quantification(
             if recur[i][j] {
                 run += 1;
             } else {
-                if run >= min_line { vert_rec_points += run; }
+                if run >= min_line {
+                    vert_rec_points += run;
+                }
                 run = 0;
             }
         }
-        if run >= min_line { vert_rec_points += run; }
+        if run >= min_line {
+            vert_rec_points += run;
+        }
     }
-    let laminarity = if rec_sum > 0 { vert_rec_points as f64 / rec_sum as f64 } else { 0.0 };
+    let laminarity = if rec_sum > 0 {
+        vert_rec_points as f64 / rec_sum as f64
+    } else {
+        0.0
+    };
 
-    RqaResult { recurrence_rate, determinism, laminarity, avg_diag_len, entropy_diag }
+    RqaResult {
+        recurrence_rate,
+        determinism,
+        laminarity,
+        avg_diag_len,
+        entropy_diag,
+    }
 }
 
 /// Compute the FTLE field over a 2D grid of initial conditions in the (dim_x, dim_y) plane.
@@ -985,46 +1268,52 @@ where
     let eps = 1e-6;
     let inv_t = 1.0 / t_integration;
 
-    let indices: Vec<(usize, usize)> = (0..grid_n).flat_map(|i| (0..grid_n).map(move |j| (i, j))).collect();
+    let indices: Vec<(usize, usize)> = (0..grid_n)
+        .flat_map(|i| (0..grid_n).map(move |j| (i, j)))
+        .collect();
 
-    indices.par_iter().map(|&(i, j)| {
-        let xc = center[0] + (i as f64 / (grid_n - 1) as f64 - 0.5) * 2.0 * extent[0];
-        let yc = center[1] + (j as f64 / (grid_n - 1) as f64 - 0.5) * 2.0 * extent[1];
+    indices
+        .par_iter()
+        .map(|&(i, j)| {
+            let xc = center[0] + (i as f64 / (grid_n - 1) as f64 - 0.5) * 2.0 * extent[0];
+            let yc = center[1] + (j as f64 / (grid_n - 1) as f64 - 0.5) * 2.0 * extent[1];
 
-        let mut state_ref = fixed_state.to_vec();
-        if state_ref.len() < full_dim {
-            state_ref.resize(full_dim, 0.0);
-        }
-        state_ref[dim_x] = xc;
-        state_ref[dim_y] = yc;
+            let mut state_ref = fixed_state.to_vec();
+            if state_ref.len() < full_dim {
+                state_ref.resize(full_dim, 0.0);
+            }
+            state_ref[dim_x] = xc;
+            state_ref[dim_y] = yc;
 
-        let mut state_pert = state_ref.clone();
-        state_pert[dim_x] += eps;
+            let mut state_pert = state_ref.clone();
+            state_pert[dim_x] += eps;
 
-        for _ in 0..n_steps {
-            rk4(&mut state_ref, dt, f);
-            rk4(&mut state_pert, dt, f);
-        }
+            for _ in 0..n_steps {
+                rk4(&mut state_ref, dt, f);
+                rk4(&mut state_pert, dt, f);
+            }
 
-        let dist: f64 = state_ref.iter().zip(state_pert.iter())
-            .map(|(&a, &b)| (a - b) * (a - b))
-            .sum::<f64>()
-            .sqrt();
+            let dist: f64 = state_ref
+                .iter()
+                .zip(state_pert.iter())
+                .map(|(&a, &b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt();
 
-        let ftle = if dist > 1e-20 { inv_t * (dist / eps).ln() } else { 0.0 };
-        (xc, yc, ftle)
-    }).collect()
+            let ftle = if dist > 1e-20 {
+                inv_t * (dist / eps).ln()
+            } else {
+                0.0
+            };
+            (xc, yc, ftle)
+        })
+        .collect()
 }
 
 /// Test time-reversibility: integrate forward N steps, then backward N steps.
 /// Returns the return error |x_final - x_initial| / |x_initial|.
 /// For Hamiltonian systems this should be ~machine epsilon; dissipative systems will be large.
-pub fn reversibility_test<F>(
-    initial_state: &[f64],
-    dt: f64,
-    n_steps: usize,
-    f: &F,
-) -> f64
+pub fn reversibility_test<F>(initial_state: &[f64], dt: f64, n_steps: usize, f: &F) -> f64
 where
     F: Fn(&[f64]) -> Vec<f64>,
 {
@@ -1039,11 +1328,17 @@ where
     }
     // Relative return error
     let norm_init: f64 = initial_state.iter().map(|&v| v * v).sum::<f64>().sqrt();
-    let error: f64 = state.iter().zip(initial_state.iter())
+    let error: f64 = state
+        .iter()
+        .zip(initial_state.iter())
         .map(|(&a, &b)| (a - b) * (a - b))
         .sum::<f64>()
         .sqrt();
-    if norm_init > 1e-15 { error / norm_init } else { error }
+    if norm_init > 1e-15 {
+        error / norm_init
+    } else {
+        error
+    }
 }
 
 /// Compute an Arnold tongue map for a periodically forced system.
@@ -1071,56 +1366,63 @@ where
     let n = grid_n.max(2);
     let indices: Vec<(usize, usize)> = (0..n).flat_map(|i| (0..n).map(move |j| (i, j))).collect();
 
-    indices.par_iter().map(|&(i, j)| {
-        let omega = omega_range.0 + i as f64 * (omega_range.1 - omega_range.0) / (n - 1) as f64;
-        let amp   = amp_range.0   + j as f64 * (amp_range.1   - amp_range.0)   / (n - 1) as f64;
+    indices
+        .par_iter()
+        .map(|&(i, j)| {
+            let omega = omega_range.0 + i as f64 * (omega_range.1 - omega_range.0) / (n - 1) as f64;
+            let amp = amp_range.0 + j as f64 * (amp_range.1 - amp_range.0) / (n - 1) as f64;
 
-        let deriv_fn = make_deriv(omega, amp);
-        let mut state = initial_state.to_vec();
+            let deriv_fn = make_deriv(omega, amp);
+            let mut state = initial_state.to_vec();
 
-        // Warmup
-        let n_warmup = (t_warmup / dt).round() as usize;
-        for _ in 0..n_warmup {
-            rk4(&mut state, dt, &*deriv_fn);
-        }
-
-        // Measure zero crossings (negative→positive) of state[0]
-        let n_measure = (t_measure / dt).round() as usize;
-        let mut n_crossings: usize = 0;
-        let mut prev_val = state[0];
-        for _ in 0..n_measure {
-            rk4(&mut state, dt, &*deriv_fn);
-            let curr_val = state[0];
-            if prev_val < 0.0 && curr_val >= 0.0 {
-                n_crossings += 1;
+            // Warmup
+            let n_warmup = (t_warmup / dt).round() as usize;
+            for _ in 0..n_warmup {
+                rk4(&mut state, dt, &*deriv_fn);
             }
-            prev_val = curr_val;
-        }
 
-        let output_freq = n_crossings as f64 / t_measure;
-        let drive_freq = omega / (2.0 * PI);
-        let sync_ratio = if omega > 0.0 { output_freq / drive_freq.max(1e-15) } else { 0.0 };
+            // Measure zero crossings (negative→positive) of state[0]
+            let n_measure = (t_measure / dt).round() as usize;
+            let mut n_crossings: usize = 0;
+            let mut prev_val = state[0];
+            for _ in 0..n_measure {
+                rk4(&mut state, dt, &*deriv_fn);
+                let curr_val = state[0];
+                if prev_val < 0.0 && curr_val >= 0.0 {
+                    n_crossings += 1;
+                }
+                prev_val = curr_val;
+            }
 
-        // is_locked: sync_ratio near a simple rational p/q (p,q ≤ 4)
-        let is_locked = {
-            let near_integer = (sync_ratio - sync_ratio.round()).abs() < 0.1;
-            let near_simple = {
-                let mut found = false;
-                'outer: for p in 1usize..=4 {
-                    for q in 1usize..=4 {
-                        if (sync_ratio - p as f64 / q as f64).abs() < 0.05 {
-                            found = true;
-                            break 'outer;
+            let output_freq = n_crossings as f64 / t_measure;
+            let drive_freq = omega / (2.0 * PI);
+            let sync_ratio = if omega > 0.0 {
+                output_freq / drive_freq.max(1e-15)
+            } else {
+                0.0
+            };
+
+            // is_locked: sync_ratio near a simple rational p/q (p,q ≤ 4)
+            let is_locked = {
+                let near_integer = (sync_ratio - sync_ratio.round()).abs() < 0.1;
+                let near_simple = {
+                    let mut found = false;
+                    'outer: for p in 1usize..=4 {
+                        for q in 1usize..=4 {
+                            if (sync_ratio - p as f64 / q as f64).abs() < 0.05 {
+                                found = true;
+                                break 'outer;
+                            }
                         }
                     }
-                }
-                found
+                    found
+                };
+                near_integer || near_simple
             };
-            near_integer || near_simple
-        };
 
-        (omega, amp, sync_ratio, is_locked)
-    }).collect()
+            (omega, amp, sync_ratio, is_locked)
+        })
+        .collect()
 }
 
 /// Compute a distance between two parameter vectors in normalized parameter space.
@@ -1130,12 +1432,16 @@ where
 /// Returns normalized distance in [0, 1].
 pub fn param_distance(params_a: &[f64], params_b: &[f64], ranges: &[(f64, f64)]) -> f64 {
     let n = params_a.len().min(params_b.len()).min(ranges.len());
-    if n == 0 { return 0.0; }
-    let sum_sq: f64 = (0..n).map(|i| {
-        let range = (ranges[i].1 - ranges[i].0).abs().max(1e-10);
-        let d = (params_a[i] - params_b[i]) / range;
-        d * d
-    }).sum();
+    if n == 0 {
+        return 0.0;
+    }
+    let sum_sq: f64 = (0..n)
+        .map(|i| {
+            let range = (ranges[i].1 - ranges[i].0).abs().max(1e-10);
+            let d = (params_a[i] - params_b[i]) / range;
+            d * d
+        })
+        .sum();
     (sum_sq / n as f64).sqrt().clamp(0.0, 1.0)
 }
 
