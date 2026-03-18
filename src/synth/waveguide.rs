@@ -41,6 +41,11 @@ pub struct WaveguideString {
 const MAX_DELAY: usize = 4096;
 
 impl WaveguideString {
+    /// Create a new waveguide string model tuned to the given sample rate.
+    ///
+    /// The string is initialized at A3 (220 Hz) with balanced brightness and
+    /// mild dispersion.  Call [`WaveguideString::set_freq`] before the first
+    /// excitation to tune it to the desired fundamental.
     pub fn new(sample_rate: f32) -> Self {
         Self {
             delay_fwd: vec![0.0; MAX_DELAY],
@@ -61,6 +66,10 @@ impl WaveguideString {
         }
     }
 
+    /// Set the string fundamental frequency in Hz.
+    ///
+    /// The actual pitch is further modulated by `self.tension` (exponential mapping
+    /// around unity at 0.5).
     pub fn set_freq(&mut self, hz: f32) {
         let hz = hz.max(10.0);
         // Exponential mapping: tension [0,1] → frequency [0.25x, 4.0x], unity at 0.5

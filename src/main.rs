@@ -70,7 +70,20 @@ const BREATHING_PERIOD_SECS: f64 = 4.5;
 const BREATHING_DEPTH: f32 = 0.033;
 
 fn main() -> anyhow::Result<()> {
-    env_logger::init();
+    // Initialize tracing subscriber (reads RUST_LOG env var, falls back to info).
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_target(false)
+        .compact()
+        .init();
+
+    // Keep env_logger for legacy log:: macros used in library code.
+    let _ = env_logger::try_init();
+
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "math-sonify starting");
 
     // ── Headless CLI mode ─────────────────────────────────────────────────
     let args: Vec<String> = std::env::args().collect();
@@ -80,6 +93,7 @@ fn main() -> anyhow::Result<()> {
 
     let config_path = std::path::PathBuf::from("config.toml");
     let config = load_config(&config_path);
+    tracing::info!(system = %config.system.name, dt = config.system.dt, "configuration loaded");
 
     // Shared state for UI <-> sim communication
     let shared = Arc::new(Mutex::new(AppState::new(config.clone())));

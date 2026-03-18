@@ -30,6 +30,12 @@ pub struct KarplusStrong {
 }
 
 impl KarplusStrong {
+    /// Create a new Karplus-Strong synthesizer.
+    ///
+    /// # Parameters
+    /// - `max_freq_hz`: Minimum expected note frequency (sets the buffer size).
+    ///   Lower values require a larger delay line; 20 Hz covers the full audio range.
+    /// - `sample_rate`: Audio sample rate in Hz.
     pub fn new(max_freq_hz: f32, sample_rate: f32) -> Self {
         let max_len = (sample_rate / max_freq_hz) as usize + 4;
         Self {
@@ -74,6 +80,9 @@ impl KarplusStrong {
         self.active = true;
     }
 
+    /// Advance the string model by one sample and return the output.
+    ///
+    /// Returns 0.0 when the string has decayed to inaudible levels.
     pub fn next_sample(&mut self) -> f32 {
         if !self.active { return 0.0; }
 

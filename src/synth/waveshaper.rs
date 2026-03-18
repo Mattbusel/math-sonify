@@ -20,10 +20,14 @@ pub struct Waveshaper {
 }
 
 impl Waveshaper {
+    /// Create a new waveshaper with unity drive, zero mix (bypass), and mild tube asymmetry.
     pub fn new() -> Self {
         Self { drive: 1.0, mix: 0.0, asymmetry: 0.22 }
     }
 
+    /// Process one audio sample through the waveshaper and return the distorted output.
+    ///
+    /// Returns the input unchanged when `self.mix < 0.001`.
     pub fn process(&self, x: f32) -> f32 {
         if self.mix < 0.001 { return x; }
 

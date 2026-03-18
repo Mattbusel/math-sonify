@@ -80,6 +80,11 @@ impl Biquad {
     }
 }
 
+/// Three-band parametric equalizer: low shelf, mid peak, high shelf.
+///
+/// Call [`ThreeBandEq::update`] after changing any gain or frequency field to
+/// rebuild the biquad coefficients.  [`ThreeBandEq::process`] is real-time safe
+/// and requires no allocation.
 pub struct ThreeBandEq {
     low_shelf_l: Biquad,
     low_shelf_r: Biquad,
@@ -95,6 +100,7 @@ pub struct ThreeBandEq {
 }
 
 impl ThreeBandEq {
+    /// Create a new flat (all gains = 0 dB) three-band EQ.
     pub fn new(sample_rate: f32) -> Self {
         Self {
             low_shelf_l: Biquad::unity(),

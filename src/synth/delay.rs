@@ -14,6 +14,11 @@ pub struct DelayLine {
 }
 
 impl DelayLine {
+    /// Create a new delay line with the specified maximum delay and sample rate.
+    ///
+    /// # Parameters
+    /// - `max_delay_ms`: Maximum delay time in milliseconds; sets the buffer size.
+    /// - `sample_rate`: Audio sample rate in Hz.
     pub fn new(max_delay_ms: f32, sample_rate: f32) -> Self {
         let max_samples = (max_delay_ms * 0.001 * sample_rate) as usize + 4;
         Self {
@@ -26,6 +31,7 @@ impl DelayLine {
         }
     }
 
+    /// Update the delay time; clamped to `[2 samples, buffer length - 2]`.
     pub fn set_delay_ms(&mut self, ms: f32, sample_rate: f32) {
         let max = self.buf_l.len() as f32 - 2.0;
         self.delay_samples = (ms * 0.001 * sample_rate).clamp(2.0, max);
@@ -41,6 +47,7 @@ impl DelayLine {
         buf[i0] * (1.0 - frac) + buf[i1] * frac
     }
 
+    /// Process one stereo sample pair and return `(dry + wet_left, dry + wet_right)`.
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
         let l = if l.is_finite() { l } else { 0.0 };
         let r = if r.is_finite() { r } else { 0.0 };

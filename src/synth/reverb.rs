@@ -1,5 +1,11 @@
-/// Freeverb — Jezar's classic reverb algorithm.
-/// 8 parallel comb filters + 4 allpass filters in series, stereo.
+/// Freeverb — Jezar's classic algorithmic reverb.
+///
+/// 8 parallel comb filters feed 4 series allpass filters in a stereo
+/// configuration.  The allpass filters decorrelate the left and right
+/// channels by using delay-line lengths that differ by 23 samples.
+///
+/// This reverb is kept on the master bus as a low-CPU hall/room effect.
+/// For a denser, more diffuse tail see [`FdnReverb`](crate::synth::FdnReverb).
 
 const NUM_COMBS: usize = 8;
 const NUM_ALLPASS: usize = 4;
@@ -64,6 +70,10 @@ pub struct Freeverb {
 }
 
 impl Freeverb {
+    /// Create a new Freeverb instance tuned to the given sample rate.
+    ///
+    /// Delay-line lengths are scaled proportionally from the canonical
+    /// 44100 Hz values, so the reverb time is sample-rate independent.
     pub fn new(sample_rate: f32) -> Self {
         let scale = sample_rate / 44100.0;
         let scale_usize = |t: usize| ((t as f32 * scale) as usize).max(1);
@@ -106,12 +116,19 @@ impl Freeverb {
         }
     }
 
+    /// Set the comb-filter feedback coefficient, controlling reverb decay time.
+    ///
+    /// A value near `0.84` gives roughly a 2-second tail at 44100 Hz.
+    /// Values above `0.98` cause the reverb to ring indefinitely.
     pub fn set_room_size(&mut self, r: f32) {
         self.room_size = r;
         for c in &mut self.combs_l { c.set_feedback(r); }
         for c in &mut self.combs_r { c.set_feedback(r); }
     }
 
+    /// Set the high-frequency damping coefficient for each comb filter.
+    ///
+    /// Higher values roll off highs faster, simulating absorption by air and surfaces.
     pub fn set_damp(&mut self, d: f32) {
         self.damp = d;
         for c in &mut self.combs_l { c.set_damp(d); }

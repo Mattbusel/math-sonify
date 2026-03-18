@@ -1,5 +1,13 @@
-/// Lookahead brickwall limiter.
-/// Uses a simple peak follower with fast attack and slow release.
+/// Lookahead brickwall limiter with peak follower and gain smoothing.
+///
+/// A short lookahead buffer (default 5 ms) gives the gain-reduction
+/// envelope time to react before the transient arrives at the output,
+/// preventing overshoot at the configured threshold.  Gain changes are
+/// low-pass smoothed to avoid zipper noise on rapid transients.
+///
+/// This processor is always present on the master bus.  It is not meant
+/// to be a creative effect; the threshold is set to -0.5 dBFS so that
+/// the limiter is only active on peaks that would otherwise clip.
 pub struct Limiter {
     threshold: f32,
     envelope: f32,
@@ -12,6 +20,12 @@ pub struct Limiter {
 }
 
 impl Limiter {
+    /// Create a new limiter.
+    ///
+    /// # Parameters
+    /// - `threshold_db`: Limiting threshold in dBFS (e.g. `-0.5`).
+    /// - `lookahead_ms`: Lookahead delay in milliseconds (e.g. `5.0`).
+    /// - `sample_rate`: Audio sample rate in Hz.
     pub fn new(threshold_db: f32, lookahead_ms: f32, sample_rate: f32) -> Self {
         let threshold = 10.0f32.powf(threshold_db / 20.0);
         let lh_len = (lookahead_ms * 0.001 * sample_rate) as usize + 1;
@@ -29,6 +43,7 @@ impl Limiter {
         }
     }
 
+    /// Process one stereo sample pair and return the gain-limited output `(left, right)`.
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
         let l = if l.is_finite() { l.clamp(-10.0, 10.0) } else { 0.0 };
         let r = if r.is_finite() { r.clamp(-10.0, 10.0) } else { 0.0 };

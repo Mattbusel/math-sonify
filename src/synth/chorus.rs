@@ -15,6 +15,7 @@ pub struct Chorus {
 }
 
 impl Chorus {
+    /// Create a new chorus with default settings (off, slow rate, moderate depth).
     pub fn new(sample_rate: f32) -> Self {
         // Max delay 50 ms (a little headroom above the deepest modulation)
         let max_delay_samples = (50.0 * 0.001 * sample_rate) as usize + 2;
@@ -43,6 +44,9 @@ impl Chorus {
         buf[i0] * (1.0 - frac) + buf[i1] * frac
     }
 
+    /// Process one stereo sample pair and return the chorused output.
+    ///
+    /// Returns the input unchanged when `self.mix < 0.001`.
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
         use std::f32::consts::TAU;
         if self.mix < 0.001 { return (l, r); }

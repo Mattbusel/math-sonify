@@ -1,6 +1,6 @@
 [package]
 name = "math-sonify"
-version = "1.0.0"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.75"
 description = "Real-time procedural audio from mathematical dynamical systems (Lorenz, Rossler, Double Pendulum, and more)"
@@ -9,9 +9,18 @@ repository = "https://github.com/Mattbusel/math-sonify"
 homepage = "https://github.com/Mattbusel/math-sonify"
 keywords = ["audio", "chaos", "dynamical-systems", "synthesis", "generative"]
 categories = ["multimedia::audio", "science", "simulation"]
-authors = ["Matt Busel"]
+authors = ["Matt Busel <matt@mattbusel.com>"]
 readme = "README.md"
 documentation = "https://docs.rs/math-sonify"
+exclude = [
+    "release/",
+    "screenshots/",
+    "docs/bifurcation.png",
+    "docs/portrait_*.png",
+    "patch_*.py",
+    "build_release.bat",
+    "math_sonify_vision.pdf",
+]
 
 [[bin]]
 name = "math-sonify"
@@ -47,6 +56,10 @@ hound = "3.5"
 midir = "0.9"
 png = "0.17"
 
+# Tracing instrumentation
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
 # VST3/CLAP plugin support
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", features = ["assert_process_allocs"] }
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", package = "nih_plug_egui" }
@@ -54,6 +67,29 @@ nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug", rev = "28b149
 [profile.release]
 opt-level = 3
 lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+panic = "abort"
 
 [profile.dev]
 opt-level = 1
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+
+[lints.clippy]
+# Deny the most impactful correctness lints
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+indexing_slicing = "warn"
+# Style and readability
+pedantic = "warn"
+# Allow common false-positive triggers in audio DSP code
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+module_name_repetitions = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"

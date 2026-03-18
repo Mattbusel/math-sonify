@@ -36,21 +36,33 @@ pub type XrunCounter = Arc<std::sync::atomic::AtomicU32>;
 
 /// One-shot playback of a pre-recorded snippet (stereo interleaved f32).
 /// Written by the UI thread (song sequencer), read+consumed by the audio thread.
+/// One-shot playback state for a pre-recorded snippet on the audio thread.
+///
+/// Snippets are short stereo-interleaved f32 recordings (usually 5–30 seconds)
+/// that the live looper plays back through the master effects chain.
 pub struct SnippetPlayback {
+    /// Stereo-interleaved f32 sample data.
     pub samples: Vec<f32>,
+    /// Current read position (sample index, not frame).
     pub pos: usize,
+    /// Whether playback is currently active.
     pub active: bool,
+    /// Playback volume scalar (0..1).
     pub volume: f32,
-    /// Set to true by audio thread when playback ends (UI reads this to advance to next slot).
+    /// Set to `true` by the audio thread when playback reaches the end.
+    /// The UI polls this flag to advance to the next looper slot.
     pub on_complete: bool,
 }
 
+/// Thread-safe handle to [`SnippetPlayback`] shared between the UI and audio threads.
 pub type SharedSnippetPlayback = Arc<Mutex<SnippetPlayback>>;
 
 impl SnippetPlayback {
+    /// Create an idle (silent) playback state.
     pub fn idle() -> Self {
         Self { samples: Vec::new(), pos: 0, active: false, volume: 0.8, on_complete: false }
     }
+    /// Create an active playback state that will begin playing `samples` immediately.
     pub fn play(samples: Vec<f32>, volume: f32) -> Self {
         Self { samples, pos: 0, active: true, volume, on_complete: false }
     }
@@ -839,12 +851,26 @@ impl SynthState {
 // Audio engine bootstrap
 // ---------------------------------------------------------------------------
 
+/// Real-time audio engine.
+///
+/// Owns the cpal output stream (and optional input stream for sidechain).
+/// The stream remains active for the lifetime of this struct; dropping it
+/// stops audio.
 pub struct AudioEngine {
     _stream: Stream,
     _input_stream: Option<Stream>,
 }
 
 impl AudioEngine {
+    /// Start the audio engine and return the engine handle plus the actual sample rate.
+    ///
+    /// Opens the system default output device, negotiates sample format, and
+    /// spawns the cpal audio callback.  The callback receives [`AudioParams`]
+    /// batches from `params_rx` via `try_recv` — it never blocks.
+    ///
+    /// # Errors
+    /// Returns [`anyhow::Error`] if no output device is available or the stream
+    /// could not be built.
     pub fn start(
         params_rx: Receiver<[Option<AudioParams>; 3]>,
         _sample_rate: u32,
@@ -869,6 +895,7 @@ impl AudioEngine {
         let actual_sr = default_config.sample_rate().0;
         let fmt = default_config.sample_format();
         log::info!("Audio: {} Hz, {:?}", actual_sr, fmt);
+        tracing::info!(sample_rate = actual_sr, format = ?fmt, "audio engine starting");
 
         let sr = actual_sr as f32;
         let synth = Arc::new(Mutex::new(
@@ -1002,7 +1029,9 @@ pub fn save_clip(clip_buffer: &ClipBuffer, sample_rate: u32) -> anyhow::Result<S
     let mut writer = hound::WavWriter::create(&filename, spec)?;
     for s in &samples { writer.write_sample(*s)?; }
     writer.finalize()?;
-    Ok(filename.to_string_lossy().into_owned())
+    let path_str = filename.to_string_lossy().into_owned();
+    tracing::info!(path = %path_str, samples = samples.len(), "clip saved");
+    Ok(path_str)
 }
 
 /// Capture last `capture_secs` seconds from the clip buffer, save to snippets/ dir.

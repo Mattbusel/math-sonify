@@ -20,6 +20,13 @@
 enum Stage { #[default] Idle, Attack, Decay, Sustain, Release }
 
 #[derive(Clone, Default)]
+/// ADSR envelope generator with exponential decay and release curves.
+///
+/// Typical use:
+/// 1. Call [`Adsr::trigger`] when a note starts.
+/// 2. Call [`Adsr::next_sample`] once per audio sample to get the envelope level.
+/// 3. Call [`Adsr::release`] when the note ends.
+/// 4. Continue calling [`Adsr::next_sample`] until [`Adsr::is_idle`] returns `true`.
 pub struct Adsr {
     stage: Stage,
     level: f32,
@@ -41,6 +48,14 @@ fn exp_coeff(time_ms: f32, sample_rate: f32) -> f32 {
 }
 
 impl Adsr {
+    /// Create a new ADSR with the given timing parameters.
+    ///
+    /// # Parameters
+    /// - `attack_ms`: Linear attack time in milliseconds.
+    /// - `decay_ms`: Exponential decay time to reach sustain level.
+    /// - `sustain`: Sustain amplitude level (0..1).
+    /// - `release_ms`: Exponential release time to reach silence.
+    /// - `sample_rate`: Audio sample rate in Hz.
     pub fn new(attack_ms: f32, decay_ms: f32, sustain: f32, release_ms: f32, sample_rate: f32) -> Self {
         let sustain = sustain.clamp(0.0, 1.0);
         let mut s = Self {
@@ -68,11 +83,16 @@ impl Adsr {
         self.sustain_level = sustain;
     }
 
+    /// Begin the attack stage.
     pub fn trigger(&mut self) { self.stage = Stage::Attack; }
+    /// Begin the release stage (no-op if already idle).
     pub fn release(&mut self) { if self.stage != Stage::Idle { self.stage = Stage::Release; } }
+    /// Returns `true` when the envelope has fully released and is producing silence.
     pub fn is_idle(&self) -> bool { self.stage == Stage::Idle }
+    /// Returns the current envelope level without advancing the state.
     pub fn level(&self) -> f32 { self.level }
 
+    /// Advance the envelope by one sample and return the current level.
     pub fn next_sample(&mut self) -> f32 {
         match self.stage {
             Stage::Idle => {

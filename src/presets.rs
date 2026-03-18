@@ -1,10 +1,19 @@
 use crate::config::*;
 
+/// A named synthesis preset bundling a human-readable description with a
+/// corresponding [`Config`] that can be loaded into the engine.
 pub struct Preset {
+    /// Display name shown in the UI preset picker.
     pub name: &'static str,
+    /// One-line description of the sonic character of this preset.
     pub description: &'static str,
 }
 
+/// Built-in preset catalogue.
+///
+/// Each entry maps a human-readable name to a short description.  Call
+/// [`load_preset`] with a name from this slice to obtain the corresponding
+/// [`Config`].
 pub const PRESETS: &[Preset] = &[
     Preset { name: "Lorenz Ambience", description: "Slow drift through the butterfly attractor" },
     Preset { name: "Pendulum Rhythm", description: "Chaotic pendulum drives granular pulses" },
@@ -16,6 +25,10 @@ pub const PRESETS: &[Preset] = &[
     Preset { name: "Pendulum Meditation", description: "Slow pendulum drift through pure harmonic ratios" },
 ];
 
+/// Load the [`Config`] for a named preset.
+///
+/// Returns the preset configuration for the given `name`, or
+/// `Config::default()` if the name does not match any known preset.
 pub fn load_preset(name: &str) -> Config {
     match name {
         "Lorenz Ambience" => Config {
