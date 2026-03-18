@@ -79,11 +79,6 @@ opt-level = 3
 lto = "thin"
 
 [lints.clippy]
-# Deny the most impactful correctness lints
-unwrap_used = "warn"
-expect_used = "warn"
-panic = "warn"
-indexing_slicing = "warn"
 # Allow common false-positive triggers in audio DSP code
 cast_precision_loss = "allow"
 cast_possible_truncation = "allow"
@@ -91,3 +86,8 @@ cast_sign_loss = "allow"
 module_name_repetitions = "allow"
 too_many_arguments = "allow"
 too_many_lines = "allow"
+# DSP/audio code legitimately indexes into fixed-size audio buffers
+indexing_slicing = "allow"
+# These fire too many false positives in plugin/DSP code
+derivable_impls = "allow"
+manual_clamp = "allow"

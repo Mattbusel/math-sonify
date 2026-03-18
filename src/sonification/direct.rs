@@ -10,6 +10,12 @@ pub struct DirectMapping {
     alpha: f64, // exponential moving average for min/max tracking
 }
 
+impl Default for DirectMapping {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DirectMapping {
     /// Creates a new `DirectMapping` with an empty min/max window.
     ///
