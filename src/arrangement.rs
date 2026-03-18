@@ -48,7 +48,13 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
     let t = t.clamp(0.0, 1.0);
     let lf64 = |a: f64, b: f64| -> f64 { a + (b - a) * t as f64 };
     let lf32 = |a: f32, b: f32| -> f32 { a + (b - a) * t };
-    let ls   = |a: &str, b: &str| -> String { if t < 0.5 { a.to_string() } else { b.to_string() } };
+    let ls = |a: &str, b: &str| -> String {
+        if t < 0.5 {
+            a.to_string()
+        } else {
+            b.to_string()
+        }
+    };
 
     Config {
         system: SystemConfig {
@@ -57,67 +63,144 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             speed: lf64(a.system.speed, b.system.speed),
         },
         sonification: SonificationConfig {
-            mode:               ls(&a.sonification.mode, &b.sonification.mode),
-            scale:              ls(&a.sonification.scale, &b.sonification.scale),
-            base_frequency:     lf64(a.sonification.base_frequency, b.sonification.base_frequency),
-            octave_range:       lf64(a.sonification.octave_range, b.sonification.octave_range),
-            chord_mode:         ls(&a.sonification.chord_mode, &b.sonification.chord_mode),
-            transpose_semitones: lf32(a.sonification.transpose_semitones, b.sonification.transpose_semitones),
-            portamento_ms:      lf32(a.sonification.portamento_ms, b.sonification.portamento_ms),
-            voice_levels:       std::array::from_fn(|i| lf32(a.sonification.voice_levels[i], b.sonification.voice_levels[i])),
-            voice_shapes:       if t < 0.5 { a.sonification.voice_shapes.clone() } else { b.sonification.voice_shapes.clone() },
+            mode: ls(&a.sonification.mode, &b.sonification.mode),
+            scale: ls(&a.sonification.scale, &b.sonification.scale),
+            base_frequency: lf64(a.sonification.base_frequency, b.sonification.base_frequency),
+            octave_range: lf64(a.sonification.octave_range, b.sonification.octave_range),
+            chord_mode: ls(&a.sonification.chord_mode, &b.sonification.chord_mode),
+            transpose_semitones: lf32(
+                a.sonification.transpose_semitones,
+                b.sonification.transpose_semitones,
+            ),
+            portamento_ms: lf32(a.sonification.portamento_ms, b.sonification.portamento_ms),
+            voice_levels: std::array::from_fn(|i| {
+                lf32(
+                    a.sonification.voice_levels[i],
+                    b.sonification.voice_levels[i],
+                )
+            }),
+            voice_shapes: if t < 0.5 {
+                a.sonification.voice_shapes.clone()
+            } else {
+                b.sonification.voice_shapes.clone()
+            },
         },
         audio: AudioConfig {
-            sample_rate:      a.audio.sample_rate,
-            buffer_size:      a.audio.buffer_size,
-            reverb_wet:       lf32(a.audio.reverb_wet,      b.audio.reverb_wet),
-            delay_ms:         lf32(a.audio.delay_ms,        b.audio.delay_ms),
-            delay_feedback:   lf32(a.audio.delay_feedback,  b.audio.delay_feedback),
+            sample_rate: a.audio.sample_rate,
+            buffer_size: a.audio.buffer_size,
+            reverb_wet: lf32(a.audio.reverb_wet, b.audio.reverb_wet),
+            delay_ms: lf32(a.audio.delay_ms, b.audio.delay_ms),
+            delay_feedback: lf32(a.audio.delay_feedback, b.audio.delay_feedback),
             // Clamp lerped volume so morph valleys never drop below audible threshold
-            master_volume:    lf32(a.audio.master_volume,   b.audio.master_volume).max(0.45),
-            bit_depth:        lf32(a.audio.bit_depth,       b.audio.bit_depth),
-            rate_crush:       lf32(a.audio.rate_crush,      b.audio.rate_crush),
-            chorus_mix:       lf32(a.audio.chorus_mix,      b.audio.chorus_mix),
-            chorus_rate:      lf32(a.audio.chorus_rate,     b.audio.chorus_rate),
-            chorus_depth:     lf32(a.audio.chorus_depth,    b.audio.chorus_depth),
+            master_volume: lf32(a.audio.master_volume, b.audio.master_volume).max(0.45),
+            bit_depth: lf32(a.audio.bit_depth, b.audio.bit_depth),
+            rate_crush: lf32(a.audio.rate_crush, b.audio.rate_crush),
+            chorus_mix: lf32(a.audio.chorus_mix, b.audio.chorus_mix),
+            chorus_rate: lf32(a.audio.chorus_rate, b.audio.chorus_rate),
+            chorus_depth: lf32(a.audio.chorus_depth, b.audio.chorus_depth),
             waveshaper_drive: lf32(a.audio.waveshaper_drive, b.audio.waveshaper_drive),
-            waveshaper_mix:   lf32(a.audio.waveshaper_mix,  b.audio.waveshaper_mix),
+            waveshaper_mix: lf32(a.audio.waveshaper_mix, b.audio.waveshaper_mix),
         },
-        lorenz:          LorenzConfig { sigma: lf64(a.lorenz.sigma, b.lorenz.sigma), rho: lf64(a.lorenz.rho, b.lorenz.rho), beta: lf64(a.lorenz.beta, b.lorenz.beta) },
-        rossler:         RosslerConfig { a: lf64(a.rossler.a, b.rossler.a), b: lf64(a.rossler.b, b.rossler.b), c: lf64(a.rossler.c, b.rossler.c) },
-        double_pendulum: DoublePendulumConfig { m1: lf64(a.double_pendulum.m1, b.double_pendulum.m1), m2: lf64(a.double_pendulum.m2, b.double_pendulum.m2), l1: lf64(a.double_pendulum.l1, b.double_pendulum.l1), l2: lf64(a.double_pendulum.l2, b.double_pendulum.l2) },
-        geodesic_torus:  GeodesicTorusConfig { big_r: lf64(a.geodesic_torus.big_r, b.geodesic_torus.big_r), r: lf64(a.geodesic_torus.r, b.geodesic_torus.r) },
-        kuramoto:        KuramotoConfig { n_oscillators: a.kuramoto.n_oscillators, coupling: lf64(a.kuramoto.coupling, b.kuramoto.coupling) },
-        duffing:         DuffingConfig { delta: lf64(a.duffing.delta, b.duffing.delta), alpha: lf64(a.duffing.alpha, b.duffing.alpha), beta: lf64(a.duffing.beta, b.duffing.beta), gamma: lf64(a.duffing.gamma, b.duffing.gamma), omega: lf64(a.duffing.omega, b.duffing.omega) },
-        van_der_pol:     VanDerPolConfig { mu: lf64(a.van_der_pol.mu, b.van_der_pol.mu) },
-        halvorsen:       HalvorsenConfig { a: lf64(a.halvorsen.a, b.halvorsen.a) },
-        aizawa:          AizawaConfig { a: lf64(a.aizawa.a, b.aizawa.a), b: lf64(a.aizawa.b, b.aizawa.b), c: lf64(a.aizawa.c, b.aizawa.c), d: lf64(a.aizawa.d, b.aizawa.d), e: lf64(a.aizawa.e, b.aizawa.e), f: lf64(a.aizawa.f, b.aizawa.f) },
-        chua:            ChuaConfig { alpha: lf64(a.chua.alpha, b.chua.alpha), beta: lf64(a.chua.beta, b.chua.beta), m0: lf64(a.chua.m0, b.chua.m0), m1: lf64(a.chua.m1, b.chua.m1) },
-        hindmarsh_rose:  HindmarshRoseConfig { current_i: lf64(a.hindmarsh_rose.current_i, b.hindmarsh_rose.current_i), r: lf64(a.hindmarsh_rose.r, b.hindmarsh_rose.r) },
-        coupled_map_lattice: CmlConfig { r: lf64(a.coupled_map_lattice.r, b.coupled_map_lattice.r), eps: lf64(a.coupled_map_lattice.eps, b.coupled_map_lattice.eps) },
-        mackey_glass:    MackeyGlassConfig { beta: lf64(a.mackey_glass.beta, b.mackey_glass.beta), gamma: lf64(a.mackey_glass.gamma, b.mackey_glass.gamma), tau: lf64(a.mackey_glass.tau, b.mackey_glass.tau), n: lf64(a.mackey_glass.n, b.mackey_glass.n) },
-        nose_hoover:     NoseHooverConfig { a: lf64(a.nose_hoover.a, b.nose_hoover.a) },
-        henon_map:       HenonMapConfig { a: lf64(a.henon_map.a, b.henon_map.a), b: lf64(a.henon_map.b, b.henon_map.b) },
-        lorenz96:        Lorenz96Config { f: lf64(a.lorenz96.f, b.lorenz96.f) },
-        viz:             a.viz.clone(), // don't morph viz settings
+        lorenz: LorenzConfig {
+            sigma: lf64(a.lorenz.sigma, b.lorenz.sigma),
+            rho: lf64(a.lorenz.rho, b.lorenz.rho),
+            beta: lf64(a.lorenz.beta, b.lorenz.beta),
+        },
+        rossler: RosslerConfig {
+            a: lf64(a.rossler.a, b.rossler.a),
+            b: lf64(a.rossler.b, b.rossler.b),
+            c: lf64(a.rossler.c, b.rossler.c),
+        },
+        double_pendulum: DoublePendulumConfig {
+            m1: lf64(a.double_pendulum.m1, b.double_pendulum.m1),
+            m2: lf64(a.double_pendulum.m2, b.double_pendulum.m2),
+            l1: lf64(a.double_pendulum.l1, b.double_pendulum.l1),
+            l2: lf64(a.double_pendulum.l2, b.double_pendulum.l2),
+        },
+        geodesic_torus: GeodesicTorusConfig {
+            big_r: lf64(a.geodesic_torus.big_r, b.geodesic_torus.big_r),
+            r: lf64(a.geodesic_torus.r, b.geodesic_torus.r),
+        },
+        kuramoto: KuramotoConfig {
+            n_oscillators: a.kuramoto.n_oscillators,
+            coupling: lf64(a.kuramoto.coupling, b.kuramoto.coupling),
+        },
+        duffing: DuffingConfig {
+            delta: lf64(a.duffing.delta, b.duffing.delta),
+            alpha: lf64(a.duffing.alpha, b.duffing.alpha),
+            beta: lf64(a.duffing.beta, b.duffing.beta),
+            gamma: lf64(a.duffing.gamma, b.duffing.gamma),
+            omega: lf64(a.duffing.omega, b.duffing.omega),
+        },
+        van_der_pol: VanDerPolConfig {
+            mu: lf64(a.van_der_pol.mu, b.van_der_pol.mu),
+        },
+        halvorsen: HalvorsenConfig {
+            a: lf64(a.halvorsen.a, b.halvorsen.a),
+        },
+        aizawa: AizawaConfig {
+            a: lf64(a.aizawa.a, b.aizawa.a),
+            b: lf64(a.aizawa.b, b.aizawa.b),
+            c: lf64(a.aizawa.c, b.aizawa.c),
+            d: lf64(a.aizawa.d, b.aizawa.d),
+            e: lf64(a.aizawa.e, b.aizawa.e),
+            f: lf64(a.aizawa.f, b.aizawa.f),
+        },
+        chua: ChuaConfig {
+            alpha: lf64(a.chua.alpha, b.chua.alpha),
+            beta: lf64(a.chua.beta, b.chua.beta),
+            m0: lf64(a.chua.m0, b.chua.m0),
+            m1: lf64(a.chua.m1, b.chua.m1),
+        },
+        hindmarsh_rose: HindmarshRoseConfig {
+            current_i: lf64(a.hindmarsh_rose.current_i, b.hindmarsh_rose.current_i),
+            r: lf64(a.hindmarsh_rose.r, b.hindmarsh_rose.r),
+        },
+        coupled_map_lattice: CmlConfig {
+            r: lf64(a.coupled_map_lattice.r, b.coupled_map_lattice.r),
+            eps: lf64(a.coupled_map_lattice.eps, b.coupled_map_lattice.eps),
+        },
+        mackey_glass: MackeyGlassConfig {
+            beta: lf64(a.mackey_glass.beta, b.mackey_glass.beta),
+            gamma: lf64(a.mackey_glass.gamma, b.mackey_glass.gamma),
+            tau: lf64(a.mackey_glass.tau, b.mackey_glass.tau),
+            n: lf64(a.mackey_glass.n, b.mackey_glass.n),
+        },
+        nose_hoover: NoseHooverConfig {
+            a: lf64(a.nose_hoover.a, b.nose_hoover.a),
+        },
+        henon_map: HenonMapConfig {
+            a: lf64(a.henon_map.a, b.henon_map.a),
+            b: lf64(a.henon_map.b, b.henon_map.b),
+        },
+        lorenz96: Lorenz96Config {
+            f: lf64(a.lorenz96.f, b.lorenz96.f),
+        },
+        viz: a.viz.clone(), // don't morph viz settings
     }
 }
 
 /// Total arrangement duration in seconds (sum of active scenes' hold + morph times).
 pub fn total_duration(scenes: &[Scene]) -> f32 {
     let active: Vec<usize> = (0..scenes.len()).filter(|&i| scenes[i].active).collect();
-    active.iter().enumerate().map(|(ord, &idx)| {
-        let s = &scenes[idx];
-        let morph = if ord > 0 { s.morph_secs } else { 0.0 };
-        morph + s.hold_secs
-    }).sum()
+    active
+        .iter()
+        .enumerate()
+        .map(|(ord, &idx)| {
+            let s = &scenes[idx];
+            let morph = if ord > 0 { s.morph_secs } else { 0.0 };
+            morph + s.hold_secs
+        })
+        .sum()
 }
 
 /// Elapsed position in arrangement -> (scene_index, phase, t)
 /// phase: true = morphing into scene_index, false = holding at scene_index
 pub fn scene_at(scenes: &[Scene], elapsed: f32) -> Option<(usize, bool, f32)> {
     let active: Vec<usize> = (0..scenes.len()).filter(|&i| scenes[i].active).collect();
-    if active.is_empty() { return None; }
+    if active.is_empty() {
+        return None;
+    }
     let mut t = elapsed;
     for (ord, &idx) in active.iter().enumerate() {
         let scene = &scenes[idx];
@@ -146,29 +229,46 @@ pub fn scene_at(scenes: &[Scene], elapsed: f32) -> Option<(usize, bool, f32)> {
 
 fn lcg(seed: &mut u64) -> f64 {
     #[allow(clippy::unreadable_literal)]
-    { *seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407); }
+    {
+        *seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+    }
     // >> 33 produces 31 bits of output; divide by 2^31 to get [0, 1).
     // Previously divided by u32::MAX (≈ 2^32), which capped output at ~0.5.
     (*seed >> 33) as f64 / (1u64 << 31) as f64
 }
 
-fn make_scene(name: &str, preset: &str, hold: f32, morph: f32, tweaks: impl FnOnce(&mut Config)) -> Scene {
+fn make_scene(
+    name: &str,
+    preset: &str,
+    hold: f32,
+    morph: f32,
+    tweaks: impl FnOnce(&mut Config),
+) -> Scene {
     let mut cfg = load_preset(preset);
     tweaks(&mut cfg);
-    Scene { name: name.to_string(), config: cfg, hold_secs: hold, morph_secs: morph, active: true, transition_prob: 1.0 }
+    Scene {
+        name: name.to_string(),
+        config: cfg,
+        hold_secs: hold,
+        morph_secs: morph,
+        active: true,
+        transition_prob: 1.0,
+    }
 }
 
 /// A hardcoded 3-minute demo piece showcasing the best sounds.
 pub fn demo_arrangement() -> Vec<Scene> {
     let mut scenes: Vec<Scene> = vec![
-        make_scene("Opening",         "Midnight Approach",    25.0, 0.0,  |_| {}),
-        make_scene("The Emergence",   "The Phase Transition", 20.0, 30.0, |c| {
+        make_scene("Opening", "Midnight Approach", 25.0, 0.0, |_| {}),
+        make_scene("The Emergence", "The Phase Transition", 20.0, 30.0, |c| {
             c.kuramoto.coupling = 1.0;
         }),
-        make_scene("Turbulence",      "Frozen Machinery",     15.0, 25.0, |_| {}),
-        make_scene("The Turn",        "Glass Harp",           20.0, 28.0, |_| {}),
-        make_scene("Dissolution",     "Collapsing Cathedral", 25.0, 30.0, |_| {}),
-        make_scene("Return",          "Midnight Approach",    20.0, 25.0, |c| {
+        make_scene("Turbulence", "Frozen Machinery", 15.0, 25.0, |_| {}),
+        make_scene("The Turn", "Glass Harp", 20.0, 28.0, |_| {}),
+        make_scene("Dissolution", "Collapsing Cathedral", 25.0, 30.0, |_| {}),
+        make_scene("Return", "Midnight Approach", 20.0, 25.0, |c| {
             c.audio.reverb_wet = (c.audio.reverb_wet + 0.08).min(0.95);
         }),
     ];
@@ -186,11 +286,13 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
     let mut rng = seed ^ 0xDEAD_BEEF_CAFE_BABE;
 
     // LCG helpers
-    let rf = |rng: &mut u64| -> f32 { lcg(rng) as f32 };              // 0..1
-    let ri = |rng: &mut u64, n: usize| -> usize {                      // 0..n
+    let rf = |rng: &mut u64| -> f32 { lcg(rng) as f32 }; // 0..1
+    let ri = |rng: &mut u64, n: usize| -> usize {
+        // 0..n
         (lcg(rng) * n as f64) as usize % n
     };
-    let rrange = |rng: &mut u64, lo: f32, hi: f32| -> f32 {           // lo..hi
+    let rrange = |rng: &mut u64, lo: f32, hi: f32| -> f32 {
+        // lo..hi
         lo + rf(rng) * (hi - lo)
     };
 

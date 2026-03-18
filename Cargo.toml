@@ -84,8 +84,6 @@ unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
 indexing_slicing = "warn"
-# Style and readability
-pedantic = "warn"
 # Allow common false-positive triggers in audio DSP code
 cast_precision_loss = "allow"
 cast_possible_truncation = "allow"
