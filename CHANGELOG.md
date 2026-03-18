@@ -1,5 +1,52 @@
 # Math Sonify — Changelog
 
+## [1.2.0] - 2026-03-18
+
+### Added
+
+- `tracing` + `tracing-subscriber` instrumentation throughout the engine:
+  - `main()`: startup span with version, loaded system name, and dt.
+  - `AudioEngine::start`: logs sample rate and sample format at `info` level.
+  - `save_clip`: logs exported file path and sample count at `info` level.
+  - Subscribers respect `RUST_LOG` environment variable (default `info`).
+- `[lints.clippy]` table in `Cargo.toml`: `unwrap_used`, `expect_used`, `panic`,
+  `indexing_slicing` promoted to `warn`; false-positive DSP lints suppressed via
+  `allow`.
+- `[profile.release]` extended: `codegen-units = 1`, `strip = "debuginfo"`,
+  `panic = "abort"` for smaller and faster release builds.
+- `[profile.bench]` added for reproducible benchmarking builds.
+- `exclude` list in `[package]` to keep `cargo package` output clean.
+- `tracing` and `tracing-subscriber` added to `[dependencies]`.
+- CI workflow (`.github/workflows/ci.yml`) rewritten with seven jobs:
+  - `fmt`: `cargo fmt --all -- --check`
+  - `clippy`: `cargo clippy --lib --tests -- -D warnings` on Ubuntu/Windows matrix
+  - `test`: `cargo test --lib --tests` on Ubuntu/Windows matrix
+  - `doc`: `cargo doc --no-deps --lib` with `RUSTDOCFLAGS="-D warnings"`
+  - `build-release`: release binary + library on Ubuntu/Windows matrix with artifact upload
+  - `audit`: `cargo audit` for known CVEs
+  - `fuzz`: 30-second `cargo fuzz run fuzz_systems` smoke test on nightly
+- Additional `///` doc comments on all public items previously lacking them:
+  `BiquadFilter`, `Freeverb`, `DelayLine`, `Limiter`, `Chorus`, `Adsr`,
+  `Waveshaper`, `ThreeBandEq`, `KarplusStrong`, `WaveguideString`,
+  `SnippetPlayback`, `AudioEngine`, `Preset`, `load_preset`.
+- New integration tests in `tests/integration.rs` (13 additional test functions):
+  - `lorenz_deterministic_trajectory`, `lorenz_zero_dt_no_change`
+  - `quantize_to_scale_t_zero_equals_base`, `quantize_to_scale_all_scales_finite_positive`
+  - `polyphony_all_voices_finite_and_non_negative`
+  - `config_default_is_already_valid`, `config_round_trip_lossless`
+  - `sonif_mode_display_non_empty`, `sonif_mode_default_is_direct`
+  - `chord_intervals_major_and_minor`, `chord_intervals_dom7_three_notes`,
+    `chord_intervals_unknown_returns_zeros`
+- README rewritten: what math sonification is, architecture diagram, supported
+  systems table with equations, sonification mode reference table, audio output
+  formats section, quickstart, full configuration reference, troubleshooting,
+  contributing guidelines.
+
+### Changed
+
+- `Cargo.toml`: version bumped to 1.2.0; `authors` field includes email;
+  `exclude` list added.
+
 ## [1.1.0] - 2026-03-17
 
 ### Added
