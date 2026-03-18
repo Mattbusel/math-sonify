@@ -1,5 +1,36 @@
 # Math Sonify — Changelog
 
+## [1.1.0] - 2026-03-17
+
+### Added
+
+- `tests/integration.rs`: External integration test suite exercising the public
+  library API. Covers:
+  - Lorenz attractor bounding box (`lorenz_stays_on_attractor`, `lorenz_z_stays_positive`)
+  - Rossler attractor boundedness
+  - Double pendulum Hamiltonian energy conservation (< 2% drift over 10 000 steps)
+  - Kuramoto synchronization transition: incoherence below K_c, synchronization above
+  - Three-body Hamiltonian energy conservation (leapfrog, < 1% drift)
+  - Scale quantization producing audible-range and valid MIDI-range frequencies for all 10 scales
+  - Polyphony limits: exactly 4 voice slots, zero-amp for voices beyond state dimension
+  - Config: empty TOML parses to defaults, out-of-range values are clamped, unknown
+    fields are silently ignored
+- `src/tests.rs` — 22 additional unit tests appended:
+  - `lorenz_stays_on_attractor` (50 000-step bounding-box test, the one referenced in README)
+  - `lorenz_z_stays_positive`
+  - `rossler_stays_bounded_30000_steps`
+  - `double_pendulum_energy_conserved_small_angles` (Yoshida symplectic integrator)
+  - `double_pendulum_state_stays_finite_and_bounded`
+  - `kuramoto_below_critical_coupling_incoherent`
+  - `kuramoto_above_critical_coupling_synchronizes`
+  - `kuramoto_order_parameter_in_unit_interval`
+  - `three_body_energy_conserved`
+  - `scale_quantization_produces_valid_midi_notes`
+  - `polyphony_limit_four_voices_max`
+  - `polyphony_default_voice_levels_descending`
+- `src/plugin.rs`: promoted `systems`, `sonification`, `synth`, and `config` modules
+  from `mod` to `pub mod` so that `tests/integration.rs` can access the public API.
+
 ## [1.0.0] - 2026-03-17
 
 ### Added

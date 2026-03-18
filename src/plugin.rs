@@ -10,10 +10,10 @@
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
-mod systems;
-mod sonification;
-mod synth;
-mod config;
+pub mod systems;
+pub mod sonification;
+pub mod synth;
+pub mod config;
 pub mod error;
 mod patches;
 mod arrangement;
