@@ -3,12 +3,13 @@ use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::sync::Arc;
 use std::time::Instant;
+use std::collections::HashSet;
 
 use crate::config::Config;
 use crate::sonification::chord_intervals_for;
-use crate::patches::{PRESETS, load_preset, save_patch, list_patches, load_patch_file};
-use crate::audio::{WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer, SharedSnippetPlayback, SnippetPlayback, save_clip, save_clip_wav_32bit, save_portrait_png, save_portrait_svg, capture_snippet};
-use crate::systems::*;
+use crate::patches::{PRESETS, load_preset, save_patch, list_patches, load_patch_file, list_backups, load_backup};
+use crate::audio::{WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer, SharedSnippetPlayback, SnippetPlayback, XrunCounter, StereoWidth, save_clip, save_clip_wav_32bit, save_portrait_png, save_portrait_svg, capture_snippet};
+use crate::systems::{self, *};
 use crate::arrangement::{Scene, total_duration, scene_at, generate_song, demo_arrangement};
 use hound;
 
@@ -153,7 +154,7 @@ pub struct AppState {
     pub system_changed: bool,
     pub mode_changed: bool,
     pub viz_projection: usize,  // 0=XY, 1=XZ, 2=YZ
-    pub viz_tab: usize,         // 0=Phase, 1=Waveform, 2=Notes, 3=Math View, 4=Bifurcation
+    pub viz_tab: usize,         // 0=Phase, 1=Waveform, 2=Notes, 3=Math View, 4=Bifurcation, 5=Basin
     pub selected_preset: String,
     pub chaos_level: f32,
     pub current_state: Vec<f64>,
@@ -385,6 +386,61 @@ pub struct AppState {
     pub mod_matrix: Vec<ModRoute>,
     /// Transient notifications shown as bottom-right overlays for a few seconds.
     pub toast_queue: Vec<Toast>,
+    // ── Feature #7: Lyapunov exponent scrolling history ─────────────────────
+    pub lyapunov_history: std::collections::VecDeque<f32>,
+    // ── Feature #8: Poincaré section ────────────────────────────────────────
+    pub poincare_points: Vec<(f32, f32)>,
+    pub poincare_z_prev: f64,
+    // ── Feature #10: Stochastic noise injection ──────────────────────────────
+    pub noise_inject: f32,
+    // ── Feature #9: Attractor interpolation ──────────────────────────────────
+    pub interp_system: String,
+    pub interp_t: f32,
+    pub interp_enabled: bool,
+    // ── Feature #6: Attractor basin visualization ────────────────────────────
+    pub basin_data: Arc<Mutex<Vec<(f32, f32, f32)>>>,  // (x, y, lyapunov_proxy) grid points
+    pub basin_computing: bool,
+    pub basin_resolution: usize,  // default 80 (80×80 grid = 6400 points)
+    pub basin_xlim: (f32, f32),   // default (-25.0, 25.0) for Lorenz
+    pub basin_ylim: (f32, f32),   // default (-35.0, 35.0)
+    pub basin_z_slice: f32,        // z-slice for initial conditions, default 27.0
+    // ── #16: OSC Output ──────────────────────────────────────────────────────
+    pub osc_enabled: bool,
+    pub osc_host: String,
+    pub osc_port: u16,
+    pub osc_status: String,
+    // ── #17: MIDI Clock Output ───────────────────────────────────────────────
+    pub midi_clock_enabled: bool,
+    // ── #21: Xrun counter — incremented by audio error callback ──────────────
+    pub xrun_counter: XrunCounter,
+    // ── #4 Stereo width ──────────────────────────────────────────────────────────
+    /// Local value edited by the UI slider (0=mono, 1=unity, 3=hyper-wide).
+    pub stereo_width: f32,
+    /// Arc shared with the audio thread — written by UI, read by audio each buffer.
+    pub stereo_width_shared: StereoWidth,
+    // ── #11 Resizable panel ─────────────────────────────────────────────────────
+    pub panel_width: f32,
+    // ── #12 Parameter lock ──────────────────────────────────────────────────────
+    pub locked_params: HashSet<String>,
+    // ── #13 Preset favorites ────────────────────────────────────────────────────
+    pub favorite_presets: HashSet<String>,
+    pub show_favorites_only: bool,
+    // ── #14 Dark/Light theme toggle ──────────────────────────────────────────────
+    pub light_theme: bool,
+    // ── #15 Waveform zoom ───────────────────────────────────────────────────────
+    pub waveform_zoom: f32,
+    pub waveform_offset: f32,
+    // ── item 16: Behavioral layer enable/disable flags ──────────────────────────
+    /// When false the sim thread skips the corresponding behavioral modifier.
+    pub behav_time_of_day: bool,
+    pub behav_seasonal_drift: bool,
+    pub behav_volume_creep: bool,
+    pub behav_breathing: bool,
+    pub behav_circadian_sleep: bool,
+    pub behav_dreams: bool,
+    pub behav_aging: bool,
+    pub behav_typing_resonance: bool,
+    pub behav_instance_empathy: bool,
 }
 
 /// Periodic session log entry (written by sim thread every ~60s).
@@ -603,6 +659,52 @@ impl AppState {
             midi_cc_learn_last_cc: 0,
             mod_matrix: Vec::new(),
             toast_queue: Vec::new(),
+            lyapunov_history: std::collections::VecDeque::with_capacity(256),
+            poincare_points: Vec::new(),
+            poincare_z_prev: 0.0,
+            noise_inject: 0.0,
+            interp_system: "rossler".into(),
+            interp_t: 0.0,
+            interp_enabled: false,
+            basin_data: Arc::new(Mutex::new(Vec::new())),
+            basin_computing: false,
+            basin_resolution: 80,
+            basin_xlim: (-25.0, 25.0),
+            basin_ylim: (-35.0, 35.0),
+            basin_z_slice: 27.0,
+            osc_enabled: false,
+            osc_host: "127.0.0.1".into(),
+            osc_port: 9000,
+            osc_status: String::new(),
+            midi_clock_enabled: false,
+            xrun_counter: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            stereo_width: 1.0,
+            stereo_width_shared: Arc::new(parking_lot::Mutex::new(1.0f32)),
+            panel_width: 400.0,
+            locked_params: HashSet::new(),
+            favorite_presets: {
+                let mut set = HashSet::new();
+                if let Ok(txt) = std::fs::read_to_string("favorites.txt") {
+                    for line in txt.lines() {
+                        let name = line.trim().to_string();
+                        if !name.is_empty() { set.insert(name); }
+                    }
+                }
+                set
+            },
+            show_favorites_only: false,
+            light_theme: false,
+            waveform_zoom: 1.0,
+            waveform_offset: 1.0,
+            behav_time_of_day: true,
+            behav_seasonal_drift: true,
+            behav_volume_creep: true,
+            behav_breathing: true,
+            behav_circadian_sleep: true,
+            behav_dreams: true,
+            behav_aging: true,
+            behav_typing_resonance: true,
+            behav_instance_empathy: true,
         }
     }
 
@@ -768,10 +870,16 @@ fn system_internal_name(display: &str) -> &'static str {
 
 fn scale_description(scale: &str) -> &'static str {
     match scale {
-        "pentatonic" => "5 notes — always sounds musical",
-        "chromatic" => "All 12 semitones — more dissonant",
+        "pentatonic"      => "5 notes — always sounds musical",
+        "chromatic"       => "All 12 semitones — more dissonant",
         "just_intonation" => "Pure harmonic ratios — warm and consonant",
-        "microtonal" => "Quarter-tones — alien and otherworldly",
+        "microtonal"      => "Quarter-tones — alien and otherworldly",
+        "edo19"           => "19-EDO: 19 equal divisions of the octave (~0.632 semitones per step)",
+        "edo31"           => "31-EDO: 31 equal divisions — rich microtonality (~0.387 semitones per step)",
+        "edo24"           => "24-EDO: quarter-tones — half a semitone per step",
+        "whole_tone"      => "6-note whole-tone scale — dreamy, symmetric, no leading tone",
+        "phrygian"        => "E Phrygian: dark and tense — flamenco and metal favourite",
+        "lydian"          => "F Lydian: bright and ethereal — raised 4th creates tension",
         _ => "",
     }
 }
@@ -816,6 +924,49 @@ fn collapsing_section(ui: &mut Ui, label: &str, default_open: bool, add_contents
     ui.add_space(4.0);
 }
 
+/// #12: Get a named parameter value from Config.
+fn get_param_value(config: &crate::config::Config, key: &str) -> f64 {
+    match key {
+        "lorenz.sigma"    => config.lorenz.sigma,
+        "lorenz.rho"      => config.lorenz.rho,
+        "lorenz.beta"     => config.lorenz.beta,
+        "system.speed"    => config.system.speed,
+        "audio.reverb_wet"   => config.audio.reverb_wet as f64,
+        "audio.delay_ms"     => config.audio.delay_ms as f64,
+        "audio.master_volume"=> config.audio.master_volume as f64,
+        _ => 0.0,
+    }
+}
+
+/// #12: Set a named parameter value on Config.
+fn set_param_value(config: &mut crate::config::Config, key: &str, val: f64) {
+    match key {
+        "lorenz.sigma"    => config.lorenz.sigma = val,
+        "lorenz.rho"      => config.lorenz.rho = val,
+        "lorenz.beta"     => config.lorenz.beta = val,
+        "system.speed"    => config.system.speed = val,
+        "audio.reverb_wet"   => config.audio.reverb_wet = val as f32,
+        "audio.delay_ms"     => config.audio.delay_ms = val as f32,
+        "audio.master_volume"=> config.audio.master_volume = val as f32,
+        _ => {}
+    }
+}
+
+/// #12: Small lock-toggle button. Returns true if the param is now locked.
+fn lock_btn(ui: &mut Ui, locked_params: &mut HashSet<String>, key: &str) {
+    let locked = locked_params.contains(key);
+    let icon = if locked { "🔒" } else { "🔓" };
+    let col = if locked { Color32::from_rgb(220, 160, 40) } else { Color32::from_rgb(80, 85, 110) };
+    if ui.add(
+        Button::new(RichText::new(icon).size(11.0).color(col))
+            .fill(Color32::TRANSPARENT)
+            .frame(false)
+            .min_size(Vec2::new(18.0, 18.0))
+    ).on_hover_text(if locked { "Unlock parameter (preset loads will restore this value)" } else { "Lock parameter (preset loads will not change this)" }).clicked() {
+        if locked { locked_params.remove(key); } else { locked_params.insert(key.to_string()); }
+    }
+}
+
 /// Draw the full UI. Called each egui frame.
 pub fn draw_ui(
     ctx: &Context,
@@ -826,8 +977,12 @@ pub fn draw_ui(
     loop_export: &LoopExportPending,
     bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>,
 ) {
-    let theme = state.lock().theme.clone();
-    apply_theme(ctx, &theme);
+    let (theme, light_theme) = { let st = state.lock(); (st.theme.clone(), st.light_theme) };
+    if light_theme {
+        ctx.set_visuals(egui::Visuals::light());
+    } else {
+        apply_theme(ctx, &theme);
+    }
 
     // Track user interaction — any egui input event resets silence timer
     // and deposits entropy into the pool
@@ -874,6 +1029,8 @@ pub fn draw_ui(
             if i.key_pressed(Key::Num5) { st.viz_tab = 4; } // Note Map
             if i.key_pressed(Key::Num6) { st.viz_tab = 5; } // Math View
             if i.key_pressed(Key::Num7) { st.viz_tab = 6; } // Bifurcation
+            if i.key_pressed(Key::Num8) { st.viz_tab = 7; } // Studio
+            if i.key_pressed(Key::Num9) { st.viz_tab = 8; } // Basin
             if i.key_pressed(Key::F) { st.perf_mode = !st.perf_mode; }
             // New shortcuts
             if i.key_pressed(Key::R) { /* recording toggle handled below */ }
@@ -948,7 +1105,8 @@ pub fn draw_ui(
         return;
     }
 
-    SidePanel::left("controls").min_width(310.0).max_width(360.0).show(ctx, |ui| {
+    let panel_w = state.lock().panel_width;
+    let panel_resp = SidePanel::left("controls").resizable(true).min_width(200.0).max_width(900.0).exact_width(panel_w).show(ctx, |ui| {
         ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(8.0);
 
@@ -1060,6 +1218,11 @@ pub fn draw_ui(
         });
     });
 
+    // #11: sync resized panel width
+    if let Some(rw) = Some(panel_resp.response.rect.width()).filter(|&w| w > 1.0) {
+        state.lock().panel_width = rw.clamp(200.0, 900.0);
+    }
+
     // ---- CENTRAL PANEL: Visualization ----
     CentralPanel::default().show(ctx, |ui| {
         // Tab bar row with theme switcher on the right
@@ -1077,6 +1240,8 @@ pub fn draw_ui(
                 ("∑", "Math"),
                 ("∿", "Bifurc"),
                 ("📼", "Studio"),
+                ("⬡", "Basin"),
+                ("⊙", "Poincaré"),
             ];
             let mut viz_tab = state.lock().viz_tab;
             for (i, (icon, name)) in tabs.iter().enumerate() {
@@ -1121,6 +1286,19 @@ pub fn draw_ui(
                     ).on_hover_text(*theme_key).clicked() {
                         state.lock().theme = theme_key.to_string();
                     }
+                }
+                // ── #14: Dark/Light toggle ──────────────────────────────────────────
+                let lt = state.lock().light_theme;
+                let lt_icon = if lt { "🌙" } else { "☀" };
+                let lt_fill = if lt { Color32::from_rgb(200, 200, 220) } else { Color32::from_rgb(22, 22, 40) };
+                let lt_text = if lt { Color32::BLACK } else { Color32::WHITE };
+                if ui.add(
+                    Button::new(RichText::new(lt_icon).color(lt_text).size(13.0))
+                        .fill(lt_fill)
+                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(100, 100, 150)))
+                        .min_size(Vec2::new(26.0, 26.0))
+                ).on_hover_text(if lt { "Switch to dark theme" } else { "Switch to light theme" }).clicked() {
+                    state.lock().light_theme = !lt;
                 }
             });
         });
@@ -1378,6 +1556,69 @@ pub fn draw_ui(
                         // Store cache key so subsequent renders skip recompute
                         st.bifurc_cache_key = Some((st.config.system.name.clone(), param.clone(), param2.clone(), is_2d));
                     });
+
+        // Basin controls
+        if viz_tab == 8 {
+            ui.horizontal(|ui| {
+                let (computing, resolution, xlim, ylim, z_slice, sigma, rho) = {
+                    let st = state.lock();
+                    (st.basin_computing, st.basin_resolution,
+                     st.basin_xlim, st.basin_ylim, st.basin_z_slice,
+                     st.config.lorenz.sigma, st.config.lorenz.rho)
+                };
+                ui.label(RichText::new(format!("σ={:.1} ρ={:.1}", sigma, rho))
+                    .color(Color32::from_rgb(140, 200, 255)).size(11.0));
+                ui.separator();
+                let mut new_res = resolution;
+                ui.label("Res:");
+                ui.add(egui::DragValue::new(&mut new_res).clamp_range(20usize..=200usize).speed(1.0));
+                let mut new_xl0 = xlim.0;
+                let mut new_xl1 = xlim.1;
+                let mut new_yl0 = ylim.0;
+                let mut new_yl1 = ylim.1;
+                let mut new_z   = z_slice;
+                ui.label("X:");
+                ui.add(egui::DragValue::new(&mut new_xl0).speed(0.5).prefix("lo "));
+                ui.add(egui::DragValue::new(&mut new_xl1).speed(0.5).prefix("hi "));
+                ui.label("Y:");
+                ui.add(egui::DragValue::new(&mut new_yl0).speed(0.5).prefix("lo "));
+                ui.add(egui::DragValue::new(&mut new_yl1).speed(0.5).prefix("hi "));
+                ui.label("Z0:");
+                ui.add(egui::DragValue::new(&mut new_z).speed(0.5));
+                {
+                    let mut st = state.lock();
+                    st.basin_resolution = new_res;
+                    st.basin_xlim = (new_xl0, new_xl1);
+                    st.basin_ylim = (new_yl0, new_yl1);
+                    st.basin_z_slice = new_z;
+                }
+                let compute_color = if computing { Color32::from_rgb(100, 60, 0) } else { Color32::from_rgb(0, 80, 120) };
+                if !computing && ui.add(
+                    Button::new(RichText::new("Compute Basin").color(Color32::WHITE)).fill(compute_color)
+                ).clicked() {
+                    let (xlim2, ylim2, z_slice2, resolution2, basin_out) = {
+                        let mut st = state.lock();
+                        st.basin_computing = true;
+                        let xl = st.basin_xlim;
+                        let yl = st.basin_ylim;
+                        let zs = st.basin_z_slice;
+                        let rs = st.basin_resolution;
+                        let out = st.basin_data.clone();
+                        *out.lock() = Vec::new();
+                        (xl, yl, zs, rs, out)
+                    };
+                    let state_clone = state.clone();
+                    std::thread::spawn(move || {
+                        compute_basin(xlim2, ylim2, z_slice2, resolution2, "lorenz", basin_out);
+                        state_clone.lock().basin_computing = false;
+                    });
+                }
+                if computing {
+                    ui.label(RichText::new("Computing...").color(Color32::from_rgb(255, 200, 0)));
+                }
+            });
+        }
+
                 }
                 if computing {
                     ui.label(RichText::new("Computing...").color(Color32::from_rgb(255, 200, 0)));
@@ -1471,15 +1712,35 @@ pub fn draw_ui(
             (st.scars.clone(), st.time_of_day_f)
         };
 
+        // Feature #7: push current Lyapunov[0] into scrolling history
+        {
+            let mut st = state.lock();
+            if let Some(&lam) = st.lyapunov_spectrum.first() {
+                st.lyapunov_history.push_back(lam as f32);
+                if st.lyapunov_history.len() > 256 {
+                    st.lyapunov_history.pop_front();
+                }
+            }
+        }
+
         match viz_tab {
             0 => draw_phase_portrait(ui, viz_points, &system_name, &mode_name, &current_state, &current_deriv, projection, rotation_angle, auto_rotate, trail_color, anaglyph_3d, anaglyph_separation, &ghosts, &ink, lunar_phase2, &scars_main, tod_main, energy_error),
             1 => draw_mixer_tab(ui, state, viz_points),
             2 => draw_arrange_tab(ui, state, recording),
-            3 => draw_waveform(ui, waveform),
+            3 => {
+                let (wz, wo) = { let st = state.lock(); (st.waveform_zoom, st.waveform_offset) };
+                let (new_wz, new_wo) = draw_waveform(ui, waveform, wz, wo, ctx);
+                { let mut st = state.lock(); st.waveform_zoom = new_wz; st.waveform_offset = new_wo; }
+            }
             4 => draw_note_map(ui, &freqs, &voice_levels, &chord_intervals),
-            5 => draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases, &lyapunov_spectrum, &attractor_type, kolmogorov_entropy, energy_error, sync_error, permutation_entropy, integrator_divergence),
+            5 => {
+                let lyap_hist = state.lock().lyapunov_history.clone();
+                draw_math_view(ui, &system_name, &current_state, &current_deriv, chaos_level, order_param, &kuramoto_phases, &lyapunov_spectrum, &attractor_type, kolmogorov_entropy, energy_error, sync_error, permutation_entropy, integrator_divergence, &lyap_hist);
+            }
             6 => draw_bifurc_diagram(ui, bifurc_data, state),
             7 => draw_studio_tab(ui, state),
+            8 => draw_basin_tab(ui, state),
+            9 => draw_poincare_tab(ui, state),
             _ => {}
         }
     });
@@ -1548,9 +1809,15 @@ fn draw_advanced_panel(
             ui.label(RichText::new(&adv_db_label).color(AMBER).size(11.0));
         });
     });
-    ui.add(
-        Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text("")
-    ).on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
+    ui.horizontal(|ui| {
+        lock_btn(ui, &mut st.locked_params, "audio.master_volume");
+        let vol_locked = st.locked_params.contains("audio.master_volume");
+        ui.add_enabled(
+            !vol_locked,
+            Slider::new(&mut st.config.audio.master_volume, 0.0..=1.0).text("")
+        );
+    });
+    let _ = ui.label("").on_hover_text("Master output volume. Use ↑/↓ arrow keys as a quick shortcut.");
     ui.add_space(4.0);
 
     // ---- Pause button ----
@@ -1608,14 +1875,33 @@ fn draw_advanced_panel(
         });
         ui.add_space(4.0);
 
+        // #13: Favorites-only toggle
+        ui.horizontal(|ui| {
+            let fav_only = st.show_favorites_only;
+            let fav_col = if fav_only { Color32::from_rgb(255, 205, 30) } else { Color32::from_rgb(80, 85, 110) };
+            if ui.add(Button::new(RichText::new("⭐ only").color(fav_col).size(11.0))
+                .fill(if fav_only { Color32::from_rgb(60, 50, 10) } else { Color32::TRANSPARENT })
+                .stroke(egui::Stroke::new(1.0, fav_col))
+                .min_size(Vec2::new(58.0, 22.0))).clicked() {
+                st.show_favorites_only = !fav_only;
+            }
+        });
+        ui.add_space(4.0);
+
         let search_lower = st.preset_search.to_lowercase();
         let selected = st.selected_preset.clone();
-        let mut last_cat = "";
-        for preset in PRESETS.iter().filter(|p| {
-            search_lower.is_empty()
+        let show_fav_only = st.show_favorites_only;
+        // #13: build sorted preset list — favorites first
+        let mut sorted_presets_adv: Vec<&crate::patches::Preset> = PRESETS.iter().filter(|p| {
+            (search_lower.is_empty()
                 || p.name.to_lowercase().contains(&search_lower)
-                || p.category.to_lowercase().contains(&search_lower)
-        }) {
+                || p.category.to_lowercase().contains(&search_lower))
+            && (!show_fav_only || st.favorite_presets.contains(p.name))
+        }).collect();
+        sorted_presets_adv.sort_by_key(|p| (!st.favorite_presets.contains(p.name), p.category, p.name));
+
+        let mut last_cat = "";
+        for preset in sorted_presets_adv.iter() {
             if preset.category != last_cat {
                 last_cat = preset.category;
                 ui.add_space(4.0);
@@ -1629,6 +1915,7 @@ fn draw_advanced_panel(
                 ui.add_space(3.0);
             }
             let is_selected = selected == preset.name;
+            let is_fav = st.favorite_presets.contains(preset.name);
             let pc = preset.color;
             let bg_color = if is_selected {
                 Color32::from_rgba_premultiplied(
@@ -1649,6 +1936,15 @@ fn draw_advanced_panel(
             let response = card.show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
+                    // #13: star toggle
+                    let star_col = if is_fav { Color32::from_rgb(255, 205, 30) } else { Color32::from_rgb(60, 65, 90) };
+                    if ui.add(Button::new(RichText::new("⭐").size(12.0).color(star_col))
+                        .fill(Color32::TRANSPARENT).frame(false).min_size(Vec2::new(22.0, 22.0))).clicked() {
+                        if is_fav { st.favorite_presets.remove(preset.name); }
+                        else { st.favorite_presets.insert(preset.name.to_string()); }
+                        let fav_txt: String = st.favorite_presets.iter().cloned().collect::<Vec<_>>().join("\n");
+                        let _ = std::fs::write("favorites.txt", fav_txt);
+                    }
                     let (strip_rect, _) = ui.allocate_exact_size(Vec2::new(5.0, 34.0), Sense::hover());
                     let strip_col = if is_selected { pc } else {
                         Color32::from_rgba_premultiplied(pc.r()/3, pc.g()/3, pc.b()/3, 200)
@@ -1664,8 +1960,12 @@ fn draw_advanced_panel(
             }).response;
             if response.interact(Sense::click()).clicked() {
                 st.push_undo();
+                // #12: snapshot locked params before load
+                let locked_snapshot_adv: Vec<(String, f64)> = st.locked_params.iter()
+                    .map(|k| (k.clone(), get_param_value(&st.config, k))).collect();
                 st.selected_preset = preset.name.to_string();
                 st.config = load_preset(preset.name);
+                for (k, v) in locked_snapshot_adv { set_param_value(&mut st.config, &k, v); }
                 st.system_changed = true;
                 st.mode_changed = true;
             }
@@ -1676,7 +1976,8 @@ fn draw_advanced_panel(
     // ---- SOUND ----
     collapsing_section(ui, "SOUND", false, |ui| {
         ui.label(RichText::new("Mode").color(GRAY_HINT).size(11.0));
-        let modes = ["direct", "orbital", "granular", "spectral", "fm", "vocal", "waveguide"];
+        // item 8: waveguide hidden — Sonification trait not yet wired; falls back to Direct silently
+        let modes = ["direct", "orbital", "granular", "spectral", "fm", "vocal"];
         let current_mode = st.config.sonification.mode.clone();
         ui.horizontal_wrapped(|ui| {
             for m in &modes {
@@ -1696,14 +1997,33 @@ fn draw_advanced_panel(
         });
         ui.add_space(6.0);
 
-        let scales = ["pentatonic", "chromatic", "just_intonation", "microtonal"];
+        // Scale list includes EDO and modal scales added in #3.
+        let scales = [
+            ("pentatonic",      "Pentatonic"),
+            ("chromatic",       "Chromatic"),
+            ("just_intonation", "Just Intonation"),
+            ("microtonal",      "Microtonal (13-TET)"),
+            ("edo19",           "19-EDO"),
+            ("edo31",           "31-EDO"),
+            ("edo24",           "24-EDO (Quarter-tones)"),
+            ("whole_tone",      "Whole Tone"),
+            ("phrygian",        "Phrygian"),
+            ("lydian",          "Lydian"),
+        ];
         let current_scale = st.config.sonification.scale.clone();
+        let current_scale_label = scales.iter()
+            .find(|(k, _)| *k == current_scale.as_str())
+            .map(|(_, v)| *v)
+            .unwrap_or(current_scale.as_str());
         ComboBox::from_label("Scale")
-            .selected_text(&current_scale)
+            .selected_text(current_scale_label)
             .show_ui(ui, |ui| {
-                for s in &scales {
-                    if ui.selectable_label(current_scale == *s, *s).clicked() {
-                        st.config.sonification.scale = s.to_string();
+                for (key, label) in &scales {
+                    if ui.selectable_label(current_scale == *key, *label)
+                        .on_hover_text(scale_description(key))
+                        .clicked()
+                    {
+                        st.config.sonification.scale = key.to_string();
                     }
                 }
             });
@@ -1801,34 +2121,70 @@ fn draw_advanced_panel(
 
     // ---- PHYSICS ENGINE ----
     collapsing_section(ui, "PHYSICS ENGINE", false, |ui| {
-        let systems_internal = ["lorenz", "fractional_lorenz", "rossler", "double_pendulum", "geodesic_torus", "kuramoto", "three_body", "duffing", "van_der_pol", "halvorsen", "aizawa", "chua", "hindmarsh_rose", "coupled_map_lattice", "custom", "mackey_glass", "nose_hoover", "sprott_b", "henon_map", "lorenz96"];
-        let systems_display: Vec<&str> = systems_internal.iter().map(|s| system_display_name(s)).collect();
+        // System list is driven by SYSTEM_REGISTRY — the single source of truth (#20).
         let current_sys = st.config.system.name.clone();
         let current_display = system_display_name(&current_sys);
         ComboBox::from_label("System")
             .selected_text(current_display)
             .show_ui(ui, |ui| {
-                for disp in &systems_display {
-                    let internal = system_internal_name(disp);
-                    if ui.selectable_label(current_sys == internal, *disp).clicked() {
-                        st.config.system.name = internal.to_string();
+                for entry in systems::SYSTEM_REGISTRY {
+                    if ui.selectable_label(current_sys == entry.name, entry.display_name)
+                        .on_hover_text(entry.description)
+                        .clicked()
+                    {
+                        st.config.system.name = entry.name.to_string();
                         st.system_changed = true;
                     }
                 }
             });
 
-        ui.add(Slider::new(&mut st.config.system.speed, 0.1..=10.0).text("Speed"))
-            .on_hover_text("Controls how fast the attractor evolves. Higher = more rapid pitch changes and rhythmic activity. Use ←/→ arrow keys as a shortcut.");
+        ui.horizontal(|ui| {
+            lock_btn(ui, &mut st.locked_params, "system.speed");
+            let spd_locked = st.locked_params.contains("system.speed");
+            ui.add_enabled(!spd_locked, Slider::new(&mut st.config.system.speed, 0.1..=10.0).text("Speed"));
+        });
+
+        // Feature #10: Thermal Noise injection
+        ui.add(Slider::new(&mut st.noise_inject, 0.0..=0.05).text("Thermal Noise"))
+            .on_hover_text("Inject stochastic noise into system state each tick. 0 = off, 0.05 = maximum. Adds organic randomness to the trajectory.");
+
+        // Feature #9: Attractor Interpolation (Morph)
+        ui.separator();
+        ui.colored_label(Color32::from_rgb(160, 200, 255), "Attractor Morph");
+        ui.checkbox(&mut st.interp_enabled, "Enable morph");
+        if st.interp_enabled {
+            let systems_list = ["lorenz", "rossler", "double_pendulum", "duffing", "van_der_pol",
+                "halvorsen", "aizawa", "chua", "nose_hoover", "sprott_b", "henon_map"];
+            let cur_interp = st.interp_system.clone();
+            ComboBox::from_label("Morph to")
+                .selected_text(system_display_name(&cur_interp))
+                .show_ui(ui, |ui| {
+                    for &s in &systems_list {
+                        if ui.selectable_label(cur_interp == s, system_display_name(s)).clicked() {
+                            st.interp_system = s.to_string();
+                        }
+                    }
+                });
+            ui.add(Slider::new(&mut st.interp_t, 0.0..=1.0).text("Morph amount"))
+                .on_hover_text("0 = primary system only, 1 = target system only. Values in between interpolate both states.");
+        }
+        ui.separator();
 
         CollapsingHeader::new(
             RichText::new("Parameters").size(12.0).color(GRAY_HINT)
         ).default_open(false).show(ui, |ui| {
             match st.config.system.name.as_str() {
                 "lorenz" => {
-                    ui.add(Slider::new(&mut st.config.lorenz.sigma, 1.0..=20.0).text("sigma"))
-                        .on_hover_text("σ (Prandtl number): controls convective instability. Higher values = faster oscillation.");
-                    ui.add(Slider::new(&mut st.config.lorenz.rho, 10.0..=50.0).text("rho"))
-                        .on_hover_text("ρ (Rayleigh number): main chaos parameter. Chaos begins above ~24.74.");
+                    ui.horizontal(|ui| {
+                        lock_btn(ui, &mut st.locked_params, "lorenz.sigma");
+                        let sl = st.locked_params.contains("lorenz.sigma");
+                        ui.add_enabled(!sl, Slider::new(&mut st.config.lorenz.sigma, 1.0..=20.0).text("sigma"));
+                    });
+                    ui.horizontal(|ui| {
+                        lock_btn(ui, &mut st.locked_params, "lorenz.rho");
+                        let sl = st.locked_params.contains("lorenz.rho");
+                        ui.add_enabled(!sl, Slider::new(&mut st.config.lorenz.rho, 10.0..=50.0).text("rho"));
+                    });
                     ui.add(Slider::new(&mut st.config.lorenz.beta, 0.5..=5.0).text("beta"))
                         .on_hover_text("β (geometric factor): controls dissipation. Typical value 8/3 ≈ 2.667.");
                 }
@@ -1950,8 +2306,12 @@ fn draw_advanced_panel(
 
     // ---- EFFECTS ----
     collapsing_section(ui, "EFFECTS", false, |ui| {
-        ui.add(Slider::new(&mut st.config.audio.reverb_wet, 0.0..=1.0).text("Reverb"))
-            .on_hover_text("Wet/dry mix for the 8×8 feedback delay network reverb.");
+        ui.horizontal(|ui| {
+            lock_btn(ui, &mut st.locked_params, "audio.reverb_wet");
+            let rvb_locked = st.locked_params.contains("audio.reverb_wet");
+            ui.add_enabled(!rvb_locked, Slider::new(&mut st.config.audio.reverb_wet, 0.0..=1.0).text("Reverb"));
+        });
+        let _ = ui.label("").on_hover_text("Wet/dry mix for the 8×8 feedback delay network reverb.");
         ui.add(Slider::new(&mut st.config.audio.delay_ms, 0.0..=1000.0).text("Delay Time ms"))
             .on_hover_text("Delay time. BPM-syncable.");
         ui.add(Slider::new(&mut st.config.audio.delay_feedback, 0.0..=0.95).text("Feedback (max 90%)"))
@@ -2023,6 +2383,39 @@ fn draw_advanced_panel(
                 st.eq_low_db = 0.0;
                 st.eq_mid_db = 0.0;
                 st.eq_high_db = 0.0;
+            }
+        }
+    });
+
+    // ---- STEREO WIDTH ----
+    // #4 — Mid/side stereo width control.  Unity (1.0) passes the signal unchanged.
+    // Below 1.0 collapses toward mono; above 1.0 pushes the stereo field wider.
+    collapsing_section(ui, "STEREO WIDTH", false, |ui| {
+        ui.add_space(2.0);
+        let changed = ui.add(
+            Slider::new(&mut st.stereo_width, 0.0..=3.0)
+                .text("Width")
+                .clamp_to_range(true),
+        )
+        .on_hover_text(
+            "Master stereo width applied after the limiter.\n\
+             0.0 = mono  ·  1.0 = unity (unchanged)  ·  3.0 = hyper-wide.\n\
+             Uses energy-normalised mid/side encoding so loudness stays constant.",
+        )
+        .changed();
+        if changed {
+            if let Some(mut w) = st.stereo_width_shared.try_lock() {
+                *w = st.stereo_width;
+            }
+        }
+        ui.add_space(2.0);
+        if (st.stereo_width - 1.0).abs() > 0.01 {
+            if ui.add(Button::new(RichText::new("Reset Width").color(Color32::WHITE).size(11.0))
+                .fill(Color32::from_rgb(40, 30, 50))
+                .min_size(Vec2::new(ui.available_width(), 24.0))
+            ).clicked() {
+                st.stereo_width = 1.0;
+                if let Some(mut w) = st.stereo_width_shared.try_lock() { *w = 1.0; }
             }
         }
     });
@@ -2153,6 +2546,47 @@ fn draw_advanced_panel(
                 }
             }
         });
+
+        // ---- RESTORE BACKUP ----
+        {
+            let patch_name = st.patch_name_input.clone();
+            if !patch_name.is_empty() {
+                let backups = list_backups(&patch_name);
+                if !backups.is_empty() {
+                    CollapsingHeader::new(
+                        RichText::new("RESTORE BACKUP").size(12.0).color(GRAY_HINT)
+                    ).default_open(false).show(ui, |ui| {
+                        let mut to_restore: Option<String> = None;
+                        for (filename, ts) in &backups {
+                            let dt = std::time::UNIX_EPOCH + std::time::Duration::from_secs(*ts);
+                            let label = if let Ok(elapsed) = std::time::SystemTime::now().duration_since(dt) {
+                                let secs = elapsed.as_secs();
+                                if secs < 3600 {
+                                    format!("{} min ago", secs / 60)
+                                } else {
+                                    format!("{} h ago", secs / 3600)
+                                }
+                            } else {
+                                filename.clone()
+                            };
+                            if ui.button(RichText::new(&label).size(11.0)).clicked() {
+                                to_restore = Some(filename.clone());
+                            }
+                        }
+                        if let Some(fname) = to_restore {
+                            if let Some(cfg) = load_backup(&fname) {
+                                st.config = cfg;
+                                st.system_changed = true;
+                                st.mode_changed = true;
+                                st.toast_queue.push(Toast::info(format!("Restored backup for '{}'", patch_name)));
+                            } else {
+                                st.toast_queue.push(Toast::error("Failed to load backup"));
+                            }
+                        }
+                    });
+                }
+            }
+        }
 
         ui.add_space(6.0);
 
@@ -2608,6 +3042,57 @@ fn draw_advanced_panel(
         }
     });
 
+    // ---- OSC OUTPUT ----
+    collapsing_section(ui, "OSC OUTPUT", false, |ui| {
+        let mut st = state.lock();
+        ui.checkbox(&mut st.osc_enabled, RichText::new("Enable OSC Output").color(Color32::WHITE));
+        if st.osc_enabled {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Host:").color(GRAY_HINT).size(11.0));
+                ui.add(TextEdit::singleline(&mut st.osc_host).desired_width(120.0).hint_text("127.0.0.1"));
+            });
+            let mut port = st.osc_port as u32;
+            if ui.add(DragValue::new(&mut port).clamp_range(1000u32..=65535).prefix("Port: ")).changed() {
+                st.osc_port = port as u16;
+            }
+            if !st.osc_status.is_empty() {
+                ui.label(RichText::new(&st.osc_status).color(CYAN).size(11.0));
+            }
+        }
+    });
+
+    // ---- MIDI CLOCK OUT ----
+    collapsing_section(ui, "MIDI CLOCK OUT", false, |ui| {
+        let mut st = state.lock();
+        ui.checkbox(&mut st.midi_clock_enabled, RichText::new("MIDI Clock Out").color(Color32::WHITE));
+        ui.label(RichText::new("Syncs external gear to BPM").color(GRAY_HINT).size(11.0).italics());
+    });
+
+    // ---- BEHAVIORAL LAYERS (item 16) ----
+    collapsing_section(ui, "BEHAVIORAL LAYERS", false, |ui| {
+        ui.label(RichText::new("Invisible automatic modifiers — uncheck to disable").color(GRAY_HINT).size(10.5).italics());
+        ui.add_space(4.0);
+        let mut st = state.lock();
+        macro_rules! behav_row {
+            ($label:expr, $tip:expr, $field:expr) => {{
+                let col = if $field { Color32::WHITE } else { GRAY_HINT };
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut $field, "");
+                    ui.label(RichText::new($label).color(col).size(11.0)).on_hover_text($tip);
+                });
+            }};
+        }
+        behav_row!("🕐 Time of Day",       "Biases macros at launch: night→darker, day→brighter",   st.behav_time_of_day);
+        behav_row!("🌸 Seasonal Drift",    "Base frequency shifts ±1.5% over the calendar year",    st.behav_seasonal_drift);
+        behav_row!("📉 Volume Creep",      "Volume drifts from 1.0 → 0.87 over ~1 hour",            st.behav_volume_creep);
+        behav_row!("🫁 Breathing",         "4.5s gain oscillation ±0.3 dB",                         st.behav_breathing);
+        behav_row!("🌙 Circadian Sleep",   "~8% volume cut during 3–5am hours",                     st.behav_circadian_sleep);
+        behav_row!("💤 Attractor Dreams",  "30min idle → brief visit to another system",            st.behav_dreams);
+        behav_row!("⌛ Aging",             "High-freq rolloff increases slowly over hours",          st.behav_aging);
+        behav_row!("⌨ Typing Resonance",  "Windows: keyboard cadence wobbles frequency",            st.behav_typing_resonance);
+        behav_row!("🤝 Instance Empathy", "Two instances sync volume over local UDP",               st.behav_instance_empathy);
+    });
+
     // ---- SOUND DESIGN TIPS ----
     collapsing_section(ui, "SOUND DESIGN TIPS", false, |ui| {
         draw_tips_content(ui);
@@ -2990,13 +3475,30 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
         ui.add_space(4.0);
 
         let search_lower = state.lock().preset_search.to_lowercase();
+        let show_fav_only_sim = state.lock().show_favorites_only;
+        // #13: favorites-only toggle
+        {
+            let fav_only = show_fav_only_sim;
+            let fav_col = if fav_only { egui::Color32::from_rgb(255, 205, 30) } else { egui::Color32::from_rgb(80, 85, 110) };
+            if ui.add(Button::new(RichText::new("⭐ only").color(fav_col).size(11.0))
+                .fill(if fav_only { egui::Color32::from_rgb(60, 50, 10) } else { egui::Color32::TRANSPARENT })
+                .stroke(egui::Stroke::new(1.0, fav_col))
+                .min_size(Vec2::new(58.0, 22.0))).clicked() {
+                state.lock().show_favorites_only = !fav_only;
+            }
+            ui.add_space(4.0);
+        }
         let show_count = if show_all { PRESETS.len() } else { 12 };
-        let mut last_cat = "";
-        for preset in PRESETS.iter().take(show_count).filter(|p| {
-            search_lower.is_empty()
+        let fav_set_sim: HashSet<String> = state.lock().favorite_presets.clone();
+        let mut sorted_presets_sim: Vec<&crate::patches::Preset> = PRESETS.iter().take(show_count).filter(|p| {
+            (search_lower.is_empty()
                 || p.name.to_lowercase().contains(&search_lower)
-                || p.category.to_lowercase().contains(&search_lower)
-        }) {
+                || p.category.to_lowercase().contains(&search_lower))
+            && (!show_fav_only_sim || fav_set_sim.contains(p.name))
+        }).collect();
+        sorted_presets_sim.sort_by_key(|p| (!fav_set_sim.contains(p.name), p.category, p.name));
+        let mut last_cat = "";
+        for preset in sorted_presets_sim.iter() {
             if preset.category != last_cat {
                 last_cat = preset.category;
                 ui.add_space(4.0);
@@ -3023,6 +3525,7 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
             };
             let border_w = if is_selected { 1.5 } else { 1.0 };
             let border_col = if is_selected { pc } else { Color32::from_rgb(34, 36, 64) };
+            let is_fav_sim = fav_set_sim.contains(preset.name);
             let card = egui::Frame::none()
                 .fill(bg_color)
                 .stroke(Stroke::new(border_w, border_col))
@@ -3031,6 +3534,16 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
             let response = card.show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
+                    // #13: star toggle
+                    let star_col = if is_fav_sim { Color32::from_rgb(255, 205, 30) } else { Color32::from_rgb(60, 65, 90) };
+                    if ui.add(Button::new(RichText::new("⭐").size(12.0).color(star_col))
+                        .fill(Color32::TRANSPARENT).frame(false).min_size(Vec2::new(22.0, 22.0))).clicked() {
+                        let mut st = state.lock();
+                        if is_fav_sim { st.favorite_presets.remove(preset.name); }
+                        else { st.favorite_presets.insert(preset.name.to_string()); }
+                        let fav_txt: String = st.favorite_presets.iter().cloned().collect::<Vec<_>>().join("\n");
+                        let _ = std::fs::write("favorites.txt", fav_txt);
+                    }
                     // Colored left accent strip
                     let strip_h = 34.0;
                     let (strip_rect, _) = ui.allocate_exact_size(Vec2::new(5.0, strip_h), Sense::hover());
@@ -3051,8 +3564,12 @@ fn draw_simple_panel(ui: &mut Ui, ctx: &Context, state: &SharedState, recording:
             if response.interact(Sense::click()).clicked() {
                 let mut st = state.lock();
                 st.push_undo();
+                // #12: snapshot locked params before load
+                let locked_snapshot_sim: Vec<(String, f64)> = st.locked_params.iter()
+                    .map(|k| (k.clone(), get_param_value(&st.config, k))).collect();
                 st.selected_preset = preset.name.to_string();
                 st.config = load_preset(preset.name);
+                for (k, v) in locked_snapshot_sim { set_param_value(&mut st.config, &k, v); }
                 st.system_changed = true;
                 st.mode_changed = true;
             }
@@ -3755,14 +4272,16 @@ fn draw_studio_tab(ui: &mut Ui, state: &SharedState) {
                             *st.snippet_pb.lock() = SnippetPlayback::idle();
                         } else {
                             let first = st.snippet_slots.iter().position(|s| s.is_some());
+                            // item 1: guard against slot becoming None between iteration and access
                             if let Some(slot_i) = first {
-                                let snip_i = st.snippet_slots[slot_i].unwrap();
+                                if let Some(snip_i) = st.snippet_slots[slot_i] {
                                 if snip_i < st.snippets.len() {
                                     let samples = (*st.snippets[snip_i].samples).clone();
                                     let v = st.snippet_volume;
                                     *st.snippet_pb.lock() = SnippetPlayback::play(samples, v);
                                     st.song_play_slot = slot_i;
                                     st.song_playing = true;
+                                }
                                 }
                             }
                         }
@@ -3980,14 +4499,136 @@ fn draw_bifurc_diagram(ui: &mut Ui, bifurc_data: &Arc<Mutex<Vec<(f32, f32)>>>, s
     painter.text(rect.left_top() + Vec2::new(8.0, 8.0), Align2::LEFT_TOP,
         format!("Bifurcation Diagram  ({} points)", data.len()),
         FontId::proportional(12.0), Color32::from_rgb(120, 140, 180));
-    // x-axis: show actual parameter name and range
     painter.text(rect.center_bottom() + Vec2::new(0.0, -12.0), Align2::CENTER_BOTTOM,
         format!("{} = {:.3} → {:.3}", param1, min_x, max_x),
         FontId::proportional(10.0), Color32::from_rgb(100, 120, 160));
-    // y-axis: label the x-state being plotted (rotated label on left edge)
     painter.text(rect.left_center() + Vec2::new(12.0, 0.0), Align2::LEFT_CENTER,
         "x-state",
         FontId::proportional(9.0), Color32::from_rgb(80, 100, 140));
+}
+
+/// Compute attractor basin: for each (x, y) initial condition on the grid, run the Lorenz
+/// system for 500 steps and measure whether it diverges or converges, storing a color proxy.
+fn compute_basin(
+    xlim: (f32, f32), ylim: (f32, f32), z_slice: f32,
+    resolution: usize, _system_name: &str,
+    out: Arc<Mutex<Vec<(f32, f32, f32)>>>,
+) {
+    use rayon::prelude::*;
+    let xs: Vec<f32> = (0..resolution)
+        .map(|i| xlim.0 + (xlim.1 - xlim.0) * i as f32 / (resolution - 1).max(1) as f32)
+        .collect();
+    let ys: Vec<f32> = (0..resolution)
+        .map(|j| ylim.0 + (ylim.1 - ylim.0) * j as f32 / (resolution - 1).max(1) as f32)
+        .collect();
+
+    let points: Vec<(f32, f32, f32)> = xs.par_iter().flat_map(|&x| {
+        ys.iter().map(|&y| {
+            let mut sys = crate::systems::Lorenz::new(10.0, 28.0, 2.667);
+            sys.set_state(&[x as f64, y as f64, z_slice as f64]);
+            let mut max_r = 0.0f64;
+            let mut diverged = false;
+            for _ in 0..500 {
+                sys.step(0.01);
+                let s = sys.state();
+                let r = (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt();
+                if r > 200.0 { diverged = true; break; }
+                if r > max_r { max_r = r; }
+            }
+            let color_val = if diverged { -1.0f32 } else { (max_r / 50.0).clamp(0.0, 1.0) as f32 };
+            (x, y, color_val)
+        }).collect::<Vec<_>>()
+    }).collect();
+
+    *out.lock() = points;
+}
+
+/// Draw the attractor basin visualization tab.
+fn draw_basin_tab(ui: &mut Ui, state: &SharedState) {
+    let (computing, resolution, xlim, ylim, basin_arc) = {
+        let st = state.lock();
+        (st.basin_computing, st.basin_resolution, st.basin_xlim, st.basin_ylim,
+         st.basin_data.clone())
+    };
+
+    let avail = ui.available_size();
+    let (response, painter) = ui.allocate_painter(avail, Sense::hover());
+    let rect = response.rect;
+    painter.rect_filled(rect, 0.0, Color32::from_rgb(6, 6, 16));
+
+    let data = match basin_arc.try_lock() {
+        Some(d) => d.clone(),
+        None => return,
+    };
+
+    if data.is_empty() {
+        let msg = if computing {
+            "Computing basin... please wait"
+        } else {
+            "Click 'Compute Basin' above to generate the attractor basin map"
+        };
+        painter.text(
+            rect.center(), Align2::CENTER_CENTER,
+            msg,
+            FontId::proportional(16.0), Color32::from_rgb(80, 80, 120),
+        );
+        painter.text(
+            rect.center_bottom() + Vec2::new(0.0, -20.0), Align2::CENTER_BOTTOM,
+            format!("x-axis: {:.1} to {:.1}   y-axis: {:.1} to {:.1}   grid: {}x{}",
+                xlim.0, xlim.1, ylim.0, ylim.1, resolution, resolution),
+            FontId::proportional(10.0), Color32::from_rgb(60, 70, 100),
+        );
+        return;
+    }
+
+    let cell_w = rect.width() / resolution as f32;
+    let cell_h = rect.height() / resolution as f32;
+    let x_range = (xlim.1 - xlim.0).max(1e-6);
+    let y_range = (ylim.1 - ylim.0).max(1e-6);
+
+    for &(x, y, v) in data.iter() {
+        let px = rect.left() + (x - xlim.0) / x_range * rect.width();
+        let py = rect.top()  + (y - ylim.0) / y_range * rect.height();
+        let color = if v < 0.0 {
+            Color32::from_rgb(200, 50, 50)
+        } else {
+            Color32::from_rgb(0, (v * 200.0) as u8, (v * 255.0) as u8)
+        };
+        painter.rect_filled(
+            egui::Rect::from_min_size(egui::pos2(px, py), egui::vec2(cell_w, cell_h)),
+            0.0,
+            color,
+        );
+    }
+
+    painter.text(
+        rect.left_top() + Vec2::new(6.0, 6.0), Align2::LEFT_TOP,
+        format!("Attractor Basin  ({}×{})", resolution, resolution),
+        FontId::proportional(12.0), Color32::from_rgb(120, 140, 180),
+    );
+    painter.text(
+        rect.center_bottom() + Vec2::new(0.0, -14.0), Align2::CENTER_BOTTOM,
+        format!("x: {:.1} to {:.1}    y: {:.1} to {:.1}", xlim.0, xlim.1, ylim.0, ylim.1),
+        FontId::proportional(10.0), Color32::from_rgb(90, 110, 150),
+    );
+    painter.rect_filled(
+        egui::Rect::from_min_size(rect.right_top() + Vec2::new(-110.0, 8.0), Vec2::new(100.0, 14.0)),
+        2.0, Color32::from_rgb(200, 50, 50),
+    );
+    painter.text(
+        rect.right_top() + Vec2::new(-112.0, 8.0), Align2::RIGHT_TOP,
+        "diverges",
+        FontId::proportional(10.0), Color32::from_rgb(200, 50, 50),
+    );
+    painter.rect_filled(
+        egui::Rect::from_min_size(rect.right_top() + Vec2::new(-110.0, 28.0), Vec2::new(100.0, 14.0)),
+        2.0, Color32::from_rgb(0, 160, 255),
+    );
+    painter.text(
+        rect.right_top() + Vec2::new(-112.0, 28.0), Align2::RIGHT_TOP,
+        "attractor",
+        FontId::proportional(10.0), Color32::from_rgb(0, 200, 255),
+    );
 }
 
 fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
@@ -4366,6 +5007,24 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add_space(8.0);
 
+        // ── Xrun / audio health indicator (#21) ──────────────────────────
+        {
+            let xrun_count = state.lock().xrun_counter.load(std::sync::atomic::Ordering::Relaxed);
+            if xrun_count > 0 {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("⚠ {} xrun{}", xrun_count, if xrun_count == 1 { "" } else { "s" }))
+                        .color(mc_red)
+                        .size(13.0));
+                    if ui.small_button("Reset").clicked() {
+                        state.lock().xrun_counter.store(0, std::sync::atomic::Ordering::Relaxed);
+                    }
+                });
+                ui.label(egui::RichText::new("Audio stream errors detected — check CPU load or buffer size")
+                    .color(mc_gray).size(10.0));
+            }
+        }
+        ui.add_space(4.0);
+
         // ── Save Clip button ──────────────────────────────────────────────
         ui.horizontal(|ui| {
             if ui.add(egui::Button::new(
@@ -4719,7 +5378,8 @@ fn draw_mixer_tab(ui: &mut egui::Ui, state: &crate::ui::SharedState, viz_points:
         ui.add_space(6.0);
 
         // ── Looper ────────────────────────────────────────────────────────
-        ui.label(egui::RichText::new("Looper").color(egui::Color32::from_rgb(200, 100, 255)).strong());
+        // item 9: looper REC captures intent; audio playback not yet wired to the audio thread.
+        ui.label(egui::RichText::new("Looper  (recording only — playback coming soon)").color(egui::Color32::from_rgb(200, 100, 255)).strong());
         ui.add_space(4.0);
         {
             let mut st = state.lock();
@@ -4893,6 +5553,85 @@ fn dim_names(system: &str) -> &'static [&'static str] {
 }
 
 // ---------------------------------------------------------------------------
+// Poincaré Section tab (Feature #8)
+// ---------------------------------------------------------------------------
+
+fn draw_poincare_tab(ui: &mut Ui, state: &SharedState) {
+    let (points, system_name) = {
+        let st = state.lock();
+        (st.poincare_points.clone(), st.config.system.name.clone())
+    };
+    let avail = ui.available_size();
+    let (response, painter) = ui.allocate_painter(avail, Sense::hover());
+    let rect = response.rect;
+    painter.rect_filled(rect, 0.0, Color32::from_rgb(4, 8, 18));
+
+    // Title
+    painter.text(
+        Pos2::new(rect.left() + 16.0, rect.top() + 10.0),
+        Align2::LEFT_TOP,
+        format!("Poincaré Section  —  {}  (z = 27 crossing)", system_name),
+        FontId::proportional(14.0),
+        Color32::from_rgb(80, 200, 220),
+    );
+    painter.text(
+        Pos2::new(rect.left() + 16.0, rect.top() + 28.0),
+        Align2::LEFT_TOP,
+        format!("{} points", points.len()),
+        FontId::monospace(11.0),
+        Color32::from_rgb(100, 130, 160),
+    );
+
+    if points.is_empty() {
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            "Waiting for Poincaré crossings…\n(z must cross 27.0 from below)",
+            FontId::proportional(14.0),
+            Color32::from_rgb(80, 90, 120),
+        );
+        return;
+    }
+
+    // Compute bounds of (x, y) data
+    let mut x_min = f32::MAX;
+    let mut x_max = f32::MIN;
+    let mut y_min = f32::MAX;
+    let mut y_max = f32::MIN;
+    for &(x, y) in &points {
+        x_min = x_min.min(x);
+        x_max = x_max.max(x);
+        y_min = y_min.min(y);
+        y_max = y_max.max(y);
+    }
+    let x_range = (x_max - x_min).max(0.01);
+    let y_range = (y_max - y_min).max(0.01);
+
+    let pad = 50.0f32;
+    let plot_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + pad, rect.top() + pad + 30.0),
+        Pos2::new(rect.right() - pad, rect.bottom() - pad),
+    );
+
+    // Axis labels
+    painter.text(Pos2::new(plot_rect.center().x, plot_rect.bottom() + 16.0),
+        Align2::CENTER_TOP, "x", FontId::proportional(12.0), Color32::from_rgb(160, 190, 220));
+    painter.text(Pos2::new(plot_rect.left() - 18.0, plot_rect.center().y),
+        Align2::CENTER_CENTER, "y", FontId::proportional(12.0), Color32::from_rgb(160, 190, 220));
+
+    // Scatter plot
+    let dot_radius = 2.0f32;
+    let cyan = Color32::from_rgb(0, 210, 220);
+    for &(x, y) in &points {
+        let nx = (x - x_min) / x_range;
+        let ny = (y - y_min) / y_range;
+        let px = plot_rect.left() + nx * plot_rect.width();
+        let py = plot_rect.bottom() - ny * plot_rect.height();
+        painter.circle_filled(Pos2::new(px, py), dot_radius, cyan);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Math View tab
 // ---------------------------------------------------------------------------
 
@@ -4911,6 +5650,7 @@ fn draw_math_view(
     sync_error: f32,
     permutation_entropy: f64,
     integrator_divergence: f64,
+    lyapunov_history: &std::collections::VecDeque<f32>,
 ) {
     let avail = ui.available_size();
     let (response, painter) = ui.allocate_painter(avail, Sense::hover());
@@ -5111,6 +5851,56 @@ fn draw_math_view(
         draw_kuramoto_circle(&painter, right_rect, kuramoto_phases, order_param);
     } else {
         draw_phase_clock(&painter, right_rect, current_state, current_deriv);
+    }
+
+    // Feature #7: Lyapunov exponent scrolling history line graph
+    if !lyapunov_history.is_empty() {
+        let graph_h = 60.0f32;
+        let graph_rect = Rect::from_min_max(
+            Pos2::new(rect.left() + 10.0, rect.max.y - graph_h - 10.0),
+            Pos2::new(mid_x - 10.0, rect.max.y - 10.0),
+        );
+        painter.rect_filled(graph_rect, 3.0, Color32::from_rgb(8, 12, 28));
+        painter.rect_stroke(graph_rect, 3.0, Stroke::new(1.0, Color32::from_rgb(40, 50, 80)));
+        painter.text(
+            Pos2::new(graph_rect.left() + 4.0, graph_rect.top() + 2.0),
+            Align2::LEFT_TOP,
+            "\u{03bb}\u{2081} history",
+            FontId::monospace(10.0),
+            Color32::from_rgb(140, 160, 200),
+        );
+        // Zero dashed line
+        let zero_y = graph_rect.center().y;
+        let mut dx = graph_rect.left();
+        while dx < graph_rect.right() {
+            painter.line_segment(
+                [Pos2::new(dx, zero_y), Pos2::new((dx + 6.0).min(graph_rect.right()), zero_y)],
+                Stroke::new(1.0, Color32::from_rgba_premultiplied(80, 80, 140, 180)),
+            );
+            dx += 12.0;
+        }
+        let hist_vec: Vec<f32> = lyapunov_history.iter().copied().collect();
+        let n = hist_vec.len();
+        let max_abs = hist_vec.iter().map(|v| v.abs()).fold(0.01f32, f32::max);
+        if n >= 2 {
+            for i in 1..n {
+                let lam = hist_vec[i];
+                let color = if lam > 0.05 {
+                    Color32::from_rgb(60, 220, 80)
+                } else if lam < -0.05 {
+                    Color32::from_rgb(60, 130, 255)
+                } else {
+                    Color32::from_rgb(240, 220, 60)
+                };
+                let x0 = graph_rect.left() + ((i - 1) as f32 / (n - 1) as f32) * graph_rect.width();
+                let x1 = graph_rect.left() + (i as f32 / (n - 1) as f32) * graph_rect.width();
+                let y0 = (zero_y - (hist_vec[i - 1] / max_abs) * (graph_rect.height() * 0.45))
+                    .clamp(graph_rect.top(), graph_rect.bottom());
+                let y1 = (zero_y - (lam / max_abs) * (graph_rect.height() * 0.45))
+                    .clamp(graph_rect.top(), graph_rect.bottom());
+                painter.line_segment([Pos2::new(x0, y0), Pos2::new(x1, y1)], Stroke::new(1.5, color));
+            }
+        }
     }
 }
 

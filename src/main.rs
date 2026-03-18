@@ -1,3 +1,8 @@
+// item 12: enforce no unsafe code globally; only exception is the Windows keyboard hook
+// FFI call (GetAsyncKeyState) which is explicitly allowed at its use site.
+// To add unsafe code, you must justify it with #[allow(unsafe_code)] at the call site.
+#![deny(unsafe_code)]
+
 mod systems;
 mod sonification;
 mod synth;
@@ -9,6 +14,7 @@ mod ui_timeline;
 mod ui_waveform;
 mod patches;
 mod arrangement;
+mod osc;
 #[cfg(test)]
 mod tests;
 
@@ -30,7 +36,7 @@ use crate::sonification::{
     DirectMapping, OrbitalResonance, GranularMapping, SpectralMapping, FmMapping, VocalMapping,
     chord_intervals_for,
 };
-use crate::audio::{AudioEngine, WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer, SnippetPlayback, SharedSnippetPlayback};
+use crate::audio::{AudioEngine, WavRecorder, LoopExportPending, VuMeter, SidechainLevel, ClipBuffer, SnippetPlayback, SharedSnippetPlayback, StereoWidth, XrunCounter};
 use crate::synth::OscShape;
 use midir;
 use crate::ui::{AppState, SharedState, draw_ui};
@@ -51,17 +57,25 @@ const SESSION_LOG_INTERVAL_TICKS: u64 = 120 * 60;
 const DREAM_IDLE_THRESHOLD_TICKS: u64 = 30 * 60 * 120;
 
 // ── Behavioral layer constants ─────────────────────────────────────────────
-/// Volume creep rate per tick (very slow upward drift over long sessions).
+/// item 15: derivation — reach VOLUME_CREEP_MIN after 1 hr at CONTROL_RATE_HZ:
+/// VOLUME_CREEP_MIN^(1/(3600*120)) = 0.87^(1/432000) ≈ 1 - 3.24e-7 per tick.
+/// Subtracting from 1 gives the per-tick fractional decay rate.
 const VOLUME_CREEP_RATE: f32 = 3.24e-7;
-/// Minimum volume floor for the creep mechanism.
+/// Target volume floor after a 1-hour session (≈ -1.2 dB). Reset if user touches slider.
 const VOLUME_CREEP_MIN: f32 = 0.87;
-/// Breathing oscillation period in seconds.
+/// item 15: 4.5 s chosen to match a slow human resting breath-cycle (~13 breaths/min).
 const BREATHING_PERIOD_SECS: f64 = 4.5;
-/// Breathing amplitude in linear gain (±0.3 dB equivalent).
+/// item 15: ±0.033 linear ≈ ±0.28 dB — below the ~1 dB JND for level differences.
 const BREATHING_DEPTH: f32 = 0.033;
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
+
+    // ── Headless CLI mode ─────────────────────────────────────────────────
+    let args: Vec<String> = std::env::args().collect();
+    if args.contains(&"--headless".to_string()) {
+        return run_headless(&args);
+    }
 
     let config_path = std::path::PathBuf::from("config.toml");
     let config = load_config(&config_path);
@@ -101,6 +115,12 @@ fn main() -> anyhow::Result<()> {
     // Snippet/song playback shared state
     let snippet_pb: SharedSnippetPlayback = Arc::new(Mutex::new(SnippetPlayback::idle()));
 
+    // #4 — Stereo width shared between UI and audio threads (default unity)
+    let stereo_width_shared: StereoWidth = Arc::new(Mutex::new(1.0f32));
+
+    // #21 — Xrun counter: incremented by audio error callback, displayed in MIXER tab
+    let xrun_counter: XrunCounter = Arc::new(std::sync::atomic::AtomicU32::new(0));
+
     // Audio engine
     let (_audio, actual_sr) = AudioEngine::start(
         rx,
@@ -116,6 +136,8 @@ fn main() -> anyhow::Result<()> {
         clip_buffer.clone(),
         sidechain_level.clone(),
         snippet_pb.clone(),
+        stereo_width_shared.clone(),
+        xrun_counter.clone(),
     )?;
 
     // Store actual sample rate and shared state in AppState
@@ -126,6 +148,9 @@ fn main() -> anyhow::Result<()> {
         st.clip_buffer = clip_buffer;
         st.sidechain_level_shared = sidechain_level.clone();
         st.snippet_pb = snippet_pb;
+        st.xrun_counter = xrun_counter;
+        // #4 - store stereo width shared handle so UI can write to it
+        st.stereo_width_shared = stereo_width_shared;
     }
 
     // Config hot-reload: watch "config.toml" for changes using notify v6
@@ -144,6 +169,9 @@ fn main() -> anyhow::Result<()> {
 
     // MIDI output thread
     start_midi_thread(shared.clone());
+
+    // MIDI clock output thread
+    start_midi_clock_thread(shared.clone());
 
     // MIDI input thread
     start_midi_input_thread(shared.clone());
@@ -269,6 +297,12 @@ fn sim_thread(
     let control_period = Duration::from_secs_f64(1.0 / CONTROL_RATE_HZ);
     let mut next_tick = Instant::now();
 
+    // ── OSC output state ──────────────────────────────────────────────────────
+    let mut osc_sender: Option<crate::osc::OscSender> = None;
+    let mut osc_sender_key: (String, u16) = (String::new(), 0);
+    let mut osc_tick_counter: u32 = 0;
+
+
     // ── Time-of-day awareness (invisible — no UI) ──────────────────────────────
     // 0.0 = midnight/dark, 1.0 = noon/bright
     let time_of_day: f32 = {
@@ -386,7 +420,8 @@ fn sim_thread(
     let mut lyap_cycles: u64 = 0;
 
     // ── Trajectory buffer for analysis (permutation entropy, RQA, etc.) ───────
-    let mut analysis_trajectory: Vec<Vec<f64>> = Vec::with_capacity(500);
+    // item 6: VecDeque gives O(1) pop_front instead of O(n) remove(0) used every 12 ticks
+    let mut analysis_trajectory: std::collections::VecDeque<Vec<f64>> = std::collections::VecDeque::with_capacity(500);
 
     // ── Session transcript timer ──────────────────────────────────────────────
     let mut session_log_timer: u64 = 0;
@@ -497,6 +532,8 @@ fn sim_thread(
                     for vk in (65i32..=90).chain(48..=57).chain([32, 13, 8, 9]) {
                         let idx = vk as usize;
                         if idx < 128 {
+                            // item 12: only unsafe site in main.rs — Win32 FFI, no pointer derefs
+                            #[allow(unsafe_code)]
                             let cur = unsafe { GetAsyncKeyState(vk) };
                             if (cur & 1) != 0 && (prev_states[idx] & 1) == 0 {
                                 key_count += 1;
@@ -528,6 +565,7 @@ fn sim_thread(
             let our_port = 47832u16;
             // Try to be the listener on our_port
             if let Ok(sock) = std::net::UdpSocket::bind(format!("127.0.0.1:{}", our_port)) {
+                // item 10: 200ms read timeout prevents UDP receive from blocking the sim thread
                 let _ = sock.set_read_timeout(Some(std::time::Duration::from_millis(200)));
                 let mut buf = [0u8; 4];
                 loop {
@@ -617,6 +655,19 @@ fn sim_thread(
         }
     }
 
+    // Feature #10: xorshift64 RNG for noise injection (no external crate needed)
+    let mut noise_rng: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().subsec_nanos() as u64
+        ^ 0xDEADBEEFCAFEBABE;
+
+    // Feature #9: secondary system for attractor interpolation
+    let mut interp_sys_instance: Option<Box<dyn DynamicalSystem>> = None;
+    let mut interp_sys_last_name: String = String::new();
+
+    // Feature #8: track poincare_z_prev locally (also kept in AppState for reference)
+    let mut poincare_z_prev: f64 = 0.0;
+    const POINCARE_THRESHOLD: f64 = 27.0;
+
     loop {
         let now = Instant::now();
         if now < next_tick {
@@ -641,7 +692,9 @@ fn sim_thread(
 
         let (paused, mut config, sys_changed, mode_changed, bpm_sync, bpm, auto_recording, auto_playing,
              poly_defs, sidechain_enabled, sidechain_level_shared, sidechain_target, sidechain_amount,
-             coupled_enabled, coupled_src_name, coupled_strength, coupled_target_param, coupled_bidirectional) = {
+             coupled_enabled, coupled_src_name, coupled_strength, coupled_target_param, coupled_bidirectional,
+             noise_inject, interp_enabled, interp_system_name, interp_t,
+             bv_dreams, bv_aging, bv_seasonal, bv_empathy) = {
             let mut st = shared.lock();
             let p = st.paused;
             let c = st.config.clone();
@@ -663,9 +716,17 @@ fn sim_thread(
             let cstr = st.coupled_strength;
             let ct = st.coupled_target.clone();
             let cbd = st.coupled_bidirectional;
-            (p, c, sc, mc, bs, bm, ar, ap, pd, se, sl, st_target, sa, ce, cs, cstr, ct, cbd)
+            let ni = st.noise_inject;
+            let ie = st.interp_enabled;
+            let isn = st.interp_system.clone();
+            let it = st.interp_t;
+            let bvd  = st.behav_dreams;
+            let bvag = st.behav_aging;
+            let bvse = st.behav_seasonal_drift;
+            let bvem = st.behav_instance_empathy;
+            (p, c, sc, mc, bs, bm, ar, ap, pd, se, sl, st_target, sa, ce, cs, cstr, ct, cbd, ni, ie, isn, it,
+             bvd, bvag, bvse, bvem)
         };
-
         // METABOLISM: resting drift when paused — keeps attractor alive like breathing
         if paused {
             // Step at 1.5% of normal speed, no audio sent
@@ -681,11 +742,12 @@ fn sim_thread(
         uptime_ticks += 1;
 
         // Collect trajectory points for analysis (every 12 ticks = 10x subsampled at 120Hz)
+        // item 6: pop_front is O(1) on VecDeque vs O(n) remove(0) on Vec
         if uptime_ticks % 12 == 0 {
             if analysis_trajectory.len() >= 500 {
-                analysis_trajectory.remove(0);
+                analysis_trajectory.pop_front();
             }
-            analysis_trajectory.push(system.state().to_vec());
+            analysis_trajectory.push_back(system.state().to_vec());
         }
         wound_t = (wound_t + 1.0 / (20.0 * 60.0 * 120.0)).min(1.0);
 
@@ -847,37 +909,44 @@ fn sim_thread(
 
         // Automation playback
         if auto_playing {
-            let (pos, total, start_time) = {
+            // item 5: batch — single lock read, process, single lock write
+            let (pos, events_clone, start_time) = {
                 let st = shared.lock();
-                (st.auto_play_pos, st.auto_events.len(), st.auto_start_time)
+                (st.auto_play_pos, st.auto_events.clone(), st.auto_start_time)
             };
+            let total = events_clone.len();
             if total > 0 {
                 let elapsed = start_time.elapsed().as_secs_f64();
-                // Apply events up to current elapsed time
-                let events_clone = shared.lock().auto_events.clone();
                 let mut new_pos = pos;
+                // Collect all parameter mutations into a local buffer, then apply in one lock
+                let mut mutations: Vec<(&str, f64)> = Vec::new();
                 for (i, (t, ref param, val)) in events_clone.iter().enumerate() {
                     if i < pos { continue; }
                     if *t <= elapsed {
-                        match param.as_str() {
-                            "master_volume" => shared.lock().config.audio.master_volume = *val as f32,
-                            "reverb_wet" => shared.lock().config.audio.reverb_wet = *val as f32,
-                            "delay_ms" => shared.lock().config.audio.delay_ms = *val as f32,
-                            "speed" => shared.lock().config.system.speed = *val,
-                            "sigma" => shared.lock().config.lorenz.sigma = *val,
-                            "rho" => shared.lock().config.lorenz.rho = *val,
-                            "coupling" => shared.lock().config.kuramoto.coupling = *val,
-                            _ => {}
-                        }
+                        mutations.push((param.as_str(), *val));
                         new_pos = i + 1;
                     }
                 }
-                // Loop: if we've reached the end, reset
-                if new_pos >= total {
-                    shared.lock().auto_play_pos = 0;
-                    shared.lock().auto_start_time = Instant::now();
-                } else {
-                    shared.lock().auto_play_pos = new_pos;
+                if !mutations.is_empty() || new_pos != pos {
+                    let mut st = shared.lock();
+                    for (param, val) in &mutations {
+                        match *param {
+                            "master_volume" => st.config.audio.master_volume = *val as f32,
+                            "reverb_wet"    => st.config.audio.reverb_wet    = *val as f32,
+                            "delay_ms"      => st.config.audio.delay_ms      = *val as f32,
+                            "speed"         => st.config.system.speed        = *val,
+                            "sigma"         => st.config.lorenz.sigma        = *val,
+                            "rho"           => st.config.lorenz.rho          = *val,
+                            "coupling"      => st.config.kuramoto.coupling   = *val,
+                            _ => {}
+                        }
+                    }
+                    if new_pos >= total {
+                        st.auto_play_pos = 0;
+                        st.auto_start_time = Instant::now();
+                    } else {
+                        st.auto_play_pos = new_pos;
+                    }
                 }
             }
         }
@@ -1162,7 +1231,7 @@ fn sim_thread(
                     dream_idle_ticks += 1;
                 }
 
-                if !dream_active && dream_idle_ticks >= dream_idle_threshold {
+                if bv_dreams && !dream_active && dream_idle_ticks >= dream_idle_threshold {
                     // Start a dream: pick a random different system
                     let cur_sys = config.system.name.clone();
                     let dream_systems = ["lorenz", "rossler", "halvorsen", "aizawa", "chua",
@@ -1209,11 +1278,11 @@ fn sim_thread(
                     };
 
                     if dream_active {
-                        // Apply dream config on top of current config
-                        config.system.speed   = dream_config.system.speed;
-                        config.lorenz.sigma   = dream_config.lorenz.sigma;
-                        config.lorenz.rho     = dream_config.lorenz.rho;
-                        config.audio.reverb_wet = dream_config.audio.reverb_wet;
+                        // item 3: clamp dream params to non-divergent bounds before applying
+                        config.system.speed   = dream_config.system.speed.clamp(0.05, 15.0);
+                        config.lorenz.sigma   = dream_config.lorenz.sigma.clamp(1.0, 50.0);
+                        config.lorenz.rho     = dream_config.lorenz.rho.clamp(1.0, 60.0);
+                        config.audio.reverb_wet = dream_config.audio.reverb_wet.clamp(0.0, 0.95);
                     }
                 }
             }
@@ -1238,7 +1307,7 @@ fn sim_thread(
         }
         // Apply empathy nudge to macro_chaos (extremely subtle, only when walk is on)
         let macro_walk_enabled_emp = { shared.lock().macro_walk_enabled };
-        if macro_walk_enabled_emp && empathy_nudge.abs() > 0.0 {
+        if bv_empathy && macro_walk_enabled_emp && empathy_nudge.abs() > 0.0 {
             let mut st = shared.lock();
             st.macro_chaos = (st.macro_chaos + empathy_nudge).clamp(0.05, 0.95);
         }
@@ -1312,9 +1381,10 @@ fn sim_thread(
                 let x = s.first().copied().unwrap_or(0.0) as f32;
                 ((x + 30.0) / 60.0).clamp(0.0, 1.0)
             };
+            // item 5: single lock for read+write of sync_error
             let inst_err = (main_x_norm - coupled_norm as f32).abs();
-            let prev_err = shared.lock().sync_error;
-            shared.lock().sync_error = prev_err * 0.95 + inst_err * 0.05;
+            let mut st = shared.lock();
+            st.sync_error = st.sync_error * 0.95 + inst_err * 0.05;
         }
 
         // Update live display of coupled outputs
@@ -1325,12 +1395,86 @@ fn sim_thread(
             st.coupled_src_x_out = coupled_norm as f32;
         }
 
+        // Feature #9: step secondary system for interpolation
+        if interp_enabled {
+            // Rebuild secondary system if name changed
+            if interp_sys_last_name != interp_system_name {
+                interp_sys_last_name = interp_system_name.clone();
+                let mut icfg = config.clone();
+                icfg.system.name = interp_system_name.clone();
+                interp_sys_instance = Some(build_system(&icfg));
+            }
+        } else {
+            interp_sys_instance = None;
+            interp_sys_last_name.clear();
+        }
+        if let Some(ref mut isys) = interp_sys_instance {
+            let isteps = ((config.system.speed / CONTROL_RATE_HZ) / config.system.dt)
+                .round() as usize;
+            for _ in 0..isteps.clamp(1, 10_000) {
+                isys.step(config.system.dt);
+            }
+        }
+
         // Integrate enough steps to cover one control period at the configured speed
         let steps = ((config.system.speed / CONTROL_RATE_HZ) / config.system.dt)
             .round() as usize;
         for _ in 0..steps.clamp(1, 10_000) {
             system.step(config.system.dt);
         }
+
+        // item 4: divergence detector — reset to safe IC and notify user if state blows up
+        {
+            let st = system.state();
+            let diverged = st.iter().any(|&v| !v.is_finite() || v.abs() > 1e5);
+            if diverged {
+                log::warn!("Attractor diverged — resetting state to safe initial conditions");
+                system.set_state(&[0.1, 0.1, 0.1]);
+                let mut st_lock = shared.lock();
+                st_lock.toast_queue.push(crate::ui::Toast::warning(
+                    "Attractor diverged — reset to safe initial conditions"
+                ));
+            }
+        }
+
+        // Feature #10: Stochastic noise injection (xorshift64)
+        if noise_inject > 0.0 {
+            noise_rng ^= noise_rng << 13;
+            noise_rng ^= noise_rng >> 7;
+            noise_rng ^= noise_rng << 17;
+            let noise_val = (noise_rng as f64 / u64::MAX as f64 - 0.5) * 2.0 * noise_inject as f64;
+            let cur_state: Vec<f64> = system.state().to_vec();
+            if !cur_state.is_empty() && cur_state.iter().all(|v| v.is_finite()) {
+                // Perturb first state variable (x) by noise, apply to all dims proportionally
+                let dim = cur_state.len().min(3);
+                let mut noisy: Vec<f64> = cur_state.clone();
+                for v in noisy.iter_mut().take(dim) {
+                    // secondary noise per dim using same rng iteration
+                    noise_rng ^= noise_rng << 13;
+                    noise_rng ^= noise_rng >> 7;
+                    noise_rng ^= noise_rng << 17;
+                    let nv = (noise_rng as f64 / u64::MAX as f64 - 0.5) * 2.0 * noise_inject as f64;
+                    *v += nv;
+                }
+                system.set_state(&noisy);
+            }
+        }
+
+        // Feature #9: Attractor interpolation — blend primary and secondary states
+        // Overrides current_state read for mapper and viz if interp_enabled
+        let effective_state: Vec<f64> = if interp_enabled && interp_t > 0.0 {
+            if let Some(ref isys) = interp_sys_instance {
+                let ps = system.state();
+                let ss = isys.state();
+                let len = ps.len().min(ss.len());
+                let t = interp_t as f64;
+                (0..len).map(|i| ps[i] * (1.0 - t) + ss[i] * t).collect()
+            } else {
+                system.state().to_vec()
+            }
+        } else {
+            system.state().to_vec()
+        };
 
         // Energy conservation tracking
         if let Some(ee) = system.energy_error() {
@@ -1350,10 +1494,27 @@ fn sim_thread(
             }
         }
 
+        // Feature #8: Poincaré section — detect z=27 crossing from below
+        {
+            let z_now = if effective_state.len() >= 3 { effective_state[2] } else { 0.0 };
+            if poincare_z_prev < POINCARE_THRESHOLD && z_now >= POINCARE_THRESHOLD {
+                let px = effective_state.first().copied().unwrap_or(0.0) as f32;
+                let py = if effective_state.len() >= 2 { effective_state[1] as f32 } else { 0.0 };
+                if px.is_finite() && py.is_finite() {
+                    let mut st = shared.lock();
+                    st.poincare_points.push((px, py));
+                    if st.poincare_points.len() > 2000 {
+                        st.poincare_points.remove(0);
+                    }
+                }
+            }
+            poincare_z_prev = z_now;
+        }
+
         // Update visualization
         let mut is_poincare_crossing = false;
         {
-            let state = system.state();
+            let state = &effective_state;
             if state.len() >= 2 {
                 let mut vh = viz.lock();
                 let max_trail = config.viz.trail_length;
@@ -1377,7 +1538,7 @@ fn sim_thread(
         }
 
         // Map state to audio params and send (non-blocking, drop if full)
-        let mut params = mapper.map(system.state(), system.speed(), &config.sonification);
+        let mut params = mapper.map(&effective_state, system.speed(), &config.sonification);
 
         // Fill harmony fields from config
         params.transpose_semitones = config.sonification.transpose_semitones;
@@ -1607,7 +1768,7 @@ fn sim_thread(
             let mut st = shared.lock();
             st.chaos_level = params.chaos_level;
             st.trail_color = trail_color;
-            st.current_state = system.state().to_vec();
+            st.current_state = effective_state.clone();
             st.current_deriv = system.current_deriv();
             if config.system.name == "kuramoto" {
                 st.kuramoto_phases = system.state().to_vec();
@@ -1643,7 +1804,7 @@ fn sim_thread(
         // Modulation is applied to the LOCAL params only — shared config/preset state is untouched.
         {
             let mod_routes = { shared.lock().mod_matrix.clone() };
-            let state_now = system.state();
+            let state_now = &effective_state;
             // Normalize Lorenz-typical range [-30, 30] to [-1, 1]
             let x_norm = state_now.first().copied().unwrap_or(0.0) as f32 / 30.0;
             let y_norm = if state_now.len() >= 2 { state_now[1] as f32 / 30.0 } else { 0.0 };
@@ -1798,10 +1959,12 @@ fn sim_thread(
         // ── Attractor aging: filter opens fractionally over first hour ────────────
         // aging_t = 0.0 at start, 1.0 after 60 minutes
         // Narrow range (0.92-1.0) so it never silences even muffled sources.
-        let aging_filter_mult = 0.92 + aging_t * 0.08;
-        params.filter_cutoff *= aging_filter_mult;
-        // Also slight harmonic richness increase: waveshaper drive decreases with age (cleaner)
-        params.waveshaper_drive = (params.waveshaper_drive * (1.0 - aging_t * 0.15)).max(1.0);
+        if bv_aging {
+            let aging_filter_mult = 0.92 + aging_t * 0.08;
+            params.filter_cutoff *= aging_filter_mult;
+            // Also slight harmonic richness increase: waveshaper drive decreases with age (cleaner)
+            params.waveshaper_drive = (params.waveshaper_drive * (1.0 - aging_t * 0.15)).max(1.0);
+        }
 
         // ── Harmonic gravity: voices drift toward pure intervals ──────────────────
         // Not hard quantization. A gentle magnetic pull toward consonance.
@@ -1872,9 +2035,11 @@ fn sim_thread(
         // ── Seasonal drift: barely perceptible frequency shift over the calendar year ──
         // Warmer, lower in winter; brighter, higher in summer. ±1.5% range.
         // Someone who uses Math Sonify for six months will notice the feel changed.
-        let sf = seasonal_freq_mult as f32;
-        for f in &mut params.freqs { *f *= sf; }
-        params.grain_base_freq *= sf;
+        if bv_seasonal {
+            let sf = seasonal_freq_mult as f32;
+            for f in &mut params.freqs { *f *= sf; }
+            params.grain_base_freq *= sf;
+        }
 
         // CIRCADIAN AUDIO: odd/even harmonic bias — night boosts odd voices, day even
         {
@@ -2013,18 +2178,65 @@ fn sim_thread(
 
         let batch: [Option<AudioParams>; 3] = [Some(params), layer1_params, layer2_params];
         let _ = tx.try_send(batch);
+
+        // ── OSC output (throttled to ~30 Hz: every 4 ticks at 120 Hz) ──────
+        osc_tick_counter = osc_tick_counter.wrapping_add(1);
+        if osc_tick_counter % 4 == 0 {
+            let (osc_en, osc_host, osc_port) = {
+                let st = shared.lock();
+                (st.osc_enabled, st.osc_host.clone(), st.osc_port)
+            };
+            if osc_en {
+                let key = (osc_host.clone(), osc_port);
+                if osc_sender.is_none() || osc_sender_key != key {
+                    osc_sender_key = key;
+                    match crate::osc::OscSender::new(&osc_host, osc_port) {
+                        Ok(s) => {
+                            osc_sender = Some(s);
+                            shared.lock().osc_status = format!("Sending to {}:{}", osc_host, osc_port);
+                        }
+                        Err(e) => {
+                            osc_sender = None;
+                            shared.lock().osc_status = format!("Error: {}", e);
+                        }
+                    }
+                }
+                if let Some(ref sender) = osc_sender {
+                    let state_now = system.state();
+                    let x = state_now.first().copied().unwrap_or(0.0) as f32;
+                    let y = if state_now.len() >= 2 { state_now[1] as f32 } else { 0.0 };
+                    let z = if state_now.len() >= 3 { state_now[2] as f32 } else { 0.0 };
+                    let speed = config.system.speed as f32;
+                    let lyapunov = {
+                        let st = shared.lock();
+                        st.lyapunov_spectrum.first().copied().unwrap_or(0.0) as f32
+                    };
+                    let _ = sender.send_state(x, y, z, speed, lyapunov);
+                }
+            } else if osc_sender.is_some() {
+                osc_sender = None;
+                osc_sender_key = (String::new(), 0);
+                shared.lock().osc_status = String::new();
+            }
+        }
     }
 }
 
+/// item 13: canonical string→OscShape mapping. Valid strings in config voice_shapes:
+/// "sine" (default), "triangle", "saw", "square", "noise".
 fn osc_shape_from_str(s: &str) -> OscShape {
     match s {
         "triangle" => OscShape::Triangle,
-        "saw" => OscShape::Saw,
-        _ => OscShape::Sine,
+        "saw"      => OscShape::Saw,
+        "square"   => OscShape::Square,
+        "noise"    => OscShape::Noise,
+        _          => OscShape::Sine,
     }
 }
 
 fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
+    // NOTE: The list of valid system names is defined in systems::SYSTEM_REGISTRY (src/systems/mod.rs).
+    // To add a new system: add an entry there and add a match arm here.
     match config.system.name.as_str() {
         "rossler"         => Box::new(Rossler::new(config.rossler.a, config.rossler.b, config.rossler.c)),
         "double_pendulum" => Box::new(DoublePendulum::new(
@@ -2274,3 +2486,153 @@ fn start_midi_input_thread(shared: SharedState) {
         }
     });
 }
+
+// ---------------------------------------------------------------------------
+// MIDI clock output thread (#17)
+// ---------------------------------------------------------------------------
+
+fn start_midi_clock_thread(shared: SharedState) {
+    std::thread::spawn(move || {
+        let midi_out = match midir::MidiOutput::new("Math Sonify Clock") {
+            Ok(m) => m,
+            Err(e) => { log::warn!("MIDI clock init failed: {e}"); return; }
+        };
+        let ports = midi_out.ports();
+        if ports.is_empty() {
+            log::info!("No MIDI output ports for clock");
+            return;
+        }
+        let port = &ports[0];
+        let mut conn = match midi_out.connect(port, "math-sonify-clock") {
+            Ok(c) => c,
+            Err(e) => { log::warn!("MIDI clock connect failed: {e}"); return; }
+        };
+
+        let mut was_enabled = false;
+
+        loop {
+            let (clock_enabled, bpm) = {
+                let st = shared.lock();
+                (st.midi_clock_enabled, st.bpm)
+            };
+
+            if clock_enabled {
+                if !was_enabled {
+                    // Send MIDI Start (0xFA)
+                    let _ = conn.send(&[0xFA]);
+                    was_enabled = true;
+                }
+                let pulse_interval = 60.0 / (bpm as f64 * 24.0);
+                // Send MIDI Clock (0xF8)
+                let _ = conn.send(&[0xF8]);
+                std::thread::sleep(std::time::Duration::from_secs_f64(pulse_interval));
+            } else {
+                if was_enabled {
+                    // Send MIDI Stop (0xFC)
+                    let _ = conn.send(&[0xFC]);
+                    was_enabled = false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Headless CLI render (#18)
+// ---------------------------------------------------------------------------
+
+fn run_headless(args: &[String]) -> anyhow::Result<()> {
+    fn arg_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+        args.windows(2)
+            .find(|w| w[0] == flag)
+            .map(|w| w[1].as_str())
+    }
+
+    let duration_secs: f32 = arg_after(args, "--duration")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10.0);
+    let output_path = arg_after(args, "--output").unwrap_or("headless_render.wav");
+    let patch_name  = arg_after(args, "--patch");
+
+    println!("Math Sonify headless render");
+    println!("  Duration : {} s", duration_secs);
+    println!("  Output   : {}", output_path);
+    if let Some(p) = patch_name { println!("  Patch    : {}", p); }
+
+    // Load config / patch
+    let mut config = crate::config::load_config(std::path::Path::new("config.toml"));
+    if let Some(name) = patch_name {
+        if let Some(cfg) = crate::patches::load_patch_file(name) {
+            config = cfg;
+        } else {
+            // Try as a preset name
+            config = crate::patches::load_preset(name);
+        }
+    }
+
+    let sample_rate = if config.audio.sample_rate > 0 { config.audio.sample_rate } else { 44100 };
+    let total_samples = (duration_secs * sample_rate as f32) as usize;
+
+    // WAV writer
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(output_path, spec)?;
+
+    // Build dynamical system and mapper
+    let mut system = build_system(&config);
+    let mut mapper = build_mapper(&config.sonification.mode);
+
+    // Use simple oscillator for offline render (no audio device)
+    let mut osc = crate::synth::Oscillator::new(
+        config.sonification.base_frequency as f32,
+        crate::synth::OscShape::Sine,
+        sample_rate as f32,
+    );
+
+    let steps_per_sample = {
+        let steps = (config.system.speed / (sample_rate as f64 * config.system.dt)).round() as usize;
+        steps.clamp(1, 10_000)
+    };
+
+    let print_every = total_samples / 10;
+    let mut next_print = print_every;
+    let mut pct = 0usize;
+
+    for i in 0..total_samples {
+        // Step sim
+        for _ in 0..steps_per_sample {
+            system.step(config.system.dt);
+        }
+
+        // Map to audio params
+        let params = mapper.map(system.state(), system.speed(), &config.sonification);
+        osc.freq = params.freqs[0].max(20.0).min(20000.0);
+
+        let sample = osc.next_sample() * params.amps[0] * config.audio.master_volume;
+        let amplitude = i16::MAX as f32;
+        writer.write_sample((sample * amplitude) as i16)?;
+
+        if i >= next_print {
+            pct += 10;
+            print!(" {}%", pct);
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            next_print += print_every;
+        }
+    }
+
+    println!(" done");
+    writer.finalize()?;
+    println!("Written to {}", output_path);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// MIDI clock output thread (#17)
+// ---------------------------------------------------------------------------
+

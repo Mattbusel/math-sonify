@@ -817,15 +817,87 @@ pub fn load_preset(name: &str) -> Config {
     }
 }
 
-/// Save a named patch to the patches/ directory.
+/// Save a named patch to the patches/ directory, backing up any existing version.
 pub fn save_patch(name: &str, config: &Config) {
     let dir = std::path::PathBuf::from("patches");
     if !dir.exists() {
         let _ = std::fs::create_dir_all(&dir);
     }
     let filename = dir.join(format!("{}.toml", sanitize_name(name)));
+    // Backup existing patch before overwriting
+    if filename.exists() {
+        let bak_dir = dir.join(".bak");
+        let _ = std::fs::create_dir_all(&bak_dir);
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let bak_name = format!("{}_{}.toml", sanitize_name(name), ts);
+        let _ = std::fs::copy(&filename, bak_dir.join(bak_name));
+        prune_backups(&bak_dir, sanitize_name(name).as_str(), 5);
+    }
     let toml_str = toml::to_string_pretty(config).unwrap_or_default();
     let _ = std::fs::write(&filename, toml_str);
+}
+
+fn prune_backups(bak_dir: &std::path::Path, base_name: &str, keep: usize) {
+    let prefix = format!("{}_", base_name);
+    let mut backups: Vec<std::path::PathBuf> = match std::fs::read_dir(bak_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let p = e.path();
+                let fname = p.file_name()?.to_str()?.to_string();
+                if fname.starts_with(&prefix) && fname.ends_with(".toml") {
+                    Some(p)
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        Err(_) => return,
+    };
+    backups.sort();
+    if backups.len() > keep {
+        for old in &backups[..backups.len() - keep] {
+            let _ = std::fs::remove_file(old);
+        }
+    }
+}
+
+/// Return (filename, timestamp) pairs for backups of a given patch name, oldest-first.
+pub fn list_backups(name: &str) -> Vec<(String, u64)> {
+    let bak_dir = std::path::PathBuf::from("patches").join(".bak");
+    let prefix = format!("{}_", sanitize_name(name));
+    let mut out: Vec<(String, u64)> = match std::fs::read_dir(&bak_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let p = e.path();
+                let fname = p.file_name()?.to_str()?.to_string();
+                if fname.starts_with(&prefix) && fname.ends_with(".toml") {
+                    let stem = fname.strip_suffix(".toml")?;
+                    let ts_str = stem.rsplit('_').next()?;
+                    let ts: u64 = ts_str.parse().ok()?;
+                    Some((fname, ts))
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    out.sort_by_key(|(_, ts)| *ts);
+    out
+}
+
+/// Load a patch from the backup directory by filename.
+pub fn load_backup(filename: &str) -> Option<Config> {
+    let path = std::path::PathBuf::from("patches").join(".bak").join(filename);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => toml::from_str(&text).ok(),
+        Err(_) => None,
+    }
 }
 
 /// List all saved patch names (without .toml extension).

@@ -1,0 +1,17 @@
+[package]
+name = "math-sonify-fuzz"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "fuzz_systems"
+path = "fuzz_targets/fuzz_systems.rs"
+test = false
+doc = false
+
+[dependencies]
+libfuzzer-sys = "0.4"
+math_sonify_plugin = { path = "..", features = [] }
+
+[workspace]

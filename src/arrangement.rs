@@ -241,6 +241,13 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
     // Transpose pool in semitones (musically sensible intervals)
     let transpose_opts: &[f32] = &[-12.0, -7.0, -5.0, 0.0, 0.0, 0.0, 5.0, 7.0, 12.0];
 
+    // item 17: Coherence budget — anchor musical DNA at song level so scenes form an arc.
+    let anchor_root_freq  = root_freqs[ri(&mut rng, root_freqs.len())];
+    let anchor_scale      = pick(&mut rng, scale_pool);
+    let anchor_speed_mult = rrange(&mut rng, 0.6, 2.0);
+    let reverb_budget_total = rrange(&mut rng, 2.0, 3.5);
+    let mut reverb_spent = 0.0f32;
+
     // Hold / morph time ranges per mood (morphs intentionally longer)
     let (hold_lo, hold_hi, morph_lo, morph_hi) = match mood {
         "rhythmic"     => (10.0f32, 20.0, 18.0f32, 32.0),
@@ -271,15 +278,19 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
         _              => names_ambient,
     };
 
-    let mut scenes: Vec<Scene> = chosen_presets.iter().enumerate().map(|(i, preset)| {
+    let mut scenes: Vec<Scene> = Vec::with_capacity(n_scenes);
+    for (i, preset) in chosen_presets.iter().enumerate() {
         let hold  = rrange(&mut rng, hold_lo, hold_hi);
         let morph = if i == 0 { 0.0 } else { rrange(&mut rng, morph_lo, morph_hi) };
         let mode  = pick(&mut rng, mode_pool);
-        let scale = pick(&mut rng, scale_pool);
+        let scale = if rf(&mut rng) < 0.65 { anchor_scale.clone() } else { pick(&mut rng, scale_pool) };
         let chord = pick(&mut rng, chord_modes);
 
         // Effects — wide independent ranges per scene
-        let reverb   = rrange(&mut rng, 0.20, 0.80);
+        let remaining_scenes = (n_scenes - i).max(1) as f32;
+        let reverb_max = ((reverb_budget_total - reverb_spent) / remaining_scenes).clamp(0.15, 0.80);
+        let reverb = rrange(&mut rng, 0.15, reverb_max);
+        reverb_spent += reverb;
         let chorus   = rrange(&mut rng, 0.0,  0.65);
         let delay_fb = rrange(&mut rng, 0.0,  0.65);
         let delay_ms = rrange(&mut rng, 60.0, 800.0);
@@ -287,13 +298,19 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
         let waveshaper_drive = rrange(&mut rng, 1.0, 6.0);
         let waveshaper_mix   = if rf(&mut rng) > 0.5 { rrange(&mut rng, 0.0, 0.5) } else { 0.0 };
 
-        // Pitch — pick a random root frequency and transposition independently
-        let base_freq  = root_freqs[ri(&mut rng, root_freqs.len())];
+        // Pitch — anchor-coherent root frequency and transposition
+        let base_freq = if rf(&mut rng) < 0.70 {
+            anchor_root_freq
+        } else {
+            let octave_shift = if rf(&mut rng) < 0.5 { 0.5 } else { 2.0 };
+            (anchor_root_freq * octave_shift).clamp(82.0, 880.0)
+        };
         let transpose  = transpose_opts[ri(&mut rng, transpose_opts.len())];
         let octave_range = rrange(&mut rng, 0.8, 3.5) as f64;
 
-        // Speed — both from preset and an additional multiplicative scatter
-        let speed_mult = rrange(&mut rng, 0.4, 2.5);
+        // Speed — scatter around the anchor speed
+        let speed_scatter = rrange(&mut rng, 0.6, 1.4);
+        let speed_mult = anchor_speed_mult * speed_scatter;
 
         // Voice shapes — each voice independently randomized
         let vs0 = pick(&mut rng, voice_shapes);
@@ -320,7 +337,7 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
         let name_idx = (i + ri(&mut rng, 3)) % name_pool.len();
         let name = name_pool[name_idx];
 
-        make_scene(name, preset, hold, morph, move |c| {
+        scenes.push(make_scene(name, preset, hold, morph, move |c| {
             c.sonification.mode  = mode;
             c.sonification.scale = scale;
             c.sonification.chord_mode = chord;
@@ -353,8 +370,8 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
             c.halvorsen.a          = halvorsen_a;
 
             c.audio.master_volume = c.audio.master_volume.max(0.62);
-        })
-    }).collect();
+        }));
+    }
 
     // Bitcrusher texture for rhythmic/experimental — independent per scene
     if mood == "rhythmic" || mood == "experimental" {

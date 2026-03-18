@@ -2,7 +2,8 @@
 mod tests {
     use crate::config::{Config, load_config};
     use crate::systems::{DynamicalSystem, Lorenz, Rossler, Duffing, Kuramoto};
-    use crate::sonification::{Scale, quantize_to_scale};
+    use crate::sonification::{Scale, quantize_to_scale, chord_intervals_for};
+    use crate::synth::oscillator::{Oscillator, OscShape};
 
     // -------------------------------------------------------------------------
     // Dynamical system integration tests
@@ -495,7 +496,11 @@ mod tests {
     #[test]
     fn scale_quantization_t0_returns_base() {
         // t=0 always maps to the root (base frequency)
-        for &scale in &[Scale::Pentatonic, Scale::Chromatic, Scale::JustIntonation, Scale::Microtonal] {
+        for &scale in &[
+            Scale::Pentatonic, Scale::Chromatic, Scale::JustIntonation, Scale::Microtonal,
+            Scale::Edo19, Scale::Edo31, Scale::Edo24,
+            Scale::WholeTone, Scale::Phrygian, Scale::Lydian,
+        ] {
             let base = 220.0_f32;
             let f = quantize_to_scale(0.0, base, 3.0, scale);
             assert!((f - base).abs() < 0.01,
@@ -529,6 +534,82 @@ mod tests {
         }
     }
 
+    // ── EDO and modal scale tests (#3) ────────────────────────────────────────
+
+    #[test]
+    fn edo19_t0_returns_base() {
+        let base = 440.0_f32;
+        let f = quantize_to_scale(0.0, base, 1.0, Scale::Edo19);
+        assert!((f - base).abs() < 0.01, "Edo19 t=0 expected base {}, got {}", base, f);
+    }
+
+    #[test]
+    fn edo19_produces_finite_values() {
+        for i in 0..=100 {
+            let t = i as f32 / 100.0;
+            let f = quantize_to_scale(t, 220.0, 2.0, Scale::Edo19);
+            assert!(f.is_finite() && f >= 219.9, "Edo19 invalid freq {} at t={}", f, t);
+        }
+    }
+
+    #[test]
+    fn edo31_step_size_approximately_correct() {
+        let base = 220.0_f32;
+        let expected_semitones = 12.0_f32 / 31.0;
+        let expected_freq = base * 2.0_f32.powf(expected_semitones / 12.0);
+        let f = quantize_to_scale(1.0 / 31.0, base, 1.0, Scale::Edo31);
+        assert!((f - expected_freq).abs() < 0.5,
+            "Edo31 second degree: expected {:.2} Hz, got {:.2} Hz", expected_freq, f);
+    }
+
+    #[test]
+    fn edo24_quarter_tone_step() {
+        let base = 440.0_f32;
+        let expected = base * 2.0_f32.powf(0.5 / 12.0);
+        let f = quantize_to_scale(1.0 / 24.0, base, 1.0, Scale::Edo24);
+        assert!((f - expected).abs() < 0.5,
+            "Edo24 quarter-tone: expected {:.2} Hz, got {:.2} Hz", expected, f);
+    }
+
+    #[test]
+    fn whole_tone_has_6_degrees() {
+        let base = 220.0_f32;
+        let expected_4th = base * 2.0_f32.powf(6.0 / 12.0);
+        let f = quantize_to_scale(3.0 / 6.0, base, 1.0, Scale::WholeTone);
+        assert!((f - expected_4th).abs() < 0.5,
+            "WholeTone 4th degree: expected {:.2} Hz, got {:.2} Hz", expected_4th, f);
+    }
+
+    #[test]
+    fn phrygian_second_degree_is_semitone() {
+        let base = 220.0_f32;
+        let expected = base * 2.0_f32.powf(1.0 / 12.0);
+        let f = quantize_to_scale(1.0 / 7.0, base, 1.0, Scale::Phrygian);
+        assert!((f - expected).abs() < 0.5,
+            "Phrygian second degree: expected {:.2} Hz, got {:.2} Hz", expected, f);
+    }
+
+    #[test]
+    fn lydian_fourth_degree_is_tritone() {
+        let base = 220.0_f32;
+        let expected = base * 2.0_f32.powf(6.0 / 12.0);
+        let f = quantize_to_scale(3.0 / 7.0, base, 1.0, Scale::Lydian);
+        assert!((f - expected).abs() < 0.5,
+            "Lydian tritone: expected {:.2} Hz, got {:.2} Hz", expected, f);
+    }
+
+    #[test]
+    fn scale_from_str_new_variants() {
+        use crate::sonification::Scale;
+        assert_eq!(Scale::from("edo19"),      Scale::Edo19);
+        assert_eq!(Scale::from("edo31"),      Scale::Edo31);
+        assert_eq!(Scale::from("edo24"),      Scale::Edo24);
+        assert_eq!(Scale::from("whole_tone"), Scale::WholeTone);
+        assert_eq!(Scale::from("phrygian"),   Scale::Phrygian);
+        assert_eq!(Scale::from("lydian"),     Scale::Lydian);
+        assert_eq!(Scale::from("unknown"),    Scale::Pentatonic);
+    }
+
     #[test]
     fn chord_intervals_known_values() {
         let major = chord_intervals_for("major");
@@ -551,5 +632,132 @@ mod tests {
     fn chord_intervals_unknown_returns_zeros() {
         let unknown = chord_intervals_for("diminished_eleventh_no_one_uses_this");
         assert_eq!(unknown, [0.0, 0.0, 0.0]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 18: Golden audio regression tests
+    // -------------------------------------------------------------------------
+
+    fn run_osc(freq: f32, shape: OscShape, n: usize) -> Vec<f32> {
+        let mut osc = Oscillator::new(freq, shape, 44100.0);
+        (0..n).map(|_| osc.next_sample()).collect()
+    }
+
+    #[test]
+    fn golden_sine_440hz_first_sample() {
+        let samples = run_osc(440.0, OscShape::Sine, 1);
+        assert!(samples[0].abs() < 1e-6, "First sine sample should be 0.0, got {}", samples[0]);
+    }
+
+    #[test]
+    fn golden_sine_440hz_quarter_period() {
+        let samples = run_osc(440.0, OscShape::Sine, 26);
+        let peak = samples[25];
+        assert!(peak > 0.9, "Sine quarter-period sample should be near +1, got {}", peak);
+    }
+
+    #[test]
+    fn golden_saw_first_sample_in_range() {
+        let samples = run_osc(440.0, OscShape::Saw, 1);
+        assert!(samples[0].is_finite() && samples[0].abs() <= 1.01,
+            "Saw first sample out of range: {}", samples[0]);
+    }
+
+    #[test]
+    fn golden_triangle_amplitude_bounded() {
+        let samples = run_osc(220.0, OscShape::Triangle, 4410);
+        let max_amp = samples.iter().cloned().fold(0.0f32, f32::max);
+        let min_amp = samples.iter().cloned().fold(0.0f32, f32::min);
+        assert!(max_amp <= 1.2, "Triangle amplitude exceeded +1.2: {}", max_amp);
+        assert!(min_amp >= -1.2, "Triangle amplitude exceeded -1.2: {}", min_amp);
+    }
+
+    #[test]
+    fn golden_square_amplitude_bounded() {
+        let samples = run_osc(440.0, OscShape::Square, 4410);
+        let max_amp = samples[1000..].iter().cloned().fold(0.0f32, f32::max);
+        assert!(max_amp <= 1.1, "Square amplitude exceeded +1.1: {}", max_amp);
+    }
+
+    #[test]
+    fn golden_noise_covers_both_signs() {
+        let samples = run_osc(440.0, OscShape::Noise, 100);
+        let has_pos = samples.iter().any(|&s| s > 0.1);
+        let has_neg = samples.iter().any(|&s| s < -0.1);
+        assert!(has_pos, "Noise should produce positive samples");
+        assert!(has_neg, "Noise should produce negative samples");
+    }
+
+    #[test]
+    fn golden_sine_deterministic_across_runs() {
+        let a = run_osc(330.0, OscShape::Sine, 64);
+        let b = run_osc(330.0, OscShape::Sine, 64);
+        for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+            assert_eq!(x.to_bits(), y.to_bits(),
+                "Sine output not deterministic at sample {}: {} != {}", i, x, y);
+        }
+    }
+
+    #[test]
+    fn golden_lorenz_trajectory_deterministic() {
+        let mut s1 = Lorenz::new(10.0, 28.0, 2.6667);
+        let mut s2 = Lorenz::new(10.0, 28.0, 2.6667);
+        for _ in 0..500 { s1.step(0.001); s2.step(0.001); }
+        for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+            assert_eq!(a.to_bits(), b.to_bits(), "Lorenz trajectory not deterministic");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 19: Config hot-reload test coverage
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn hot_reload_modified_field_is_picked_up() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("math_sonify_test_hot_reload.toml");
+        let mut cfg1 = Config::default();
+        cfg1.lorenz.sigma = 12.5;
+        std::fs::write(&path, toml::to_string(&cfg1).expect("serialize")).expect("write");
+        let loaded1 = load_config(&path);
+        assert!((loaded1.lorenz.sigma - 12.5).abs() < 1e-9,
+            "Initial load should see sigma=12.5, got {}", loaded1.lorenz.sigma);
+        let mut cfg2 = Config::default();
+        cfg2.lorenz.sigma = 18.0;
+        cfg2.audio.reverb_wet = 0.7;
+        std::fs::write(&path, toml::to_string(&cfg2).expect("serialize")).expect("overwrite");
+        let loaded2 = load_config(&path);
+        assert!((loaded2.lorenz.sigma - 18.0).abs() < 1e-9,
+            "After hot-reload should see sigma=18.0, got {}", loaded2.lorenz.sigma);
+        assert!((loaded2.audio.reverb_wet - 0.7).abs() < 1e-5,
+            "After hot-reload should see reverb_wet=0.7, got {}", loaded2.audio.reverb_wet);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn hot_reload_invalid_value_is_clamped() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("math_sonify_test_hot_reload_clamp.toml");
+        let mut cfg = Config::default();
+        cfg.audio.reverb_wet = 5.0;
+        std::fs::write(&path, toml::to_string(&cfg).expect("serialize")).expect("write");
+        let loaded = load_config(&path);
+        assert!(loaded.audio.reverb_wet <= 1.0,
+            "reverb_wet should be clamped to <=1.0, got {}", loaded.audio.reverb_wet);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn hot_reload_preserves_unchanged_fields() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("math_sonify_test_hot_reload_stable.toml");
+        let cfg = Config::default();
+        std::fs::write(&path, toml::to_string(&cfg).expect("serialize")).expect("write");
+        let a = load_config(&path);
+        let b = load_config(&path);
+        assert_eq!(a.lorenz.sigma, b.lorenz.sigma);
+        assert_eq!(a.system.dt, b.system.dt);
+        assert_eq!(a.audio.sample_rate, b.audio.sample_rate);
+        let _ = std::fs::remove_file(&path);
     }
 }

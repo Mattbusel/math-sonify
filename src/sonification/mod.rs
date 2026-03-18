@@ -195,21 +195,48 @@ impl std::fmt::Display for SonifMode {
 
 /// Musical scale quantization.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum Scale { #[default] Pentatonic, Chromatic, JustIntonation, Microtonal }
+pub enum Scale {
+    #[default] Pentatonic,
+    Chromatic,
+    JustIntonation,
+    Microtonal,
+    Edo19,      // 19 equal divisions of the octave
+    Edo31,      // 31 equal divisions of the octave
+    Edo24,      // 24-EDO: quarter-tones
+    WholeTone,  // 6-note whole-tone scale
+    Phrygian,   // E Phrygian: 0, 1, 3, 5, 7, 8, 10
+    Lydian,     // F Lydian: 0, 2, 4, 6, 7, 9, 11
+}
 
-/// Semitone intervals for each scale, relative to root.
+/// Semitone intervals for non-computed scales, relative to root.
 fn scale_intervals(scale: Scale) -> &'static [f32] {
     match scale {
         Scale::Pentatonic =>      &[0.0, 2.0, 4.0, 7.0, 9.0],
         Scale::Chromatic =>       &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0],
         Scale::JustIntonation =>  &[0.0, 2.039, 3.863, 4.980, 7.020, 8.841, 10.884], // just major
         Scale::Microtonal =>      &[0.0, 0.75, 1.5, 2.25, 3.0, 3.75, 4.5, 5.25, 6.0, 6.75, 7.5, 8.25, 9.0],
+        Scale::WholeTone =>       &[0.0, 2.0, 4.0, 6.0, 8.0, 10.0],
+        Scale::Phrygian =>        &[0.0, 1.0, 3.0, 5.0, 7.0, 8.0, 10.0],
+        Scale::Lydian =>          &[0.0, 2.0, 4.0, 6.0, 7.0, 9.0, 11.0],
+        // EDO scales have computed intervals -- handled in scale_intervals_owned
+        Scale::Edo19 | Scale::Edo31 | Scale::Edo24 => &[0.0],
+    }
+}
+
+/// Return the full interval set as an owned Vec. EDO scales are computed here.
+/// For non-EDO scales, this delegates to scale_intervals to avoid duplication.
+fn scale_intervals_owned(scale: Scale) -> Vec<f32> {
+    match scale {
+        Scale::Edo19 => (0..19).map(|i| i as f32 * 12.0 / 19.0).collect(),
+        Scale::Edo31 => (0..31).map(|i| i as f32 * 12.0 / 31.0).collect(),
+        Scale::Edo24 => (0..24).map(|i| i as f32 * 0.5).collect(),
+        other => scale_intervals(other).to_vec(),
     }
 }
 
 /// Quantize a continuous value [0..1] to a frequency on the given scale.
 pub fn quantize_to_scale(t: f32, base_hz: f32, octave_range: f32, scale: Scale) -> f32 {
-    let intervals = scale_intervals(scale);
+    let intervals = scale_intervals_owned(scale);
     let n = intervals.len() as f32;
     // Map t to a position in the scale across octave_range octaves
     let total_steps = octave_range * n;

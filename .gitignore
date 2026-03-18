@@ -1,2 +1,7 @@
 target/
 dist/
+
+# Fuzz corpus and artifacts
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/target/

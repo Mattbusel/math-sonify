@@ -445,8 +445,18 @@ impl From<String> for SonifMode {
 
 impl From<&str> for Scale {
     fn from(s: &str) -> Self {
-        match s { "chromatic" => Self::Chromatic, "just_intonation" => Self::JustIntonation,
-                  "microtonal" => Self::Microtonal, _ => Self::Pentatonic }
+        match s {
+            "chromatic"       => Self::Chromatic,
+            "just_intonation" => Self::JustIntonation,
+            "microtonal"      => Self::Microtonal,
+            "edo19"           => Self::Edo19,
+            "edo31"           => Self::Edo31,
+            "edo24"           => Self::Edo24,
+            "whole_tone"      => Self::WholeTone,
+            "phrygian"        => Self::Phrygian,
+            "lydian"          => Self::Lydian,
+            _                 => Self::Pentatonic,
+        }
     }
 }
 

@@ -28,6 +28,11 @@ pub type VuMeter = Arc<Mutex<[f32; 4]>>;
 pub type SidechainLevel = Arc<Mutex<f32>>;
 /// Circular audio clip buffer (last ~60 seconds stereo interleaved f32).
 pub type ClipBuffer = Arc<Mutex<VecDeque<f32>>>;
+/// #4 — Shared master stereo width: written by UI thread, read by audio thread.
+pub type StereoWidth = Arc<Mutex<f32>>;
+/// Shared counter for audio stream errors / xruns (#21).
+/// Incremented by the cpal error callback; read by the UI to show a warning.
+pub type XrunCounter = Arc<std::sync::atomic::AtomicU32>;
 
 /// One-shot playback of a pre-recorded snippet (stereo interleaved f32).
 /// Written by the UI thread (song sequencer), read+consumed by the audio thread.
@@ -91,6 +96,12 @@ struct LayerSynth {
     vocoder_buzz_phase: f32,
     // Track current formant frequencies to avoid rebuilding filters every sample
     formant_freqs: [f32; 3],
+    // #1 — Voice stealing: age counter per voice
+    voice_age: [u32; 4],
+    // #5 — Doppler portamento overshoot
+    prev_freq_target: [f32; 4],
+    freq_doppler_overshoot: [f32; 4],
+    doppler_decay_counter: [u32; 4],
 }
 
 impl LayerSynth {
@@ -151,6 +162,10 @@ impl LayerSynth {
             },
             vocoder_buzz_phase: 0.0,
             formant_freqs: [800.0, 1200.0, 2500.0],
+            voice_age: [0u32; 4],
+            prev_freq_target: [0.0f32; 4],
+            freq_doppler_overshoot: [0.0f32; 4],
+            doppler_decay_counter: [0u32; 4],
         }
     }
 
@@ -183,10 +198,11 @@ impl LayerSynth {
             let velocity = p.amps[0].clamp(0.01, 1.0);
             let att = (p.adsr_attack_ms * (1.2 - velocity * 0.8)).max(1.0);
             let rel = p.adsr_release_ms * (0.7 + velocity * 0.6);
-            for adsr in &mut self.voice_adsr {
-                adsr.set_params(att, p.adsr_decay_ms, p.adsr_sustain, rel);
-                adsr.trigger();
-            }
+            // #1 — Voice stealing: steal oldest sustaining voice
+            let stolen = self.steal_oldest_voice();
+            self.voice_adsr[stolen].set_params(att, p.adsr_decay_ms, p.adsr_sustain, rel);
+            self.voice_adsr[stolen].trigger();
+            self.voice_age[stolen] = 0;
         }
         self.ks.volume = p.ks_volume;
 
@@ -207,6 +223,12 @@ impl LayerSynth {
                 }
             }
         }
+    }
+
+    /// #1 — Voice stealing helper: returns index of voice sustaining longest.
+    fn steal_oldest_voice(&self) -> usize {
+        self.voice_age.iter().enumerate()
+            .max_by_key(|&(_, &a)| a).map(|(i, _)| i).unwrap_or(0)
     }
 
     /// Render one stereo sample for this layer (no master effects yet).
@@ -298,9 +320,23 @@ impl LayerSynth {
             let target_freq = p.freqs[i] * transpose;
             let target_amp  = p.amps[i] * p.voice_levels[i];
             if target_freq > 10.0 {
+                // #5 — Doppler-effect portamento overshoot
+                let delta = target_freq - self.prev_freq_target[i];
+                if delta.abs() > 0.5 {
+                    self.freq_doppler_overshoot[i] =
+                        delta * 0.04 * (-(self.doppler_decay_counter[i] as f32) * 0.002).exp();
+                    self.doppler_decay_counter[i] += 1;
+                } else {
+                    self.doppler_decay_counter[i] = 0;
+                    self.freq_doppler_overshoot[i] *= 0.95;
+                }
+                self.prev_freq_target[i] = target_freq;
                 self.freq_smooth[i] += self.freq_smooth_rate * (target_freq - self.freq_smooth[i]);
+                let freq_out = (self.freq_smooth[i] + self.freq_doppler_overshoot[i]).max(10.0);
                 self.amp_smooth[i]  += 0.005 * (target_amp - self.amp_smooth[i]);
-                self.oscs[i].freq = self.freq_smooth[i];
+                self.oscs[i].freq = freq_out;
+                // #1 — increment voice age each sample
+                self.voice_age[i] = self.voice_age[i].saturating_add(1);
                 let env = self.voice_adsr[i].next_sample();
                 let sig = self.oscs[i].next_sample() * self.amp_smooth[i] * gain * env;
                 let pan = p.pans[i].clamp(-1.0, 1.0);
@@ -506,6 +542,8 @@ struct SynthState {
     limiter: Limiter,
     chorus: Chorus,
     master_volume: f32,
+    /// #4 — Mid/side stereo width after limiter (0=mono, 1=unity, 3=hyper-wide).
+    stereo_width: f32,
     // Sidechain duck (KS trigger ducks reverb/delay output)
     sidechain_duck: f32,
     reverb_wet: f32,
@@ -557,6 +595,7 @@ impl SynthState {
             limiter: Limiter::new(-1.0, 5.0, sr),
             chorus: Chorus::new(sr),
             master_volume: 0.7,
+            stereo_width: 1.0,
             sidechain_duck: 1.0,
             reverb_wet,
             delay_ms,
@@ -696,7 +735,17 @@ impl SynthState {
         // Sidechain duck recovery — slower (0.0001 ≈ 4.5s) to avoid obvious pumping
         // at fast arpeggio rates where 0.0003 never let reverb fully recover.
         self.sidechain_duck += 0.0001 * (1.0 - self.sidechain_duck);
-        let (lo_raw, ro_raw) = self.limiter.process(lrev, rrev);
+        let (lo_lim, ro_lim) = self.limiter.process(lrev, rrev);
+
+        // #4 — Master stereo width: mid/side matrix after limiter.
+        // Energy-normalised: loudness stays constant across all width values.
+        let (lo_raw, ro_raw) = {
+            let w = self.stereo_width.clamp(0.0, 3.0);
+            let mid  = (lo_lim + ro_lim) * 0.5;
+            let side = (lo_lim - ro_lim) * 0.5 * w;
+            let norm = 1.0 / (0.5 + w * w * 0.5f32).sqrt();
+            ((mid + side) * norm, (mid - side) * norm)
+        };
 
         // Final NaN guard
         let mut lo = if lo_raw.is_finite() { lo_raw } else { 0.0 };
@@ -810,6 +859,8 @@ impl AudioEngine {
         clip_buffer: ClipBuffer,
         sidechain_level: SidechainLevel,
         snippet_pb: SharedSnippetPlayback,
+        stereo_width: StereoWidth,
+        xrun_counter: XrunCounter,
     ) -> anyhow::Result<(Self, u32)> {
         let host = cpal::default_host();
         let device = host.default_output_device()
@@ -837,31 +888,43 @@ impl AudioEngine {
             latest
         }
 
-        let stream = match fmt {
+        // Error callback: logs error and increments xrun counter (#21).
+        let make_err_fn = |xc: XrunCounter| {
+            move |err: cpal::StreamError| {
+                log::error!("Audio stream error: {err}");
+                xc.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        };
+
+                let stream = match fmt {
             SampleFormat::F32 => {
                 let ss = synth.clone();
+                let sw = stereo_width.clone();
                 device.build_output_stream(
                     &stream_config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         let latest = drain(&params_rx);
                         let mut state = ss.lock();
+                        if let Some(w) = sw.try_lock() { state.stereo_width = *w; }
                         for i in 0..3 { if let Some(p) = latest[i].clone() { state.update_params(i, p); } }
                         state.render(data);
                     },
-                    |err| log::error!("Audio stream error: {err}"), None)?
+                    make_err_fn(xrun_counter.clone()), None)?
             }
             _ => {
                 // For I16/U16: convert via f32 buffer, same drain logic
                 let ss = synth.clone();
+                let sw = stereo_width.clone();
                 device.build_output_stream(
                     &stream_config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         let latest = drain(&params_rx);
                         let mut state = ss.lock();
+                        if let Some(w) = sw.try_lock() { state.stereo_width = *w; }
                         for i in 0..3 { if let Some(p) = latest[i].clone() { state.update_params(i, p); } }
                         state.render(data);
                     },
-                    |err| log::error!("Audio stream error: {err}"), None)?
+                    make_err_fn(xrun_counter.clone()), None)?
             }
         };
 

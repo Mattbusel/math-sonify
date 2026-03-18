@@ -1,7 +1,7 @@
 use std::f32::consts::TAU;
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum OscShape { #[default] Sine, Triangle, Saw }
+pub enum OscShape { #[default] Sine, Triangle, Saw, Square, Noise }
 
 pub struct Oscillator {
     phase: f32,
@@ -12,6 +12,8 @@ pub struct Oscillator {
     tri_state: f32,
     // DC-blocking state for square wave input to triangle integrator
     sq_dc: f32,
+    // xorshift64 state for noise generation
+    noise_seed: u64,
 }
 
 /// PolyBLEP residual — removes the aliasing step artifact at a phase discontinuity.
@@ -37,7 +39,7 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
 
 impl Oscillator {
     pub fn new(freq: f32, shape: OscShape, sample_rate: f32) -> Self {
-        Self { phase: 0.0, freq, shape, sample_rate, tri_state: 0.0, sq_dc: 0.0 }
+        Self { phase: 0.0, freq, shape, sample_rate, tri_state: 0.0, sq_dc: 0.0, noise_seed: 0x9E3779B97F4A7C15 }
     }
 
     pub fn next_sample(&mut self) -> f32 {
@@ -52,6 +54,20 @@ impl Oscillator {
                 // Naive: 2t - 1, with a step discontinuity at t=0.
                 // Correction subtracts the blep residual at the wrap point.
                 (2.0 * t - 1.0) - poly_blep(t, dt)
+            }
+
+            OscShape::Square => {
+                // Band-limited square via PolyBLEP.
+                let sq_naive = if t < 0.5 { 1.0f32 } else { -1.0f32 };
+                sq_naive + poly_blep(t, dt) - poly_blep((t + 0.5) % 1.0, dt)
+            }
+
+            OscShape::Noise => {
+                // White noise via xorshift64, mapped to [-1, 1]
+                let mut s = self.noise_seed;
+                s ^= s << 13; s ^= s >> 7; s ^= s << 17;
+                self.noise_seed = s;
+                (s as f32 / u64::MAX as f32) * 2.0 - 1.0
             }
 
             OscShape::Triangle => {

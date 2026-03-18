@@ -4,6 +4,41 @@
 
 use rayon::prelude::*;
 
+// ---------------------------------------------------------------------------
+// Compile-time system registry (#20)
+// ---------------------------------------------------------------------------
+
+/// Registry entry: system name + display metadata.
+pub struct SystemEntry {
+    pub name: &'static str,
+    pub display_name: &'static str,
+    pub description: &'static str,
+}
+
+pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
+    SystemEntry { name: "lorenz",              display_name: "Lorenz",           description: "Classic butterfly attractor" },
+    SystemEntry { name: "rossler",             display_name: "Rossler",          description: "Spiral attractor" },
+    SystemEntry { name: "double_pendulum",     display_name: "Double Pendulum",  description: "Gravitational chaos" },
+    SystemEntry { name: "geodesic_torus",      display_name: "Geodesic Torus",   description: "Ergodic irrational winding" },
+    SystemEntry { name: "kuramoto",            display_name: "Kuramoto",         description: "8 coupled oscillators" },
+    SystemEntry { name: "three_body",          display_name: "Three Body",       description: "Gravitational three-body problem" },
+    SystemEntry { name: "duffing",             display_name: "Duffing",          description: "Driven nonlinear oscillator" },
+    SystemEntry { name: "van_der_pol",         display_name: "Van der Pol",      description: "Self-sustaining limit cycle" },
+    SystemEntry { name: "halvorsen",           display_name: "Halvorsen",        description: "Cyclic symmetry attractor" },
+    SystemEntry { name: "aizawa",              display_name: "Aizawa",           description: "Six-parameter torus-like attractor" },
+    SystemEntry { name: "chua",                display_name: "Chua",             description: "Electronic circuit chaos" },
+    SystemEntry { name: "hindmarsh_rose",      display_name: "Hindmarsh-Rose",   description: "Neuron firing model" },
+    SystemEntry { name: "coupled_map_lattice", display_name: "CML",              description: "Spatiotemporal chaos" },
+    SystemEntry { name: "mackey_glass",        display_name: "Mackey-Glass",     description: "Delay differential equation" },
+    SystemEntry { name: "nose_hoover",         display_name: "Nose-Hoover",      description: "Conservative chaos" },
+    SystemEntry { name: "sprott_b",            display_name: "Sprott B",         description: "Minimal algebraically simple attractor" },
+    SystemEntry { name: "henon_map",           display_name: "Henon Map",        description: "Discrete-time map" },
+    SystemEntry { name: "lorenz96",            display_name: "Lorenz 96",        description: "Weather prediction model" },
+    SystemEntry { name: "custom",              display_name: "Custom ODE",       description: "Type your own 3-variable ODEs" },
+    SystemEntry { name: "fractional_lorenz",   display_name: "Fractional Lorenz",description: "Lorenz with fractional-order derivatives" },
+];
+
+
 pub mod lorenz;
 pub mod custom_ode;
 pub mod fractional_lorenz;
