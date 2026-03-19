@@ -226,6 +226,10 @@ pub struct AppState {
     // Bifurcation
     pub bifurc_computing: bool,
     pub bifurc_param: String,
+    /// Progress counter for ongoing bifurcation compute (0..bifurc_total_steps).
+    pub bifurc_progress: Arc<std::sync::atomic::AtomicUsize>,
+    /// Total steps for current bifurcation compute.
+    pub bifurc_total_steps: usize,
     // Loop export
     pub loop_bars: u32,
     // Karplus-Strong
@@ -330,6 +334,7 @@ pub struct AppState {
     pub midi_in_last_note: u8,
     pub midi_in_last_vel: u8,
     pub midi_in_last_cc: u8,
+    pub midi_in_last_cc_num: u8, // CC number of the most recently received CC message
     // MIDI export recording
     pub midi_rec_enabled: bool,
     pub midi_rec_events: Vec<(u32, u8, u8, u8)>, // (tick_ms, status, data1, data2)
@@ -578,6 +583,8 @@ impl AppState {
             theme: "neon".into(),
             bifurc_computing: false,
             bifurc_param: "rho".into(),
+            bifurc_progress: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            bifurc_total_steps: 0,
             loop_bars: 4,
             ks_enabled: false,
             ks_volume: 0.5,
@@ -653,6 +660,7 @@ impl AppState {
             midi_in_last_note: 0,
             midi_in_last_vel: 0,
             midi_in_last_cc: 0,
+            midi_in_last_cc_num: 0,
             midi_rec_enabled: false,
             midi_rec_events: Vec::new(),
             midi_rec_start: std::time::Instant::now(),
@@ -2090,9 +2098,16 @@ pub fn draw_ui(
                             st.config.kuramoto.clone(),
                         )
                     };
-                    state.lock().bifurc_computing = true;
+                    {
+                        let mut st = state.lock();
+                        let total = if is_2d { 40 * 40 } else { 200 };
+                        st.bifurc_computing = true;
+                        st.bifurc_total_steps = total;
+                        st.bifurc_progress.store(0, std::sync::atomic::Ordering::Relaxed);
+                    }
                     let bifurc_data_clone = bifurc_data.clone();
                     let state_clone = state.clone();
+                    let progress_arc = state.lock().bifurc_progress.clone();
                     std::thread::spawn(move || {
                         if is_2d {
                             // 2D: sweep param1 × param2 on a 40×40 grid; measure chaos via speed variance
@@ -2144,6 +2159,7 @@ pub fn draw_ui(
                                     let var = vals.iter().map(|&v| (v - mean).powi(2)).sum::<f64>()
                                         / vals.len().max(1) as f64;
                                     let _ = sys2; // suppress unused warning
+                                    progress_arc.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                     (p1val as f32, p2val as f32, var.sqrt() as f32)
                                 })
                                 .collect();
@@ -2176,6 +2192,7 @@ pub fn draw_ui(
                                             pts.push((pval as f32, v as f32));
                                         }
                                     }
+                                    progress_arc.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                     pts
                                 })
                                 .collect();
@@ -2193,7 +2210,30 @@ pub fn draw_ui(
                     });
                 }
                 if computing {
-                    ui.label(RichText::new("Computing...").color(Color32::from_rgb(255, 200, 0)));
+                    let (done, total) = {
+                        let st = state.lock();
+                        (
+                            st.bifurc_progress.load(std::sync::atomic::Ordering::Relaxed),
+                            st.bifurc_total_steps,
+                        )
+                    };
+                    let pct = if total > 0 { (done * 100 / total).min(99) } else { 0 };
+                    ui.label(
+                        RichText::new(format!("Computing… {}%", pct))
+                            .color(Color32::from_rgb(255, 200, 0)),
+                    );
+                    let bar_w = ui.available_width();
+                    let (bar_rect, _) = ui.allocate_exact_size(
+                        egui::Vec2::new(bar_w, 4.0),
+                        egui::Sense::hover(),
+                    );
+                    let fill_w = bar_w * pct as f32 / 100.0;
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(bar_rect.min, egui::Vec2::new(fill_w, 4.0)),
+                        0.0,
+                        Color32::from_rgb(255, 200, 0),
+                    );
+                    ctx.request_repaint();
                 }
                 // Basin controls — always visible when on the basin tab
                 if viz_tab == 8 {

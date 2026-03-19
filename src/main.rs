@@ -36,8 +36,8 @@ use crate::audio::{
 };
 use crate::config::{load_config, Config};
 use crate::sonification::{
-    chord_intervals_for, AudioParams, DirectMapping, FmMapping, GranularMapping, OrbitalResonance,
-    SonifMode, Sonification, SpectralMapping, VocalMapping, WaveguideMapping,
+    chord_intervals_for, AmMapping, AudioParams, DirectMapping, FmMapping, GranularMapping,
+    OrbitalResonance, SonifMode, Sonification, SpectralMapping, VocalMapping, WaveguideMapping,
 };
 use crate::synth::OscShape;
 use crate::systems::{
@@ -1191,7 +1191,14 @@ fn sim_thread(
                     let ord = active_indices.iter().position(|&i| i == idx).unwrap_or(0);
                     if ord > 0 {
                         let prev_idx = active_indices[ord - 1];
-                        lerp_config(&scenes[prev_idx].config, &scenes[idx].config, t)
+                        // Adjust interpolation factor based on the scene's transition type.
+                        // Snap and Fade both jump params instantly (t=1.0); Morph blends normally.
+                        let effective_t = match scenes[idx].transition_type {
+                            crate::arrangement::TransitionType::Morph => t,
+                            crate::arrangement::TransitionType::Snap
+                            | crate::arrangement::TransitionType::Fade => 1.0,
+                        };
+                        lerp_config(&scenes[prev_idx].config, &scenes[idx].config, effective_t)
                     } else {
                         scenes[idx].config.clone()
                     }
@@ -1927,6 +1934,18 @@ fn sim_thread(
                 apply_param(&note_target, note_norm, &mut config);
                 apply_param(&vel_target, vel_norm, &mut config);
                 apply_param(&cc_target, cc_norm, &mut config);
+                // Apply all learned CC→param mappings
+                let cc_map = {
+                    let st3 = shared.lock();
+                    (st3.midi_in_last_cc_num, st3.midi_cc_map.clone())
+                };
+                let (last_cc_num, learned_map) = cc_map;
+                for (cc_num, param_name) in &learned_map {
+                    if *cc_num == last_cc_num {
+                        let norm = shared.lock().midi_in_last_cc as f32 / 127.0;
+                        apply_param(param_name, norm, &mut config);
+                    }
+                }
             }
         }
 
@@ -2542,6 +2561,25 @@ fn sim_thread(
                     chaos_level: st.chaos_level,
                 }
             };
+            // Write to disk as JSONL (manual formatting — no serde_json dep needed)
+            {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open("session.log")
+                {
+                    // Escape any quotes in string fields for safe JSON output
+                    let sys = entry.system_name.replace('"', "\\\"");
+                    let attr = entry.attractor_type.replace('"', "\\\"");
+                    let _ = writeln!(
+                        f,
+                        r#"{{"t":{:.1},"sys":"{}","lyap":{:.4},"attr":"{}","k_ent":{:.4},"chaos":{:.3}}}"#,
+                        entry.elapsed_secs, sys, entry.lyapunov_max,
+                        attr, entry.kolmogorov_entropy, entry.chaos_level,
+                    );
+                }
+            }
             let mut st = shared.lock();
             st.session_log.push(entry);
             if st.session_log.len() > 1440 {
@@ -2817,8 +2855,10 @@ fn build_mapper(mode: &str) -> Box<dyn Sonification> {
         "granular" => Box::new(GranularMapping::new()),
         "spectral" => Box::new(SpectralMapping::new()),
         "fm" => Box::new(FmMapping::new()),
+        "am" => Box::new(AmMapping::new()),
         "vocal" => Box::new(VocalMapping::new()),
         "waveguide" => Box::new(WaveguideMapping::new()),
+        "resonator" => Box::new(DirectMapping::new()), // resonator uses Direct params + resonator synth
         _ => Box::new(DirectMapping::new()),
     }
 }
@@ -2982,8 +3022,18 @@ fn start_midi_input_thread(shared: SharedState) {
                             let cc_num = msg[1];
                             let cc_val = msg[2].min(127);
                             let cc_num_target = shared_cb.lock().midi_in_cc_num;
-                            if cc_num == cc_num_target {
-                                shared_cb.lock().midi_in_last_cc = cc_val;
+                            // Always track the last received CC number for learned mapping dispatch
+                            {
+                                let mut st = shared_cb.lock();
+                                st.midi_in_last_cc_num = cc_num;
+                                if cc_num == cc_num_target {
+                                    st.midi_in_last_cc = cc_val;
+                                }
+                                // Update CC value if it matches any learned mapping
+                                let has_learned = st.midi_cc_map.iter().any(|(n, _)| *n == cc_num);
+                                if has_learned {
+                                    st.midi_in_last_cc = cc_val;
+                                }
                             }
                         }
                     }

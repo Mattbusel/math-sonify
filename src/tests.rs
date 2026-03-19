@@ -1895,7 +1895,12 @@ mod tests {
 #[cfg(test)]
 mod ode_property_tests {
     use crate::systems::duffing::Duffing;
-    use crate::systems::{DynamicalSystem, Lorenz};
+    use crate::systems::{DynamicalSystem, Kuramoto, Lorenz, Rossler};
+    use crate::synth::grain::GrainEngine;
+
+    fn all_finite(state: &[f64]) -> bool {
+        state.iter().all(|v| v.is_finite())
+    }
 
     /// Lorenz attractor bounds test.
     ///
@@ -1997,5 +2002,100 @@ mod ode_property_tests {
             h0,
             h_final
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Parameterized / multi-seed integration tests (#32)
+    // -------------------------------------------------------------------------
+
+    /// Lorenz stays finite for a variety of parameter combinations, including
+    /// near-bifurcation and high-chaos regimes.
+    #[test]
+    fn lorenz_finite_varied_parameters() {
+        let cases: &[(f64, f64, f64)] = &[
+            (10.0, 28.0, 2.6667),  // classic chaos
+            (10.0, 0.5, 2.6667),   // stable fixed point (rho < 1)
+            (10.0, 1.5, 2.6667),   // stable fixed point (rho slightly above 1)
+            (10.0, 24.0, 2.6667),  // near first bifurcation
+            (16.0, 45.92, 4.0),    // double-scroll regime
+            (1.0, 200.0, 8.0 / 3.0), // extreme rho — should stay finite with small dt
+            (10.0, 28.0, 0.1),     // very low beta
+        ];
+        for &(sigma, rho, beta) in cases {
+            let mut sys = Lorenz::new(sigma, rho, beta);
+            for _ in 0..2000 {
+                sys.step(0.001);
+            }
+            assert!(
+                all_finite(sys.state()),
+                "Lorenz(σ={}, ρ={}, β={}) diverged: {:?}",
+                sigma, rho, beta, sys.state()
+            );
+        }
+    }
+
+    /// Rossler stays finite for a variety of a/b/c values including known chaotic regimes.
+    #[test]
+    fn rossler_finite_varied_parameters() {
+        let cases: &[(f64, f64, f64)] = &[
+            (0.2, 0.2, 5.7),   // classic
+            (0.1, 0.1, 14.0),  // funnel attractor
+            (0.3, 0.3, 4.5),   // period-2 orbit
+            (0.4, 0.4, 8.5),   // chaos
+        ];
+        for &(a, b, c) in cases {
+            let mut sys = Rossler::new(a, b, c);
+            for _ in 0..2000 {
+                sys.step(0.001);
+            }
+            assert!(
+                all_finite(sys.state()),
+                "Rossler(a={}, b={}, c={}) diverged: {:?}",
+                a, b, c, sys.state()
+            );
+        }
+    }
+
+    /// Kuramoto stays finite with varying coupling strength and oscillator count.
+    #[test]
+    fn kuramoto_finite_varied_coupling() {
+        use crate::systems::Kuramoto;
+        for &coupling in &[0.0f64, 0.5, 1.0, 2.0, 5.0] {
+            let mut sys = Kuramoto::new(4, coupling);
+            for _ in 0..2000 {
+                sys.step(0.001);
+            }
+            assert!(
+                all_finite(sys.state()),
+                "Kuramoto(coupling={}) diverged: {:?}",
+                coupling, sys.state()
+            );
+        }
+    }
+
+    /// GrainEngine produces finite, bounded stereo samples across multiple instances.
+    #[test]
+    fn grain_engine_finite_varied_params() {
+        use crate::synth::grain::GrainEngine;
+        let configs: &[(f32, f32, f32)] = &[
+            (440.0, 20.0, 0.0),   // A4 base, low chaos
+            (110.0, 60.0, 1.0),   // A2 base, high spawn, full chaos
+            (880.0, 5.0, 0.5),    // A5 base, sparse
+            (220.0, 100.0, 0.8),  // dense cloud
+        ];
+        for &(base_freq, spawn_rate, chaos) in configs {
+            let mut engine = GrainEngine::new(44100.0);
+            engine.base_freq = base_freq;
+            engine.spawn_rate = spawn_rate;
+            engine.chaos_level = chaos;
+            for _ in 0..4410 {
+                let (l, r) = engine.next_sample();
+                assert!(l.is_finite() && r.is_finite(),
+                    "GrainEngine(base={}, spawn={}, chaos={}) non-finite output",
+                    base_freq, spawn_rate, chaos);
+                assert!(l.abs() < 10.0 && r.abs() < 10.0,
+                    "GrainEngine sample exceeds ±10: ({}, {})", l, r);
+            }
+        }
     }
 }

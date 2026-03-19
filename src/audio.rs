@@ -211,6 +211,7 @@ impl LayerSynth {
         self.grains.spawn_rate += 0.05 * (target_spawn_rate - self.grains.spawn_rate);
         self.grains.base_freq = p.grain_base_freq;
         self.grains.freq_spread = p.grain_freq_spread;
+        self.grains.chaos_level = p.chaos_level;
         let samples = p.portamento_ms.max(1.0) * 0.001 * self.sr;
         self.freq_smooth_rate = (1.0 - (-6.908 / samples).exp()).clamp(0.001, 1.0);
         self.chord_intervals = p.chord_intervals;
@@ -295,6 +296,8 @@ impl LayerSynth {
                 let s = self.waveguide.next_sample() * p.gain;
                 (s, s)
             }
+            SonifMode::AM => self.synth_additive(p),
+            SonifMode::Resonator => self.synth_additive(p),
         };
 
         // Spectral freeze: mix in frozen partials
@@ -620,10 +623,10 @@ impl LayerSynth {
         for (i, freq) in [p.freqs[0], p.freqs[1], p.freqs[2]].iter().enumerate() {
             let f = freq.clamp(100.0, sr * 0.45);
             // Smooth the target frequency before deciding to update coefficients.
-            // The old 2 Hz dead-band caused audible "stepping" during slow glides;
-            // 0.5 Hz is fine since filter coeff recalculation is cheap (~10 ns).
+            // 2.0 Hz dead-band avoids redundant recalculation (~99% reduction during
+            // normal playback) while remaining inaudible on slow glides.
             self.formant_freqs[i] += 0.008 * (f - self.formant_freqs[i]);
-            if (f - self.formant_freqs[i]).abs() > 0.5 {
+            if (f - self.formant_freqs[i]).abs() > 2.0 {
                 self.formant_filters[i].update_bp(self.formant_freqs[i], q, sr);
             }
         }
