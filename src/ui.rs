@@ -940,6 +940,41 @@ fn system_display_name(s: &str) -> &'static str {
     }
 }
 
+/// Short evocative tagline shown under the system name in the UI.
+fn system_tagline(s: &str) -> &'static str {
+    match s {
+        "lorenz" => "A butterfly-shaped attractor born from fluid convection",
+        "rossler" => "A single folded loop spiraling toward chaos",
+        "double_pendulum" => "Two coupled pendulums — infinitely sensitive to each starting point",
+        "geodesic_torus" => "Trajectories winding endlessly across a donut-shaped surface",
+        "kuramoto" => "Coupled oscillators that spontaneously synchronize",
+        "three_body" => "Three gravitating masses — analytically unsolvable, endlessly surprising",
+        "duffing" => "A driven nonlinear spring with period-doubling cascades",
+        "van_der_pol" => "A self-sustained oscillator from vacuum-tube circuit theory",
+        "halvorsen" => "Three interlocked spirals locked in cyclic symmetry",
+        "aizawa" => "A toroidal attractor with a wormhole-like structure",
+        "chua" => "Chaos from the world's simplest electronic circuit",
+        "hindmarsh_rose" => "The firing patterns of a single mathematical neuron",
+        "coupled_map_lattice" => "A lattice of coupled logistic maps — spatial chaos",
+        "custom" => "Your own differential equations, unfolding in real time",
+        "mackey_glass" => "A delay-differential equation inspired by blood cell regulation",
+        "nose_hoover" => "A conservative thermostat that still generates chaos",
+        "sprott_b" => "A minimal three-term system, maximally chaotic",
+        "henon_map" => "A discrete attractor discovered while modeling stellar orbits",
+        "lorenz96" => "A toy model of atmospheric turbulence on a circular latitude ring",
+        "logistic_map" => "The simplest map showing the road from order to chaos",
+        "standard_map" => "Area-preserving chaos in angle-action space",
+        "arnold_cat" => "A stretching-and-folding map that scrambles any image on a torus",
+        "stochastic_lorenz" => "The Lorenz butterfly, shaken by thermal noise",
+        "delayed_map" => "A logistic map with memory — the past influences the present",
+        "oregonator" => "Chemical oscillations in the Belousov-Zhabotinsky reaction",
+        "mathieu" => "A parametrically driven oscillator with stability tongues",
+        "kuramoto_driven" => "Kuramoto oscillators forced by an external rhythm",
+        "fractional_lorenz" => "Lorenz equations with fractional-order memory",
+        _ => "A dynamical system evolving through state space",
+    }
+}
+
 // system_internal_name is called from the system-selector dropdown when the
 // user types a name into the search box (ui_timeline.rs path). The compiler
 // sees only a few call sites inside cfg(feature) blocks, triggering a false-positive.
@@ -1377,84 +1412,124 @@ pub fn draw_ui(
                 ui.add_space(8.0);
 
                 // ── App identity header ────────────────────────────────────────────────
+                let (hdr_sys, hdr_mode) = {
+                    let st = state.lock();
+                    (st.config.system.name.clone(), st.config.sonification.mode.clone())
+                };
+                let hdr_sys_display = system_display_name(&hdr_sys);
+                let hdr_sys_tag = system_tagline(&hdr_sys);
                 egui::Frame::none()
-                    .fill(Color32::from_rgb(10, 12, 26))
+                    .fill(Color32::from_rgb(8, 9, 22))
                     .inner_margin(egui::Margin::symmetric(12.0, 10.0))
                     .rounding(egui::Rounding::same(10.0))
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgb(28, 50, 96)))
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
+                        // Title row
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new("MATH SONIFY").size(20.0).color(CYAN).strong(),
+                                RichText::new("MATH SONIFY").size(17.0).color(CYAN).strong(),
                             );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     ui.label(
                                         RichText::new("v1.2")
-                                            .size(9.5)
-                                            .color(GRAY_HINT.linear_multiply(0.7)),
+                                            .size(9.0)
+                                            .color(GRAY_HINT.linear_multiply(0.55)),
                                     );
                                 },
                             );
                         });
-                        ui.add_space(1.0);
-                        ui.label(
-                            RichText::new("strange attractors  →  sound")
-                                .size(10.5)
-                                .color(GRAY_HINT)
-                                .italics(),
-                        );
-                        ui.add_space(4.0);
-                        // Thin gradient accent line
-                        let aw = ui.available_width();
-                        let (bar_rect, _) =
-                            ui.allocate_exact_size(Vec2::new(aw, 1.0), Sense::hover());
-                        ui.painter().rect_filled(
-                            bar_rect,
-                            0.0,
-                            CYAN.linear_multiply(0.22),
+                        ui.add_space(5.0);
+                        // Thin accent separator
+                        {
+                            let aw = ui.available_width();
+                            let (sep, _) = ui.allocate_exact_size(Vec2::new(aw, 1.0), Sense::hover());
+                            ui.painter().rect_filled(sep, 0.0, CYAN.linear_multiply(0.15));
+                        }
+                        ui.add_space(5.0);
+                        // Active system row
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("▸").size(11.0).color(CYAN.linear_multiply(0.65)),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(hdr_sys_display)
+                                    .size(13.5)
+                                    .color(Color32::from_rgb(195, 218, 255))
+                                    .strong(),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new(&hdr_mode)
+                                        .size(9.5)
+                                        .color(AMBER.linear_multiply(0.7))
+                                        .italics(),
+                                );
+                            });
+                        });
+                        ui.add_space(2.0);
+                        // Tagline
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(hdr_sys_tag)
+                                    .size(9.5)
+                                    .color(GRAY_HINT.linear_multiply(0.85))
+                                    .italics(),
+                            )
+                            .wrap(true),
                         );
                     });
                 ui.add_space(8.0);
 
                 // ── Live chaos status bar ──────────────────────────────────────────────
                 {
-                    let (chaos, paused) = {
+                    let (chaos, paused, sb_vu) = {
                         let st = state.lock();
-                        (st.chaos_level, st.paused)
+                        let vu = *st.vu_meter.lock();
+                        (st.chaos_level, st.paused, vu)
                     };
                     let chaos_col = lerp_color(
                         Color32::from_rgb(40, 120, 210),
                         Color32::from_rgb(225, 72, 28),
                         chaos,
                     );
+                    // Pulsing animation: dot radius breathes when live
+                    let t = ui.input(|i| i.time as f32);
+                    let dot_radius = if paused { 3.5 } else { 3.5 + (t * 2.8).sin() * 0.9 };
+                    ctx.request_repaint();
                     egui::Frame::none()
                         .fill(Color32::from_rgb(11, 13, 26))
-                        .inner_margin(egui::Margin::symmetric(10.0, 7.0))
+                        .inner_margin(egui::Margin::symmetric(10.0, 8.0))
                         .rounding(egui::Rounding::same(8.0))
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            Color32::from_rgb(28, 34, 62),
-                        ))
+                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(28, 34, 62)))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
+                            // Top row: status dot + label + chaos%
                             ui.horizontal(|ui| {
-                                // Pulsing status dot
                                 let dot_col = if paused {
-                                    Color32::from_rgb(120, 122, 155)
+                                    Color32::from_rgb(100, 102, 135)
                                 } else {
                                     Color32::from_rgb(72, 228, 118)
                                 };
-                                let (dot_rect, _) =
-                                    ui.allocate_exact_size(Vec2::new(7.0, 7.0), Sense::hover());
+                                // Glow halo when live
+                                let (dot_rect, _) = ui.allocate_exact_size(Vec2::new(12.0, 12.0), Sense::hover());
                                 let dot_center = dot_rect.center();
-                                ui.painter().circle_filled(dot_center, 3.5, dot_col);
-                                ui.add_space(4.0);
+                                if !paused {
+                                    let glow_alpha = (((t * 2.8).sin() * 0.5 + 0.5) * 50.0) as u8;
+                                    ui.painter().circle_filled(
+                                        dot_center,
+                                        dot_radius + 3.0,
+                                        Color32::from_rgba_premultiplied(72, 228, 118, glow_alpha),
+                                    );
+                                }
+                                ui.painter().circle_filled(dot_center, dot_radius, dot_col);
+                                ui.add_space(2.0);
                                 let status_text = if paused { "PAUSED" } else { "LIVE" };
                                 let status_col = if paused {
-                                    Color32::from_rgb(145, 148, 178)
+                                    Color32::from_rgb(130, 132, 162)
                                 } else {
                                     Color32::from_rgb(72, 228, 118)
                                 };
@@ -1464,28 +1539,46 @@ pub fn draw_ui(
                                         .color(status_col)
                                         .strong(),
                                 );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(
-                                            RichText::new(format!("{:.0}% chaos", chaos * 100.0))
-                                                .size(10.5)
-                                                .color(chaos_col)
-                                                .strong(),
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(
+                                        RichText::new(format!("{:.0}% chaos", chaos * 100.0))
+                                            .size(10.5)
+                                            .color(chaos_col)
+                                            .strong(),
+                                    );
+                                    // Mini VU bars (right of status, left of chaos%)
+                                    ui.add_space(4.0);
+                                    let vu_peak = ((sb_vu[0] + sb_vu[1]) * 0.5).clamp(0.0, 1.0);
+                                    let bar_h = 10.0f32;
+                                    let bar_w = 3.0f32;
+                                    for seg in (0..5u8).rev() {
+                                        let thresh = seg as f32 * 0.2;
+                                        let lit = vu_peak > thresh;
+                                        let seg_col = if seg >= 4 {
+                                            Color32::from_rgb(255, 60, 60)
+                                        } else if seg >= 3 {
+                                            Color32::from_rgb(255, 185, 0)
+                                        } else {
+                                            Color32::from_rgb(45, 210, 128)
+                                        };
+                                        let col = if lit { seg_col } else { Color32::from_rgb(22, 24, 44) };
+                                        let h = bar_h * (0.4 + seg as f32 * 0.15);
+                                        let (r, _) = ui.allocate_exact_size(Vec2::new(bar_w, bar_h), Sense::hover());
+                                        let bar_rect = egui::Rect::from_min_size(
+                                            Pos2::new(r.min.x, r.max.y - h),
+                                            Vec2::new(bar_w, h),
                                         );
-                                    },
-                                );
+                                        ui.painter().rect_filled(bar_rect, 1.0, col);
+                                        ui.add_space(1.0);
+                                    }
+                                });
                             });
-                            ui.add_space(5.0);
-                            // Progress track
+                            ui.add_space(4.0);
+                            // Chaos progress track
                             let bar_w = ui.available_width();
                             let (bar_rect, _) =
-                                ui.allocate_exact_size(Vec2::new(bar_w, 6.0), Sense::hover());
-                            ui.painter().rect_filled(
-                                bar_rect,
-                                3.0,
-                                Color32::from_rgb(18, 20, 38),
-                            );
+                                ui.allocate_exact_size(Vec2::new(bar_w, 5.0), Sense::hover());
+                            ui.painter().rect_filled(bar_rect, 3.0, Color32::from_rgb(18, 20, 38));
                             let fill_w = bar_rect.width() * chaos.clamp(0.0, 1.0);
                             if fill_w > 0.0 {
                                 let fill_rect = egui::Rect::from_min_size(
@@ -1494,7 +1587,6 @@ pub fn draw_ui(
                                 );
                                 ui.painter().rect_filled(fill_rect, 3.0, chaos_col);
                             }
-                            // Track border
                             ui.painter().rect_stroke(
                                 bar_rect,
                                 3.0,
@@ -1622,20 +1714,20 @@ pub fn draw_ui(
                 ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
                     let tabs = [
-                        ("🌀", "Phase"),
-                        ("🎚", "Mixer"),
-                        ("🎬", "Arrange"),
-                        ("〰", "Wave"),
-                        ("🎵", "Notes"),
-                        ("∑", "Math"),
-                        ("∿", "Bifurc"),
-                        ("📼", "Studio"),
-                        ("⬡", "Basin"),
-                        ("⊙", "Poincaré"),
-                        ("⧈", "Recurr"),
+                        ("🌀", "Phase",    "Phase portrait — watch the attractor draw itself in real time"),
+                        ("🎚", "Mixer",    "Mixer — layer multiple systems and blend their sounds"),
+                        ("🎬", "Arrange",  "Arranger — compose multi-scene musical sequences"),
+                        ("〰", "Wave",     "Waveform — see the raw audio signal you're generating"),
+                        ("🎵", "Notes",    "Note map — which pitches are being played right now"),
+                        ("∑",  "Math",     "Math view — Lyapunov exponents, entropy, and live metrics"),
+                        ("∿",  "Bifurc",   "Bifurcation — how the system's behavior changes with a parameter"),
+                        ("📼", "Studio",   "Studio — record, export WAV, save portraits and loops"),
+                        ("⬡",  "Basin",    "Basin of attraction — which initial conditions lead where"),
+                        ("⊙",  "Poincaré", "Poincaré section — a slice through the attractor revealing hidden structure"),
+                        ("⧈",  "Recurr",   "Recurrence plot — when does the trajectory revisit the same region?"),
                     ];
                     let mut viz_tab = state.lock().viz_tab;
-                    for (i, (icon, name)) in tabs.iter().enumerate() {
+                    for (i, (icon, name, tooltip)) in tabs.iter().enumerate() {
                         let selected = viz_tab == i;
                         let (fill, text_col) = if selected {
                             (Color32::from_rgb(14, 118, 210), Color32::WHITE)
@@ -1659,7 +1751,7 @@ pub fn draw_ui(
                         .stroke(stroke)
                         .rounding(egui::Rounding { nw: 6.0, ne: 6.0, sw: 0.0, se: 0.0 })
                         .min_size(Vec2::new(72.0, 28.0));
-                        if ui.add(btn).clicked() {
+                        if ui.add(btn).on_hover_text(*tooltip).clicked() {
                             viz_tab = i;
                         }
                     }
@@ -6728,12 +6820,65 @@ fn draw_phase_portrait(
     painter.rect_filled(rect, 0.0, Color32::from_rgb(8, 8, 18));
 
     if points.is_empty() {
+        // ── Welcome / loading splash ──────────────────────────────────────────
+        let card_w = 380.0f32.min(rect.width() - 40.0);
+        let card_h = 148.0f32;
+        let card_rect = egui::Rect::from_center_size(rect.center(), Vec2::new(card_w, card_h));
+        painter.rect_filled(
+            card_rect,
+            12.0,
+            Color32::from_rgba_premultiplied(12, 14, 32, 230),
+        );
+        painter.rect_stroke(
+            card_rect,
+            12.0,
+            egui::Stroke::new(1.0, Color32::from_rgb(38, 55, 110)),
+        );
+        // Accent top bar
+        let accent_bar = egui::Rect::from_min_size(
+            card_rect.min + Vec2::new(0.0, 0.0),
+            Vec2::new(card_w, 3.0),
+        );
+        painter.rect_filled(accent_bar, egui::Rounding { nw: 12.0, ne: 12.0, sw: 0.0, se: 0.0 },
+            Color32::from_rgba_premultiplied(90, 195, 255, 140));
+
+        let sys_display = system_display_name(system_name);
+        let sys_tag = system_tagline(system_name);
+
         painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            "No data yet...",
-            FontId::proportional(16.0),
-            Color32::from_rgb(80, 80, 120),
+            card_rect.center_top() + Vec2::new(0.0, 18.0),
+            Align2::CENTER_TOP,
+            sys_display,
+            FontId::proportional(20.0),
+            Color32::from_rgb(185, 215, 255),
+        );
+        painter.text(
+            card_rect.center_top() + Vec2::new(0.0, 44.0),
+            Align2::CENTER_TOP,
+            sys_tag,
+            FontId::proportional(11.5),
+            Color32::from_rgba_premultiplied(150, 162, 200, 220),
+        );
+        painter.text(
+            card_rect.center_top() + Vec2::new(0.0, 70.0),
+            Align2::CENTER_TOP,
+            "─────────────────────────────────",
+            FontId::proportional(8.0),
+            Color32::from_rgba_premultiplied(50, 70, 110, 120),
+        );
+        painter.text(
+            card_rect.center_top() + Vec2::new(0.0, 88.0),
+            Align2::CENTER_TOP,
+            "Press  SPACE  to begin",
+            FontId::proportional(13.5),
+            Color32::from_rgba_premultiplied(90, 195, 255, 200),
+        );
+        painter.text(
+            card_rect.center_top() + Vec2::new(0.0, 112.0),
+            Align2::CENTER_TOP,
+            "or click  AUTO  in the left panel for an instant composition",
+            FontId::proportional(10.0),
+            Color32::from_rgba_premultiplied(135, 142, 168, 180),
         );
         return;
     }
@@ -7054,45 +7199,50 @@ fn draw_phase_portrait(
         painter.circle_filled(pos, 5.0, Color32::WHITE);
     }
 
-    // Corner info overlay — semi-transparent backdrop for readability
-    let info_bg = egui::Rect::from_min_size(
-        rect.left_top() + Vec2::new(6.0, 6.0),
-        Vec2::new(210.0, 56.0),
-    );
-    painter.rect_filled(
-        info_bg,
-        6.0,
-        Color32::from_rgba_premultiplied(8, 8, 20, 160),
-    );
-
+    // ── Corner info overlay ─────────────────────────────────────────────────
     let sys_display = system_display_name(system_name);
+    let sys_tag = system_tagline(system_name);
+    let info_w = 220.0f32;
+    let info_h = 72.0f32;
+    let info_bg = egui::Rect::from_min_size(
+        rect.left_top() + Vec2::new(8.0, 8.0),
+        Vec2::new(info_w, info_h),
+    );
+    // Backdrop
+    painter.rect_filled(info_bg, 8.0, Color32::from_rgba_premultiplied(6, 8, 22, 195));
+    painter.rect_stroke(info_bg, 8.0, egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 80, 150, 100)));
+    // Left accent bar
+    let lbar = egui::Rect::from_min_size(info_bg.min, Vec2::new(3.0, info_h));
+    painter.rect_filled(lbar, egui::Rounding { nw: 8.0, sw: 8.0, ne: 0.0, se: 0.0 },
+        Color32::from_rgba_premultiplied(90, 195, 255, 160));
+
     painter.text(
-        rect.left_top() + Vec2::new(12.0, 10.0),
+        rect.left_top() + Vec2::new(16.0, 13.0),
         Align2::LEFT_TOP,
         sys_display,
-        FontId::proportional(12.5),
-        Color32::from_rgb(140, 195, 255),
+        FontId::proportional(14.0),
+        Color32::from_rgb(185, 215, 255),
     );
+    // Tagline
     painter.text(
-        rect.left_top() + Vec2::new(12.0, 26.0),
+        rect.left_top() + Vec2::new(16.0, 31.0),
         Align2::LEFT_TOP,
-        format!("mode: {}", mode_name),
-        FontId::proportional(11.0),
-        Color32::from_rgb(100, 160, 220),
+        sys_tag,
+        FontId::proportional(9.5),
+        Color32::from_rgba_premultiplied(135, 150, 195, 200),
     );
-
-    // Projection label
+    // Mode + projection row
     let proj_label = match projection {
-        1 => "XZ  plane",
-        2 => "YZ  plane",
-        _ => "XY  plane",
+        1 => "XZ",
+        2 => "YZ",
+        _ => "XY",
     };
     painter.text(
-        rect.left_top() + Vec2::new(12.0, 42.0),
+        rect.left_top() + Vec2::new(16.0, 55.0),
         Align2::LEFT_TOP,
-        proj_label,
-        FontId::proportional(10.5),
-        Color32::from_rgb(70, 110, 175),
+        format!("{mode_name}  ·  {proj_label} plane"),
+        FontId::proportional(10.0),
+        Color32::from_rgba_premultiplied(90, 130, 195, 180),
     );
 
     // Derivative arrow at current position
@@ -8058,14 +8208,26 @@ pub(crate) fn hue_to_color(hue: f32, saturation: f32) -> Color32 {
 
 fn equation_text(system: &str) -> &'static str {
     match system {
-        "lorenz" => "x' = s(y-x)\ny' = x(r-z)-y\nz' = xy-bz",
-        "rossler" => "x' = -y-z\ny' = x+ay\nz' = b+z(x-c)",
-        "double_pendulum" => "th1'' = f(th1,th2,w1,w2)\nth2'' = g(th1,th2,w1,w2)",
-        "geodesic_torus" => {
-            "phi'' = -2(r sin(th)/(R+r cos(th)))phi'th'\nth'' = (R+r cos(th))sin(th)/r * phi'^2"
-        }
-        "kuramoto" => "th'_i = w_i + K/N sum_j sin(th_j-th_i)",
-        "three_body" => "r''_i = G sum_j m_j(r_j-r_i)/|r_j-r_i|^3",
+        "lorenz" => "x' = σ(y−x)\ny' = x(ρ−z)−y\nz' = xy−βz",
+        "rossler" => "x' = −y−z\ny' = x+ay\nz' = b+z(x−c)",
+        "double_pendulum" => "θ₁'' = f(θ₁,θ₂,ω₁,ω₂)\nθ₂'' = g(θ₁,θ₂,ω₁,ω₂)",
+        "geodesic_torus" => "φ'' = −2r sin(θ)/(R+r cos θ)·φ'θ'\nθ'' = (R+r cos θ)sin θ/r·φ'²",
+        "kuramoto" => "θ'ᵢ = ωᵢ + K/N Σⱼ sin(θⱼ−θᵢ)",
+        "three_body" => "r''ᵢ = G Σⱼ mⱼ(rⱼ−rᵢ)/|rⱼ−rᵢ|³",
+        "duffing" => "x' = y\ny' = −δy−αx−βx³+γcos(ωt)",
+        "van_der_pol" => "x' = y\ny' = μ(1−x²)y−x",
+        "halvorsen" => "x' = −ax−4y−4z−y²\ny' = −ay−4z−4x−z²\nz' = −az−4x−4y−x²",
+        "aizawa" => "x' = (z−b)x−dy\ny' = dx+(z−b)y\nz' = c+az−z³/3−(x²+y²)(1+ez)+fz x³",
+        "chua" => "x' = α(y−x−f(x))\ny' = x−y+z\nz' = −βy",
+        "hindmarsh_rose" => "x' = y−ax³+bx²−z+I\ny' = c−dx²−y\nz' = r(s(x−x₀)−z)",
+        "nose_hoover" => "x' = y\ny' = yz−x\nz' = 1−y²",
+        "sprott_b" => "x' = yz\ny' = x−y\nz' = 1−xy",
+        "logistic_map" => "xₙ₊₁ = r·xₙ(1−xₙ)",
+        "standard_map" => "pₙ₊₁ = pₙ+k sin(θₙ)\nθₙ₊₁ = θₙ+pₙ₊₁  (mod 2π)",
+        "henon_map" => "xₙ₊₁ = 1−axₙ²+yₙ\nyₙ₊₁ = bxₙ",
+        "oregonator" => "x' = s(y−xy+x−qx²)\ny' = (−y−xy+fz)/s\nz' = x−z",
+        "mathieu" => "x'' + (a−2q cos 2t)x = 0",
+        "mackey_glass" => "x'(t) = βx(t−τ)/(1+x(t−τ)ⁿ) − γx(t)",
         _ => "",
     }
 }

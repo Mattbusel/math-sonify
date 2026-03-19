@@ -123,13 +123,13 @@ impl Sonification for OrbitalResonance {
             params.pans[i] = if i % 2 == 0 { -0.35 } else { 0.35 };
         }
 
-        // If the state has a z-dimension, use it to add a sub-octave voice
+        // If the state has a z-dimension, use it to drive the sub-octave voice
         // that grounds the texture with low-frequency energy.
+        // sub_osc_level drives a sine at half voice[0]'s frequency — do NOT
+        // overwrite freqs[0]/amps[0] here, which would destroy the harmonic series.
         if state.len() >= 3 {
             let z_norm = (state[2].tanh() * 0.5 + 0.5) as f32;
-            // Sub-octave at half fundamental, amplitude proportional to |z|
-            params.freqs[0] = fundamental * 0.5 * (0.8 + z_norm * 0.4);
-            params.amps[0] = harmonic_amp(0, stretch) * (0.5 + 0.5 * z_norm);
+            params.sub_osc_level = harmonic_amp(0, stretch) * (0.5 + 0.5 * z_norm);
         }
 
         // Filter: ordered → warm & dark, chaotic → bright & resonant

@@ -52,17 +52,13 @@ impl DoublePendulum {
     }
 
     fn d_p(&self) -> (f64, f64) {
-        let [th1, th2, p1, p2] = [self.state[0], self.state[1], self.state[2], self.state[3]];
+        let [th1, th2, _p1, _p2] = [self.state[0], self.state[1], self.state[2], self.state[3]];
         let (m1, m2, l1, l2, g) = (self.m1, self.m2, self.l1, self.l2, self.g);
         let delta = th2 - th1;
         let (dth1, dth2) = self.d_theta();
-        let dp1 = -(m1 + m2) * g * l1 * th1.sin() - m2 * l1 * l2 * dth1 * dth2 * delta.sin()
-            + (p1 * p2 * delta.sin()) / ((m1 + m2) * l1.powi(2) / (m2 * l2.powi(2)).max(1e-10));
-        // Use energy-conserving form via the full Hamiltonian partial derivative
-        let dp1_exact = -(m1 + m2) * g * l1 * th1.sin() - m2 * l1 * l2 * dth1 * dth2 * delta.sin();
-        let dp2_exact = -m2 * g * l2 * th2.sin() + m2 * l1 * l2 * dth1 * dth2 * delta.sin();
-        let _ = dp1;
-        (dp1_exact, dp2_exact)
+        let dp1 = -(m1 + m2) * g * l1 * th1.sin() - m2 * l1 * l2 * dth1 * dth2 * delta.sin();
+        let dp2 = -m2 * g * l2 * th2.sin() + m2 * l1 * l2 * dth1 * dth2 * delta.sin();
+        (dp1, dp2)
     }
 }
 
