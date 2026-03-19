@@ -7,8 +7,13 @@
 //! amplitude) so the cloud has natural musical richness.
 
 use std::f32::consts::{PI, TAU};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const MAX_GRAINS: usize = 256; // increased from 96 for even denser texture
+
+/// Global counter ensures each GrainEngine instance gets a unique xorshift seed,
+/// preventing correlated noise bursts when multiple layers start simultaneously.
+static GRAIN_ENGINE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 struct Grain {
     osc_phase: f32,
@@ -89,7 +94,11 @@ impl GrainEngine {
             freq_spread: 0.5,
             overlap: 0.5,
             spawn_counter: 0.0,
-            rng_state: 12345,
+            // Unique seed per instance: prevents correlated noise across simultaneous layers.
+            rng_state: GRAIN_ENGINE_COUNTER
+                .fetch_add(1, Ordering::Relaxed)
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                .wrapping_add(0x6C62272E07BB0142),
         }
     }
 
@@ -128,7 +137,9 @@ impl GrainEngine {
         // Amplitude: compensate for Hann window energy loss.
         // The Hann window averages 0.5 vs a rectangle window's 1.0, so multiply
         // by sqrt(2) ≈ 1.41 to restore perceptual loudness parity with other modes.
-        let amplitude = (1.06 + self.rand_f32() * 0.35) * std::f32::consts::SQRT_2;
+        // Fixed amplitude (no per-grain random variance) prevents the ±14% gain
+        // fluctuation that caused audible tremolo at low grain counts.
+        let amplitude = std::f32::consts::SQRT_2;
 
         if let Some(g) = self.grains.iter_mut().find(|g| !g.active) {
             g.freq = freq;

@@ -69,9 +69,7 @@ impl Toast {
     }
 }
 
-/// A single looper layer (stereo interleaved samples).
-/// Fields are prepared for future looper playback implementation.
-#[allow(dead_code)]
+/// A single looper layer. Playback not yet wired to the audio thread.
 pub struct LooperLayer {
     pub samples: Vec<f32>,
     pub active: bool,
@@ -2879,6 +2877,17 @@ fn draw_advanced_panel(
                     .collect();
                 st.selected_preset = preset.name.to_string();
                 st.config = load_preset(preset.name);
+                // Validate and notify if any values were clamped.
+                let pre_sigma = st.config.lorenz.sigma;
+                let pre_vol = st.config.audio.master_volume;
+                st.config.validate();
+                if (st.config.lorenz.sigma - pre_sigma).abs() > 1e-9
+                    || (st.config.audio.master_volume - pre_vol).abs() > 1e-5
+                {
+                    st.toast_queue.push(Toast::warning(
+                        "Some config values were out of range and have been adjusted",
+                    ));
+                }
                 for (k, v) in locked_snapshot_adv {
                     set_param_value(&mut st.config, &k, v);
                 }
@@ -2892,7 +2901,6 @@ fn draw_advanced_panel(
     // ---- SOUND ----
     collapsing_section(ui, "SOUND", false, |ui| {
         ui.label(RichText::new("Mode").color(GRAY_HINT).size(11.0));
-        // item 8: waveguide hidden — Sonification trait not yet wired; falls back to Direct silently
         let modes = ["direct", "orbital", "granular", "spectral", "fm", "vocal"];
         let current_mode = st.config.sonification.mode.clone();
         ui.horizontal_wrapped(|ui| {
@@ -2914,6 +2922,16 @@ fn draw_advanced_panel(
                 }
                 resp.on_hover_text(mode_tooltip(m));
             }
+            // Waveguide: shown but disabled until wired
+            let resp = ui.add(
+                Button::new(
+                    RichText::new("waveguide")
+                        .color(Color32::from_rgb(90, 90, 110)),
+                )
+                .fill(Color32::from_rgb(22, 22, 32))
+                .min_size(Vec2::new(72.0, 26.0)),
+            );
+            resp.on_hover_text("Waveguide physical model — coming in next release");
         });
         ui.add_space(6.0);
 
@@ -3728,6 +3746,13 @@ fn draw_advanced_panel(
                             if let Some(cfg) = load_patch_file(patch_name) {
                                 let loaded_name = patch_name.clone();
                                 st.config = cfg;
+                                let pre_sigma = st.config.lorenz.sigma;
+                                st.config.validate();
+                                if (st.config.lorenz.sigma - pre_sigma).abs() > 1e-9 {
+                                    st.toast_queue.push(Toast::warning(
+                                        "Some config values were out of range and have been adjusted",
+                                    ));
+                                }
                                 st.system_changed = true;
                                 st.mode_changed = true;
                                 st.toast_queue
@@ -7411,12 +7436,14 @@ fn draw_mixer_tab(
                         let _ = std::fs::write(&sig_path, hex.as_bytes());
                     }
                     match (wav_result, png_result) {
-                        (Ok(wav), Ok(png)) => log::info!("Clip saved: {} + {}", wav, png),
+                        (Ok(wav), Ok(_png)) => {
+                            log::info!("Clip saved: {} + {}", wav, _png);
+                        }
                         (Err(e), _) => log::error!("Clip save failed: {e}"),
                         (_, Err(e)) => log::error!("Portrait save failed: {e}"),
                     }
                 });
-                state.lock().clip_status = "Saving to clips/ folder...".into();
+                state.lock().clip_status = "Saving… check clips/ folder for WAV + PNG".into();
             }
             let status = state.lock().clip_status.clone();
             if !status.is_empty() {

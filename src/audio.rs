@@ -100,6 +100,9 @@ struct LayerSynth {
     chord_intervals: [f32; 3],
     fm_phase: f32,
     fm_mod_phase: f32,
+    /// Dedicated phase for the sub-oscillator in additive mode.
+    /// Previously shared with fm_phase, causing a phase discontinuity click on mode switch.
+    sub_osc_phase: f32,
     waveshaper: Waveshaper,
     bitcrusher: Bitcrusher,
     level: f32,
@@ -164,6 +167,7 @@ impl LayerSynth {
             chord_intervals: [0.0; 3],
             fm_phase: 0.0,
             fm_mod_phase: 0.0,
+            sub_osc_phase: 0.0,
             waveshaper: Waveshaper::new(),
             bitcrusher: Bitcrusher::with_seed(crush_seed),
             level: 1.0,
@@ -459,10 +463,9 @@ impl LayerSynth {
             // Derive sub frequency from the smoothed voice[0] pitch (avoids zipper noise).
             let sub_freq = self.freq_smooth[0] * 0.5;
             // Use a simple per-call phase from existing oscillator state — advance by sub_phase_inc.
-            // We store the sub osc phase in fm_phase when in additive mode (fm_phase unused there).
-            self.fm_phase = (self.fm_phase + std::f32::consts::TAU * sub_freq / self.sr)
+            self.sub_osc_phase = (self.sub_osc_phase + std::f32::consts::TAU * sub_freq / self.sr)
                 .rem_euclid(std::f32::consts::TAU);
-            let sub_sig = self.fm_phase.sin()
+            let sub_sig = self.sub_osc_phase.sin()
                 * p.sub_osc_level
                 * self.amp_smooth[0]
                 * gain;
@@ -649,6 +652,8 @@ struct SynthState {
     layers: [LayerSynth; 3],
     // Shared master effects chain
     filter: BiquadFilter,
+    /// Smoothed target for the master LP filter cutoff (prevents zipper noise on rapid changes).
+    filter_cutoff_smooth: f32,
     eq: ThreeBandEq,
     reverb: FdnReverb,
     delay: DelayLine,
@@ -713,6 +718,7 @@ impl SynthState {
                 LayerSynth::new_with_index(sr, 2),
             ],
             filter: BiquadFilter::low_pass(8000.0, 0.7, sr),
+            filter_cutoff_smooth: 8000.0,
             eq: ThreeBandEq::new(sr),
             reverb,
             delay,
@@ -746,10 +752,12 @@ impl SynthState {
         }
         // Update master effects from layer 0 params (layer 0 owns the master bus)
         if idx == 0 {
-            // Hard floor at 50 Hz — allows sub-bass content to pass through
-            let safe_cutoff = params.filter_cutoff.max(50.0);
+            // Smooth filter cutoff to prevent zipper noise on rapid state-driven changes.
+            // At 120 Hz control rate a jump of 3700 Hz would otherwise produce a click.
+            let target_cutoff = params.filter_cutoff.max(50.0);
+            self.filter_cutoff_smooth += 0.12 * (target_cutoff - self.filter_cutoff_smooth);
             self.filter
-                .update_lp(safe_cutoff, params.filter_q, self.sample_rate);
+                .update_lp(self.filter_cutoff_smooth, params.filter_q, self.sample_rate);
             self.master_volume = params.master_volume;
             self.reverb.wet = params.reverb_wet.clamp(0.0, 1.0);
             self.delay.feedback = params.delay_feedback.clamp(0.0, 0.9);

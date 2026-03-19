@@ -126,11 +126,15 @@ impl Sonification for SpectralMapping {
         }
 
         let base = config.base_frequency as f32;
+        // Gain scales with the number of active (non-zero) partials so perceived
+        // loudness stays consistent whether 2 or 32 bins are populated.
+        let active_partials = self.smoothed.iter().filter(|&&v| v > 0.01).count().max(1);
+        let gain = (1.0 / (active_partials as f32).sqrt()).clamp(0.08, 0.5);
         let mut p = AudioParams {
             mode: SonifMode::Spectral,
             partials: self.smoothed,
             partials_base_freq: base,
-            gain: 0.30, // was 0.15 — spectral DFT bins were normalized so output was 6 dB too quiet
+            gain,
             filter_cutoff: 8000.0,
             filter_q: 0.7,
             ..Default::default()

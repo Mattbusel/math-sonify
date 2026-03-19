@@ -1,4 +1,9 @@
 use std::f32::consts::TAU;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Unique seed counter — each Oscillator instance gets a distinct noise seed so
+/// simultaneous Noise-shape voices don't produce correlated (identical) bursts.
+static OSC_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Waveform shape for a band-limited oscillator.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -72,7 +77,10 @@ impl Oscillator {
             sample_rate,
             tri_state: 0.0,
             sq_dc: 0.0,
-            noise_seed: 0x9E37_79B9_7F4A_7C15,
+            noise_seed: OSC_COUNTER
+                .fetch_add(1, Ordering::Relaxed)
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                .wrapping_add(0x517C_C1B7_2722_0A95),
         }
     }
 
