@@ -455,7 +455,7 @@ fn sim_thread(
         *s = s
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
-        (*s >> 33) as f32 / u32::MAX as f32
+        (*s >> 33) as f32 / 2_147_483_647.0f32
     };
     let mut next_excursion_tick: u64 = {
         let r = lcg(&mut walk_seed_ex);
@@ -579,7 +579,7 @@ fn sim_thread(
                 *s = s
                     .wrapping_mul(6364136223846793005)
                     .wrapping_add(1442695040888963407);
-                ((*s >> 33) as f64 / u32::MAX as f64) * 2.0 - 1.0
+                (*s >> 33) as f64 / 2_147_483_647.0f64 * 2.0 - 1.0
             };
             // Stay within attractor basin
             let ix = fp_f(&mut fp) * 18.0;
@@ -1137,7 +1137,7 @@ fn sim_thread(
                                 walk_seed = walk_seed
                                     .wrapping_mul(6364136223846793005)
                                     .wrapping_add(1442695040888963407);
-                                let r = (walk_seed >> 33) as f32 / u32::MAX as f32 * total_w;
+                                let r = (walk_seed >> 33) as f32 / 2_147_483_647.0f32 * total_w;
                                 let mut acc = 0.0f32;
                                 let mut chosen = active_indices[0];
                                 for &i in &active_indices {
@@ -1147,13 +1147,25 @@ fn sim_thread(
                                         break;
                                     }
                                 }
-                                // Reorder scenes so chosen is first; just restart from beginning
-                                // but jump elapsed to start of that scene
-                                let _ = chosen; // just loop from start for simplicity
+                                // Jump arr_elapsed to the start of the chosen scene.
+                                let chosen_ord = active_indices.iter().position(|&i| i == chosen).unwrap_or(0);
+                                let start_t: f32 = active_indices[..chosen_ord]
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(ord, &i)| {
+                                        let s = &st.scenes[i];
+                                        let morph = if ord > 0 { s.morph_secs } else { 0.0 };
+                                        morph + s.hold_secs
+                                    })
+                                    .sum();
+                                st.arr_elapsed = start_t;
                             }
                         }
-                        st.arr_elapsed = 0.0;
-                        Some(0.0)
+                        if st.arr_elapsed == elapsed {
+                            // No scene was chosen (total_w == 0 or active empty); reset to 0
+                            st.arr_elapsed = 0.0;
+                        }
+                        Some(st.arr_elapsed)
                     } else if st.arr_loop {
                         st.arr_elapsed = elapsed % total.max(0.001);
                         Some(st.arr_elapsed)
@@ -1243,7 +1255,7 @@ fn sim_thread(
                     *seed = seed
                         .wrapping_mul(6364136223846793005)
                         .wrapping_add(1442695040888963407);
-                    (*seed >> 33) as f32 / u32::MAX as f32 * 2.0 - 1.0
+                    (*seed >> 33) as f32 / 2_147_483_647.0f32 * 2.0 - 1.0
                 };
 
                 // Tidal pull: walk energy follows attractor chaos level
