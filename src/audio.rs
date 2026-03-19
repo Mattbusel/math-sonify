@@ -530,7 +530,7 @@ impl LayerSynth {
                 // Equal-power panning: low freqs left → high freqs right.
                 // cos/sin maintains constant loudness; old linear formula attenuated centre.
                 use std::f32::consts::FRAC_PI_4;
-                let pan = (i as f32 / (num_bands - 1) as f32) * 2.0 - 1.0;
+                let pan = if num_bands > 1 { (i as f32 / (num_bands - 1) as f32) * 2.0 - 1.0 } else { 0.0 };
                 let angle = (pan + 1.0) * FRAC_PI_4;
                 out_l += filtered * angle.cos();
                 out_r += filtered * angle.sin();
@@ -852,10 +852,12 @@ impl SynthState {
             let dt = 1.0 / self.sample_rate;
             self.mode_morph_alpha = (self.mode_morph_alpha + dt * 10.0).min(1.0);
             let alpha = self.mode_morph_alpha;
+            // Keep prev_out frozen as the old mode's last output for the full crossfade duration.
+            // Overwriting it each frame with sum_l/sum_r would replace the old-mode snapshot
+            // with the new mode's output after just one sample, collapsing the fade to nothing.
             let (pl, pr) = self.mode_morph_prev_out;
             let bl = pl * (1.0 - alpha) + sum_l * alpha;
             let br = pr * (1.0 - alpha) + sum_r * alpha;
-            self.mode_morph_prev_out = (sum_l, sum_r);
             (bl, br)
         } else {
             self.mode_morph_prev_out = (sum_l, sum_r);
