@@ -100,6 +100,7 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             chorus_depth: lf32(a.audio.chorus_depth, b.audio.chorus_depth),
             waveshaper_drive: lf32(a.audio.waveshaper_drive, b.audio.waveshaper_drive),
             waveshaper_mix: lf32(a.audio.waveshaper_mix, b.audio.waveshaper_mix),
+            ..a.audio.clone()
         },
         lorenz: LorenzConfig {
             sigma: lf64(a.lorenz.sigma, b.lorenz.sigma),
@@ -177,6 +178,7 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             f: lf64(a.lorenz96.f, b.lorenz96.f),
         },
         viz: a.viz.clone(), // don't morph viz settings
+        ..a.clone()
     }
 }
 

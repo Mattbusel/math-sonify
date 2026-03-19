@@ -794,9 +794,9 @@ fn apply_theme(ctx: &Context, theme: &str) {
     let mut visuals = ctx.style().visuals.clone();
     visuals.dark_mode = true;
 
-    // Global rounding — gives a polished, modern feel across all themes
-    let round_sm = egui::Rounding::same(5.0);
-    let round_md = egui::Rounding::same(8.0);
+    // Global rounding — rounder corners for a more modern, polished feel
+    let round_sm = egui::Rounding::same(6.0);
+    let round_md = egui::Rounding::same(10.0);
     visuals.window_rounding = round_md;
     visuals.menu_rounding = round_md;
     visuals.widgets.noninteractive.rounding = round_sm;
@@ -804,80 +804,82 @@ fn apply_theme(ctx: &Context, theme: &str) {
     visuals.widgets.hovered.rounding = round_sm;
     visuals.widgets.active.rounding = round_sm;
     visuals.widgets.open.rounding = round_sm;
+    // Clip inner content to rounded window edges
+    visuals.clip_rect_margin = 0.0;
 
     match theme {
         "vaporwave" => {
-            visuals.window_fill = Color32::from_rgb(14, 7, 24);
-            visuals.panel_fill = Color32::from_rgb(14, 7, 24);
-            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(30, 12, 46);
+            visuals.window_fill = Color32::from_rgb(12, 5, 22);
+            visuals.panel_fill = Color32::from_rgb(12, 5, 22);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(26, 10, 42);
             visuals.widgets.noninteractive.bg_stroke =
-                egui::Stroke::new(1.0, Color32::from_rgb(70, 30, 100));
-            visuals.widgets.inactive.bg_fill = Color32::from_rgb(44, 18, 66);
+                egui::Stroke::new(1.0, Color32::from_rgb(65, 28, 96));
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(38, 16, 60);
             visuals.widgets.inactive.bg_stroke =
-                egui::Stroke::new(1.0, Color32::from_rgb(90, 40, 130));
-            visuals.widgets.hovered.bg_fill = Color32::from_rgb(70, 26, 100);
+                egui::Stroke::new(1.0, Color32::from_rgb(88, 38, 126));
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(66, 24, 96);
             visuals.widgets.hovered.bg_stroke =
-                egui::Stroke::new(1.5, Color32::from_rgb(200, 80, 200));
-            visuals.widgets.active.bg_fill = Color32::from_rgb(210, 55, 160);
+                egui::Stroke::new(1.5, Color32::from_rgb(220, 90, 210));
+            visuals.widgets.active.bg_fill = Color32::from_rgb(205, 50, 155);
             visuals.widgets.active.bg_stroke =
-                egui::Stroke::new(2.0, Color32::from_rgb(255, 140, 230));
-            visuals.selection.bg_fill = Color32::from_rgb(180, 40, 130);
-            visuals.override_text_color = Some(Color32::from_rgb(248, 190, 240));
+                egui::Stroke::new(2.0, Color32::from_rgb(255, 145, 235));
+            visuals.selection.bg_fill = Color32::from_rgb(175, 35, 125);
+            visuals.override_text_color = Some(Color32::from_rgb(245, 185, 238));
         }
         "crt" => {
-            visuals.window_fill = Color32::from_rgb(0, 0, 0);
-            visuals.panel_fill = Color32::from_rgb(0, 0, 0);
-            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(0, 8, 0);
+            visuals.window_fill = Color32::from_rgb(0, 2, 0);
+            visuals.panel_fill = Color32::from_rgb(0, 2, 0);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(0, 10, 0);
             visuals.widgets.noninteractive.bg_stroke =
-                egui::Stroke::new(1.0, Color32::from_rgb(0, 40, 0));
-            visuals.widgets.inactive.bg_fill = Color32::from_rgb(0, 16, 0);
+                egui::Stroke::new(1.0, Color32::from_rgb(0, 45, 8));
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(0, 18, 4);
             visuals.widgets.inactive.bg_stroke =
-                egui::Stroke::new(1.0, Color32::from_rgb(0, 60, 0));
-            visuals.widgets.hovered.bg_fill = Color32::from_rgb(0, 32, 0);
+                egui::Stroke::new(1.0, Color32::from_rgb(0, 65, 12));
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(0, 36, 6);
             visuals.widgets.hovered.bg_stroke =
-                egui::Stroke::new(1.5, Color32::from_rgb(0, 200, 60));
-            visuals.widgets.active.bg_fill = Color32::from_rgb(0, 160, 0);
+                egui::Stroke::new(1.5, Color32::from_rgb(0, 210, 65));
+            visuals.widgets.active.bg_fill = Color32::from_rgb(0, 155, 20);
             visuals.widgets.active.bg_stroke =
-                egui::Stroke::new(2.0, Color32::from_rgb(0, 255, 80));
-            visuals.selection.bg_fill = Color32::from_rgb(0, 120, 0);
-            visuals.override_text_color = Some(Color32::from_rgb(0, 255, 60));
+                egui::Stroke::new(2.0, Color32::from_rgb(0, 255, 85));
+            visuals.selection.bg_fill = Color32::from_rgb(0, 115, 15);
+            visuals.override_text_color = Some(Color32::from_rgb(0, 255, 65));
         }
         "solar" => {
-            visuals.window_fill = Color32::from_rgb(14, 7, 0);
-            visuals.panel_fill = Color32::from_rgb(14, 7, 0);
-            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(28, 14, 0);
+            visuals.window_fill = Color32::from_rgb(12, 6, 0);
+            visuals.panel_fill = Color32::from_rgb(12, 6, 0);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(26, 13, 0);
             visuals.widgets.noninteractive.bg_stroke =
-                egui::Stroke::new(1.0, Color32::from_rgb(60, 30, 0));
-            visuals.widgets.inactive.bg_fill = Color32::from_rgb(42, 22, 0);
+                egui::Stroke::new(1.0, Color32::from_rgb(62, 32, 0));
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(40, 20, 0);
             visuals.widgets.inactive.bg_stroke =
-                egui::Stroke::new(1.0, Color32::from_rgb(90, 46, 0));
-            visuals.widgets.hovered.bg_fill = Color32::from_rgb(70, 38, 0);
+                egui::Stroke::new(1.0, Color32::from_rgb(92, 48, 0));
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(68, 36, 0);
             visuals.widgets.hovered.bg_stroke =
-                egui::Stroke::new(1.5, Color32::from_rgb(220, 140, 0));
-            visuals.widgets.active.bg_fill = Color32::from_rgb(210, 125, 0);
+                egui::Stroke::new(1.5, Color32::from_rgb(235, 148, 0));
+            visuals.widgets.active.bg_fill = Color32::from_rgb(205, 122, 0);
             visuals.widgets.active.bg_stroke =
-                egui::Stroke::new(2.0, Color32::from_rgb(255, 200, 60));
-            visuals.selection.bg_fill = Color32::from_rgb(180, 100, 0);
-            visuals.override_text_color = Some(Color32::from_rgb(255, 215, 110));
+                egui::Stroke::new(2.0, Color32::from_rgb(255, 205, 65));
+            visuals.selection.bg_fill = Color32::from_rgb(175, 98, 0);
+            visuals.override_text_color = Some(Color32::from_rgb(255, 218, 115));
         }
         _ => {
-            // neon (default) — deep space blue
-            visuals.window_fill = Color32::from_rgb(7, 7, 15);
-            visuals.panel_fill = Color32::from_rgb(7, 7, 15);
-            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(15, 15, 28);
+            // neon (default) — deep midnight blue
+            visuals.window_fill = Color32::from_rgb(8, 9, 18);
+            visuals.panel_fill = Color32::from_rgb(8, 9, 18);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(16, 18, 34);
             visuals.widgets.noninteractive.bg_stroke =
-                egui::Stroke::new(1.0, Color32::from_rgb(35, 40, 70));
-            visuals.widgets.inactive.bg_fill = Color32::from_rgb(20, 20, 40);
+                egui::Stroke::new(1.0, Color32::from_rgb(38, 44, 78));
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(22, 25, 46);
             visuals.widgets.inactive.bg_stroke =
-                egui::Stroke::new(1.0, Color32::from_rgb(45, 50, 85));
-            visuals.widgets.hovered.bg_fill = Color32::from_rgb(28, 32, 62);
+                egui::Stroke::new(1.0, Color32::from_rgb(50, 58, 98));
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(30, 36, 66);
             visuals.widgets.hovered.bg_stroke =
-                egui::Stroke::new(1.5, Color32::from_rgb(60, 140, 230));
-            visuals.widgets.active.bg_fill = Color32::from_rgb(0, 125, 215);
+                egui::Stroke::new(1.5, Color32::from_rgb(70, 148, 242));
+            visuals.widgets.active.bg_fill = Color32::from_rgb(15, 128, 222);
             visuals.widgets.active.bg_stroke =
-                egui::Stroke::new(2.0, Color32::from_rgb(100, 190, 255));
-            visuals.selection.bg_fill = Color32::from_rgb(0, 100, 185);
-            visuals.override_text_color = Some(Color32::from_rgb(210, 220, 240));
+                egui::Stroke::new(2.0, Color32::from_rgb(105, 195, 255));
+            visuals.selection.bg_fill = Color32::from_rgb(0, 105, 195);
+            visuals.override_text_color = Some(Color32::from_rgb(215, 224, 246));
         }
     }
     ctx.set_visuals(visuals);
@@ -967,12 +969,18 @@ fn mode_tooltip(mode: &str) -> &'static str {
     }
 }
 
-pub(crate) const CYAN: Color32 = Color32::from_rgb(100, 200, 255);
-pub(crate) const GRAY_HINT: Color32 = Color32::from_rgb(140, 145, 170);
-pub(crate) const AMBER: Color32 = Color32::from_rgb(220, 175, 60);
-const GREEN_ACC: Color32 = Color32::from_rgb(50, 210, 130);
+pub(crate) const CYAN: Color32 = Color32::from_rgb(90, 195, 255);
+pub(crate) const GRAY_HINT: Color32 = Color32::from_rgb(135, 142, 168);
+pub(crate) const AMBER: Color32 = Color32::from_rgb(225, 178, 55);
+const GREEN_ACC: Color32 = Color32::from_rgb(45, 215, 128);
 #[allow(dead_code)]
-const DIM_BG: Color32 = Color32::from_rgb(18, 18, 34);
+const DIM_BG: Color32 = Color32::from_rgb(16, 18, 34);
+pub(crate) const VIOLET: Color32 = Color32::from_rgb(168, 98, 255);
+const ROSE: Color32 = Color32::from_rgb(255, 88, 128);
+#[allow(dead_code)]
+const TEAL_ACC: Color32 = Color32::from_rgb(0, 200, 178);
+/// Subtle panel background used for inset frames and section headers.
+const SECTION_BG: Color32 = Color32::from_rgb(13, 15, 30);
 
 fn collapsing_section(
     ui: &mut Ui,
@@ -980,22 +988,26 @@ fn collapsing_section(
     default_open: bool,
     add_contents: impl FnOnce(&mut Ui),
 ) {
-    ui.add_space(4.0);
-    // Subtle full-width header background
-    let header_frame = egui::Frame::none()
-        .fill(Color32::from_rgb(18, 22, 42))
-        .inner_margin(egui::Margin::symmetric(6.0, 3.0))
-        .rounding(egui::Rounding::same(5.0));
-    header_frame.show(ui, |ui| {
-        CollapsingHeader::new(RichText::new(label).size(12.5).color(CYAN).strong())
-            .default_open(default_open)
-            .show(ui, |ui| {
-                ui.add_space(4.0);
-                add_contents(ui);
-                ui.add_space(2.0);
-            });
-    });
-    ui.add_space(4.0);
+    ui.add_space(3.0);
+    let outer = egui::Frame::none()
+        .fill(SECTION_BG)
+        .inner_margin(egui::Margin { left: 10.0, right: 6.0, top: 3.0, bottom: 3.0 })
+        .rounding(egui::Rounding::same(6.0))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            CollapsingHeader::new(RichText::new(label).size(12.5).color(CYAN).strong())
+                .default_open(default_open)
+                .show(ui, |ui| {
+                    ui.add_space(5.0);
+                    add_contents(ui);
+                    ui.add_space(3.0);
+                });
+        });
+    // 3 px cyan accent bar on the left edge of the section
+    let r = outer.response.rect;
+    let bar = egui::Rect::from_min_max(r.left_top(), egui::pos2(r.left() + 3.0, r.bottom()));
+    ui.painter().rect_filled(bar, egui::Rounding::same(1.5), CYAN.linear_multiply(0.45));
+    ui.add_space(3.0);
 }
 
 /// #12: Get a named parameter value from Config.
@@ -1282,18 +1294,43 @@ pub fn draw_ui(
 
                 // ── App identity header ────────────────────────────────────────────────
                 egui::Frame::none()
-                    .fill(Color32::from_rgb(10, 12, 24))
-                    .inner_margin(egui::Margin::symmetric(10.0, 8.0))
-                    .rounding(egui::Rounding::same(8.0))
-                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(30, 50, 90)))
+                    .fill(Color32::from_rgb(10, 12, 26))
+                    .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+                    .rounding(egui::Rounding::same(10.0))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(28, 50, 96)))
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
-                        ui.label(RichText::new("MATH SONIFY").size(19.0).color(CYAN).strong());
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("MATH SONIFY").size(20.0).color(CYAN).strong(),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new("v1.2")
+                                            .size(9.5)
+                                            .color(GRAY_HINT.linear_multiply(0.7)),
+                                    );
+                                },
+                            );
+                        });
+                        ui.add_space(1.0);
                         ui.label(
                             RichText::new("strange attractors  →  sound")
                                 .size(10.5)
                                 .color(GRAY_HINT)
                                 .italics(),
+                        );
+                        ui.add_space(4.0);
+                        // Thin gradient accent line
+                        let aw = ui.available_width();
+                        let (bar_rect, _) =
+                            ui.allocate_exact_size(Vec2::new(aw, 1.0), Sense::hover());
+                        ui.painter().rect_filled(
+                            bar_rect,
+                            0.0,
+                            CYAN.linear_multiply(0.22),
                         );
                     });
                 ui.add_space(8.0);
@@ -1305,109 +1342,174 @@ pub fn draw_ui(
                         (st.chaos_level, st.paused)
                     };
                     let chaos_col = lerp_color(
-                        Color32::from_rgb(30, 110, 200),
-                        Color32::from_rgb(220, 70, 30),
+                        Color32::from_rgb(40, 120, 210),
+                        Color32::from_rgb(225, 72, 28),
                         chaos,
                     );
-                    ui.horizontal(|ui| {
-                        let status_text = if paused { "⏸  PAUSED" } else { "▶  LIVE" };
-                        let status_col = if paused {
-                            Color32::from_rgb(150, 150, 180)
-                        } else {
-                            Color32::from_rgb(80, 220, 120)
-                        };
-                        ui.label(
-                            RichText::new(status_text)
-                                .size(10.0)
-                                .color(status_col)
-                                .strong(),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                RichText::new(format!("{:.0}% chaos", chaos * 100.0))
-                                    .size(10.0)
-                                    .color(chaos_col),
+                    egui::Frame::none()
+                        .fill(Color32::from_rgb(11, 13, 26))
+                        .inner_margin(egui::Margin::symmetric(10.0, 7.0))
+                        .rounding(egui::Rounding::same(8.0))
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            Color32::from_rgb(28, 34, 62),
+                        ))
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                // Pulsing status dot
+                                let dot_col = if paused {
+                                    Color32::from_rgb(120, 122, 155)
+                                } else {
+                                    Color32::from_rgb(72, 228, 118)
+                                };
+                                let (dot_rect, _) =
+                                    ui.allocate_exact_size(Vec2::new(7.0, 7.0), Sense::hover());
+                                let dot_center = dot_rect.center();
+                                ui.painter().circle_filled(dot_center, 3.5, dot_col);
+                                ui.add_space(4.0);
+                                let status_text = if paused { "PAUSED" } else { "LIVE" };
+                                let status_col = if paused {
+                                    Color32::from_rgb(145, 148, 178)
+                                } else {
+                                    Color32::from_rgb(72, 228, 118)
+                                };
+                                ui.label(
+                                    RichText::new(status_text)
+                                        .size(10.5)
+                                        .color(status_col)
+                                        .strong(),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(format!("{:.0}% chaos", chaos * 100.0))
+                                                .size(10.5)
+                                                .color(chaos_col)
+                                                .strong(),
+                                        );
+                                    },
+                                );
+                            });
+                            ui.add_space(5.0);
+                            // Progress track
+                            let bar_w = ui.available_width();
+                            let (bar_rect, _) =
+                                ui.allocate_exact_size(Vec2::new(bar_w, 6.0), Sense::hover());
+                            ui.painter().rect_filled(
+                                bar_rect,
+                                3.0,
+                                Color32::from_rgb(18, 20, 38),
+                            );
+                            let fill_w = bar_rect.width() * chaos.clamp(0.0, 1.0);
+                            if fill_w > 0.0 {
+                                let fill_rect = egui::Rect::from_min_size(
+                                    bar_rect.min,
+                                    Vec2::new(fill_w, bar_rect.height()),
+                                );
+                                ui.painter().rect_filled(fill_rect, 3.0, chaos_col);
+                            }
+                            // Track border
+                            ui.painter().rect_stroke(
+                                bar_rect,
+                                3.0,
+                                egui::Stroke::new(0.5, Color32::from_rgb(36, 40, 72)),
                             );
                         });
-                    });
-                    let bar_w = ui.available_width();
-                    let (bar_rect, _) =
-                        ui.allocate_exact_size(Vec2::new(bar_w, 5.0), Sense::hover());
-                    ui.painter()
-                        .rect_filled(bar_rect, 2.5, Color32::from_rgb(15, 15, 30));
-                    let fill_rect = egui::Rect::from_min_size(
-                        bar_rect.min,
-                        Vec2::new(bar_rect.width() * chaos.clamp(0.0, 1.0), bar_rect.height()),
-                    );
-                    ui.painter().rect_filled(fill_rect, 2.5, chaos_col);
                 }
                 ui.add_space(8.0);
 
-                // ── Simple / Advanced toggle ───────────────────────────────────────────
+                // ── Simple / Advanced segmented control ───────────────────────────────
                 let is_simple = {
                     let mut st = state.lock();
-                    let half_w = (ui.available_width() - 6.0) / 2.0;
-                    ui.horizontal(|ui| {
-                        let simple_active = st.simple_mode;
-                        let simple_fill = if simple_active {
-                            Color32::from_rgb(22, 140, 78)
-                        } else {
-                            Color32::from_rgb(18, 18, 36)
-                        };
-                        let adv_fill = if !simple_active {
-                            Color32::from_rgb(15, 105, 205)
-                        } else {
-                            Color32::from_rgb(18, 18, 36)
-                        };
-                        let simple_border = if simple_active {
-                            Color32::from_rgb(50, 200, 110)
-                        } else {
-                            Color32::from_rgb(40, 42, 70)
-                        };
-                        let adv_border = if !simple_active {
-                            Color32::from_rgb(60, 160, 255)
-                        } else {
-                            Color32::from_rgb(40, 42, 70)
-                        };
-                        if ui
-                            .add(
-                                Button::new(
-                                    RichText::new("Simple")
-                                        .color(Color32::WHITE)
-                                        .size(13.0)
-                                        .strong(),
-                                )
-                                .fill(simple_fill)
-                                .stroke(egui::Stroke::new(
-                                    if simple_active { 1.5 } else { 1.0 },
-                                    simple_border,
-                                ))
-                                .min_size(Vec2::new(half_w, 32.0)),
-                            )
-                            .clicked()
-                        {
-                            st.simple_mode = true;
-                        }
-                        if ui
-                            .add(
-                                Button::new(
-                                    RichText::new("Advanced")
-                                        .color(Color32::WHITE)
-                                        .size(13.0)
-                                        .strong(),
-                                )
-                                .fill(adv_fill)
-                                .stroke(egui::Stroke::new(
-                                    if !simple_active { 1.5 } else { 1.0 },
-                                    adv_border,
-                                ))
-                                .min_size(Vec2::new(half_w, 32.0)),
-                            )
-                            .clicked()
-                        {
-                            st.simple_mode = false;
-                        }
-                    });
+                    let total_w = ui.available_width();
+                    let half_w = (total_w - 2.0) / 2.0;
+                    let simple_active = st.simple_mode;
+
+                    // Outer container gives the control a unified pill background
+                    egui::Frame::none()
+                        .fill(Color32::from_rgb(14, 16, 30))
+                        .rounding(egui::Rounding::same(8.0))
+                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(36, 40, 72)))
+                        .inner_margin(egui::Margin::same(2.0))
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            ui.set_min_width(total_w - 4.0);
+                            ui.horizontal(|ui| {
+                                // Simple segment — rounded left, flat right
+                                let s_fill = if simple_active {
+                                    Color32::from_rgb(20, 138, 76)
+                                } else {
+                                    Color32::TRANSPARENT
+                                };
+                                let s_stroke = if simple_active {
+                                    egui::Stroke::new(0.0, Color32::TRANSPARENT)
+                                } else {
+                                    egui::Stroke::new(0.0, Color32::TRANSPARENT)
+                                };
+                                let s_text_col = if simple_active {
+                                    Color32::WHITE
+                                } else {
+                                    Color32::from_rgb(130, 135, 165)
+                                };
+                                if ui
+                                    .add(
+                                        Button::new(
+                                            RichText::new("Simple")
+                                                .color(s_text_col)
+                                                .size(12.5)
+                                                .strong(),
+                                        )
+                                        .fill(s_fill)
+                                        .stroke(s_stroke)
+                                        .rounding(egui::Rounding {
+                                            nw: 6.0,
+                                            sw: 6.0,
+                                            ne: 0.0,
+                                            se: 0.0,
+                                        })
+                                        .min_size(Vec2::new(half_w, 30.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    st.simple_mode = true;
+                                }
+                                // Advanced segment — flat left, rounded right
+                                let a_fill = if !simple_active {
+                                    Color32::from_rgb(14, 108, 208)
+                                } else {
+                                    Color32::TRANSPARENT
+                                };
+                                let a_text_col = if !simple_active {
+                                    Color32::WHITE
+                                } else {
+                                    Color32::from_rgb(130, 135, 165)
+                                };
+                                if ui
+                                    .add(
+                                        Button::new(
+                                            RichText::new("Advanced")
+                                                .color(a_text_col)
+                                                .size(12.5)
+                                                .strong(),
+                                        )
+                                        .fill(a_fill)
+                                        .stroke(egui::Stroke::new(0.0, Color32::TRANSPARENT))
+                                        .rounding(egui::Rounding {
+                                            nw: 0.0,
+                                            sw: 0.0,
+                                            ne: 6.0,
+                                            se: 6.0,
+                                        })
+                                        .min_size(Vec2::new(half_w, 30.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    st.simple_mode = false;
+                                }
+                            });
+                        });
                     ui.add_space(6.0);
                     st.simple_mode
                 }; // lock released here
@@ -1429,9 +1531,11 @@ pub fn draw_ui(
     CentralPanel::default().show(ctx, |ui| {
         // Tab bar row with theme switcher on the right
         egui::Frame::none()
-            .fill(Color32::from_rgb(10, 10, 22))
-            .inner_margin(egui::Margin::symmetric(4.0, 4.0))
+            .fill(Color32::from_rgb(9, 10, 21))
+            .inner_margin(egui::Margin { left: 4.0, right: 4.0, top: 4.0, bottom: 0.0 })
+            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(24, 28, 54)))
             .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
                     let tabs = [
                         ("🌀", "Phase"),
@@ -1449,12 +1553,17 @@ pub fn draw_ui(
                     for (i, (icon, name)) in tabs.iter().enumerate() {
                         let selected = viz_tab == i;
                         let (fill, text_col) = if selected {
-                            (Color32::from_rgb(0, 125, 215), Color32::WHITE)
+                            (Color32::from_rgb(14, 118, 210), Color32::WHITE)
                         } else {
                             (
-                                Color32::from_rgb(20, 22, 42),
-                                Color32::from_rgb(160, 170, 200),
+                                Color32::from_rgb(16, 18, 36),
+                                Color32::from_rgb(148, 158, 192),
                             )
+                        };
+                        let stroke = if selected {
+                            egui::Stroke::new(1.5, Color32::from_rgb(72, 158, 255))
+                        } else {
+                            egui::Stroke::new(0.0, Color32::TRANSPARENT)
                         };
                         let btn = Button::new(
                             RichText::new(format!("{} {}", icon, name))
@@ -1462,11 +1571,9 @@ pub fn draw_ui(
                                 .size(11.5),
                         )
                         .fill(fill)
-                        .stroke(egui::Stroke::new(
-                            if selected { 1.5 } else { 0.0 },
-                            Color32::from_rgb(60, 160, 255),
-                        ))
-                        .min_size(Vec2::new(74.0, 28.0));
+                        .stroke(stroke)
+                        .rounding(egui::Rounding { nw: 6.0, ne: 6.0, sw: 0.0, se: 0.0 })
+                        .min_size(Vec2::new(72.0, 28.0));
                         if ui.add(btn).clicked() {
                             viz_tab = i;
                         }
@@ -1476,33 +1583,38 @@ pub fn draw_ui(
                     // Theme switcher right-aligned
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let themes = [
-                            ("☀", "solar", Color32::from_rgb(195, 110, 10)),
-                            ("⎕", "crt", Color32::from_rgb(0, 170, 0)),
-                            ("◈", "vaporwave", Color32::from_rgb(170, 35, 130)),
-                            ("◆", "neon", Color32::from_rgb(0, 130, 215)),
+                            ("☀", "solar", Color32::from_rgb(200, 115, 10), "Solar"),
+                            ("⎕", "crt", Color32::from_rgb(0, 175, 10), "CRT Green"),
+                            ("◈", "vaporwave", Color32::from_rgb(175, 38, 135), "Vaporwave"),
+                            ("◆", "neon", Color32::from_rgb(10, 132, 220), "Neon"),
                         ];
-                        for (icon, theme_key, color) in themes.iter() {
+                        for (icon, theme_key, color, label) in themes.iter() {
                             let is_active = state.lock().theme == *theme_key;
-                            let btn_color = if is_active {
-                                *color
+                            let (btn_color, border_w, border_col) = if is_active {
+                                (*color, 1.5f32, *color)
                             } else {
-                                Color32::from_rgb(22, 22, 40)
+                                (
+                                    Color32::from_rgb(18, 20, 38),
+                                    1.0f32,
+                                    Color32::from_rgb(38, 42, 68),
+                                )
                             };
-                            let border = if is_active {
-                                *color
+                            let icon_col = if is_active {
+                                Color32::WHITE
                             } else {
-                                Color32::from_rgb(40, 42, 65)
+                                Color32::from_rgb(130, 136, 168)
                             };
                             if ui
                                 .add(
                                     Button::new(
-                                        RichText::new(*icon).color(Color32::WHITE).size(13.0),
+                                        RichText::new(*icon).color(icon_col).size(13.0),
                                     )
                                     .fill(btn_color)
-                                    .stroke(egui::Stroke::new(1.0, border))
+                                    .stroke(egui::Stroke::new(border_w, border_col))
+                                    .rounding(egui::Rounding { nw: 6.0, ne: 6.0, sw: 0.0, se: 0.0 })
                                     .min_size(Vec2::new(26.0, 26.0)),
                                 )
-                                .on_hover_text(*theme_key)
+                                .on_hover_text(*label)
                                 .clicked()
                             {
                                 state.lock().theme = theme_key.to_string();
@@ -1510,21 +1622,26 @@ pub fn draw_ui(
                         }
                         // ── #14: Dark/Light toggle ──────────────────────────────────────────
                         let lt = state.lock().light_theme;
-                        let lt_icon = if lt { "🌙" } else { "☀" };
+                        let lt_icon = if lt { "🌙" } else { "✦" };
                         let lt_fill = if lt {
-                            Color32::from_rgb(200, 200, 220)
+                            Color32::from_rgb(198, 200, 222)
                         } else {
-                            Color32::from_rgb(22, 22, 40)
+                            Color32::from_rgb(18, 20, 38)
                         };
-                        let lt_text = if lt { Color32::BLACK } else { Color32::WHITE };
+                        let lt_text = if lt {
+                            Color32::from_rgb(20, 22, 40)
+                        } else {
+                            Color32::from_rgb(130, 136, 168)
+                        };
                         if ui
                             .add(
                                 Button::new(RichText::new(lt_icon).color(lt_text).size(13.0))
                                     .fill(lt_fill)
                                     .stroke(egui::Stroke::new(
                                         1.0,
-                                        Color32::from_rgb(100, 100, 150),
+                                        Color32::from_rgb(96, 100, 148),
                                     ))
+                                    .rounding(egui::Rounding { nw: 6.0, ne: 6.0, sw: 0.0, se: 0.0 })
                                     .min_size(Vec2::new(26.0, 26.0)),
                             )
                             .on_hover_text(if lt {
@@ -1899,105 +2016,104 @@ pub fn draw_ui(
                             is_2d,
                         ));
                     });
-
-                    // Basin controls
-                    if viz_tab == 8 {
-                        ui.horizontal(|ui| {
-                            let (computing, resolution, xlim, ylim, z_slice, sigma, rho) = {
-                                let st = state.lock();
-                                (
-                                    st.basin_computing,
-                                    st.basin_resolution,
-                                    st.basin_xlim,
-                                    st.basin_ylim,
-                                    st.basin_z_slice,
-                                    st.config.lorenz.sigma,
-                                    st.config.lorenz.rho,
-                                )
-                            };
-                            ui.label(
-                                RichText::new(format!("σ={:.1} ρ={:.1}", sigma, rho))
-                                    .color(Color32::from_rgb(140, 200, 255))
-                                    .size(11.0),
-                            );
-                            ui.separator();
-                            let mut new_res = resolution;
-                            ui.label("Res:");
-                            ui.add(
-                                egui::DragValue::new(&mut new_res)
-                                    .clamp_range(20usize..=200usize)
-                                    .speed(1.0),
-                            );
-                            let mut new_xl0 = xlim.0;
-                            let mut new_xl1 = xlim.1;
-                            let mut new_yl0 = ylim.0;
-                            let mut new_yl1 = ylim.1;
-                            let mut new_z = z_slice;
-                            ui.label("X:");
-                            ui.add(egui::DragValue::new(&mut new_xl0).speed(0.5).prefix("lo "));
-                            ui.add(egui::DragValue::new(&mut new_xl1).speed(0.5).prefix("hi "));
-                            ui.label("Y:");
-                            ui.add(egui::DragValue::new(&mut new_yl0).speed(0.5).prefix("lo "));
-                            ui.add(egui::DragValue::new(&mut new_yl1).speed(0.5).prefix("hi "));
-                            ui.label("Z0:");
-                            ui.add(egui::DragValue::new(&mut new_z).speed(0.5));
-                            {
-                                let mut st = state.lock();
-                                st.basin_resolution = new_res;
-                                st.basin_xlim = (new_xl0, new_xl1);
-                                st.basin_ylim = (new_yl0, new_yl1);
-                                st.basin_z_slice = new_z;
-                            }
-                            let compute_color = if computing {
-                                Color32::from_rgb(100, 60, 0)
-                            } else {
-                                Color32::from_rgb(0, 80, 120)
-                            };
-                            if !computing
-                                && ui
-                                    .add(
-                                        Button::new(
-                                            RichText::new("Compute Basin").color(Color32::WHITE),
-                                        )
-                                        .fill(compute_color),
-                                    )
-                                    .clicked()
-                            {
-                                let (xlim2, ylim2, z_slice2, resolution2, basin_out) = {
-                                    let mut st = state.lock();
-                                    st.basin_computing = true;
-                                    let xl = st.basin_xlim;
-                                    let yl = st.basin_ylim;
-                                    let zs = st.basin_z_slice;
-                                    let rs = st.basin_resolution;
-                                    let out = st.basin_data.clone();
-                                    *out.lock() = Vec::new();
-                                    (xl, yl, zs, rs, out)
-                                };
-                                let state_clone = state.clone();
-                                std::thread::spawn(move || {
-                                    compute_basin(
-                                        xlim2,
-                                        ylim2,
-                                        z_slice2,
-                                        resolution2,
-                                        "lorenz",
-                                        basin_out,
-                                    );
-                                    state_clone.lock().basin_computing = false;
-                                });
-                            }
-                            if computing {
-                                ui.label(
-                                    RichText::new("Computing...")
-                                        .color(Color32::from_rgb(255, 200, 0)),
-                                );
-                            }
-                        });
-                    }
                 }
                 if computing {
                     ui.label(RichText::new("Computing...").color(Color32::from_rgb(255, 200, 0)));
+                }
+                // Basin controls — always visible when on the basin tab
+                if viz_tab == 8 {
+                    ui.horizontal(|ui| {
+                        let (basin_computing, resolution, xlim, ylim, z_slice, sigma, rho) = {
+                            let st = state.lock();
+                            (
+                                st.basin_computing,
+                                st.basin_resolution,
+                                st.basin_xlim,
+                                st.basin_ylim,
+                                st.basin_z_slice,
+                                st.config.lorenz.sigma,
+                                st.config.lorenz.rho,
+                            )
+                        };
+                        ui.label(
+                            RichText::new(format!("σ={:.1} ρ={:.1}", sigma, rho))
+                                .color(Color32::from_rgb(140, 200, 255))
+                                .size(11.0),
+                        );
+                        ui.separator();
+                        let mut new_res = resolution;
+                        ui.label("Res:");
+                        ui.add(
+                            egui::DragValue::new(&mut new_res)
+                                .clamp_range(20usize..=200usize)
+                                .speed(1.0),
+                        );
+                        let mut new_xl0 = xlim.0;
+                        let mut new_xl1 = xlim.1;
+                        let mut new_yl0 = ylim.0;
+                        let mut new_yl1 = ylim.1;
+                        let mut new_z = z_slice;
+                        ui.label("X:");
+                        ui.add(egui::DragValue::new(&mut new_xl0).speed(0.5).prefix("lo "));
+                        ui.add(egui::DragValue::new(&mut new_xl1).speed(0.5).prefix("hi "));
+                        ui.label("Y:");
+                        ui.add(egui::DragValue::new(&mut new_yl0).speed(0.5).prefix("lo "));
+                        ui.add(egui::DragValue::new(&mut new_yl1).speed(0.5).prefix("hi "));
+                        ui.label("Z0:");
+                        ui.add(egui::DragValue::new(&mut new_z).speed(0.5));
+                        {
+                            let mut st = state.lock();
+                            st.basin_resolution = new_res;
+                            st.basin_xlim = (new_xl0, new_xl1);
+                            st.basin_ylim = (new_yl0, new_yl1);
+                            st.basin_z_slice = new_z;
+                        }
+                        let compute_color = if basin_computing {
+                            Color32::from_rgb(100, 60, 0)
+                        } else {
+                            Color32::from_rgb(0, 80, 120)
+                        };
+                        if !basin_computing
+                            && ui
+                                .add(
+                                    Button::new(
+                                        RichText::new("Compute Basin").color(Color32::WHITE),
+                                    )
+                                    .fill(compute_color),
+                                )
+                                .clicked()
+                        {
+                            let (xlim2, ylim2, z_slice2, resolution2, basin_out) = {
+                                let mut st = state.lock();
+                                st.basin_computing = true;
+                                let xl = st.basin_xlim;
+                                let yl = st.basin_ylim;
+                                let zs = st.basin_z_slice;
+                                let rs = st.basin_resolution;
+                                let out = st.basin_data.clone();
+                                *out.lock() = Vec::new();
+                                (xl, yl, zs, rs, out)
+                            };
+                            let state_clone = state.clone();
+                            std::thread::spawn(move || {
+                                compute_basin(
+                                    xlim2,
+                                    ylim2,
+                                    z_slice2,
+                                    resolution2,
+                                    "lorenz",
+                                    basin_out,
+                                );
+                                state_clone.lock().basin_computing = false;
+                            });
+                        }
+                        if basin_computing {
+                            ui.label(
+                                RichText::new("Computing...")
+                                    .color(Color32::from_rgb(255, 200, 0)),
+                            );
+                        }
+                    });
                 }
             });
         }
@@ -2212,17 +2328,20 @@ pub fn draw_ui(
                 } else {
                     ((toast.ttl_secs - age) / 0.5).clamp(0.0, 1.0)
                 };
-                let (bg_col, icon) = match toast.kind {
+                let (bg_col, accent_col, icon) = match toast.kind {
                     ToastKind::Info => (
-                        Color32::from_rgba_unmultiplied(40, 120, 200, (200.0 * fade) as u8),
+                        Color32::from_rgba_unmultiplied(22, 36, 62, (230.0 * fade) as u8),
+                        Color32::from_rgba_unmultiplied(55, 140, 230, (255.0 * fade) as u8),
                         "ℹ",
                     ),
                     ToastKind::Warning => (
-                        Color32::from_rgba_unmultiplied(180, 130, 0, (200.0 * fade) as u8),
+                        Color32::from_rgba_unmultiplied(42, 32, 8, (230.0 * fade) as u8),
+                        Color32::from_rgba_unmultiplied(210, 155, 0, (255.0 * fade) as u8),
                         "⚠",
                     ),
                     ToastKind::Error => (
-                        Color32::from_rgba_unmultiplied(180, 40, 40, (220.0 * fade) as u8),
+                        Color32::from_rgba_unmultiplied(48, 14, 14, (230.0 * fade) as u8),
+                        Color32::from_rgba_unmultiplied(210, 48, 48, (255.0 * fade) as u8),
                         "✕",
                     ),
                 };
@@ -2230,22 +2349,37 @@ pub fn draw_ui(
                 let galley = ctx.fonts(|f| {
                     f.layout_no_wrap(text.clone(), FontId::proportional(13.0), Color32::WHITE)
                 });
-                let w = galley.rect.width() + 24.0;
-                let h = galley.rect.height() + 12.0;
-                y_offset -= h + 6.0;
+                let w = galley.rect.width() + 28.0;
+                let h = galley.rect.height() + 16.0;
+                y_offset -= h + 8.0;
+                if y_offset < 0.0 {
+                    break;
+                }
                 let rect = Rect::from_min_size(
-                    Pos2::new(screen_rect.max.x - w - 12.0, y_offset),
+                    Pos2::new(screen_rect.max.x - w - 14.0, y_offset),
                     Vec2::new(w, h),
                 );
                 let painter =
                     ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("toast_overlay")));
-                painter.rect_filled(rect, 6.0, bg_col);
+                // Background
+                painter.rect_filled(rect, 8.0, bg_col);
+                // Border
+                let border_col =
+                    Color32::from_rgba_unmultiplied(accent_col.r(), accent_col.g(), accent_col.b(), (80.0 * fade) as u8);
+                painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.0, border_col));
+                // Left accent bar
+                let accent_bar = Rect::from_min_max(
+                    rect.left_top() + Vec2::new(0.0, 4.0),
+                    Pos2::new(rect.left() + 3.5, rect.bottom() - 4.0),
+                );
+                painter.rect_filled(accent_bar, 2.0, accent_col);
+                // Text
                 painter.text(
-                    rect.min + Vec2::new(12.0, 6.0),
+                    rect.min + Vec2::new(14.0, 8.0),
                     Align2::LEFT_TOP,
                     text,
                     FontId::proportional(13.0),
-                    Color32::from_rgba_unmultiplied(255, 255, 255, (255.0 * fade) as u8),
+                    Color32::from_rgba_unmultiplied(225, 230, 248, (255.0 * fade) as u8),
                 );
             }
             ctx.request_repaint();
@@ -3538,7 +3672,7 @@ fn draw_advanced_panel(
                 .rect_filled(rect, 2.0, Color32::from_rgb(20, 20, 40));
             let bar = egui::Rect::from_min_size(
                 rect.min,
-                Vec2::new(rect.width() * main_x, rect.height()),
+                Vec2::new(rect.width() * main_x.clamp(0.0, 1.0), rect.height()),
             );
             ui.painter()
                 .rect_filled(bar, 2.0, Color32::from_rgb(0, 160, 200));
@@ -3549,7 +3683,7 @@ fn draw_advanced_panel(
             ui.painter()
                 .rect_filled(rect, 2.0, Color32::from_rgb(20, 20, 40));
             let bar =
-                egui::Rect::from_min_size(rect.min, Vec2::new(rect.width() * src_x, rect.height()));
+                egui::Rect::from_min_size(rect.min, Vec2::new(rect.width() * src_x.clamp(0.0, 1.0), rect.height()));
             ui.painter()
                 .rect_filled(bar, 2.0, Color32::from_rgb(200, 100, 0));
         });
