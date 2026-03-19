@@ -183,6 +183,39 @@ pub(crate) fn draw_waveform(
                 hue_to_color(bin as f32 / n_bins as f32, 0.8),
             );
         }
+
+        // Frequency axis labels (logarithmic mapping: 20 Hz – 20 kHz)
+        // The DFT bins represent: bin_freq = (bin+1) * sample_rate / (2 * n_dft)
+        // We use a log-scale mapping of the label frequencies to x position.
+        let freq_labels: &[(f32, &str)] = &[
+            (100.0, "100"),
+            (500.0, "500"),
+            (1000.0, "1k"),
+            (5000.0, "5k"),
+            (10000.0, "10k"),
+        ];
+        let min_log = 20.0f32.log10();
+        let max_log = 20000.0f32.log10();
+        for &(freq, label) in freq_labels {
+            let lx = rect.left()
+                + (freq.log10() - min_log) / (max_log - min_log) * rect.width();
+            if lx >= rect.left() && lx <= rect.right() {
+                painter.line_segment(
+                    [
+                        Pos2::new(lx, spec_y + bin_h_max),
+                        Pos2::new(lx, spec_y + bin_h_max + 4.0),
+                    ],
+                    Stroke::new(1.0, Color32::from_rgb(120, 140, 180)),
+                );
+                painter.text(
+                    Pos2::new(lx, spec_y + bin_h_max + 5.0),
+                    Align2::CENTER_TOP,
+                    label,
+                    FontId::proportional(9.0),
+                    Color32::from_rgb(120, 140, 180),
+                );
+            }
+        }
     }
 
     (zoom, offset)

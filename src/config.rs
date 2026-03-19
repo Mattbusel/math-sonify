@@ -739,6 +739,22 @@ impl Config {
 
         // Lorenz96
         Self::clamp_log_f64(&mut self.lorenz96.f, 0.0, 50.0, "lorenz96.f");
+
+        // New systems added after initial release
+        Self::clamp_log_f64(&mut self.logistic_map.r, 0.0, 4.0, "logistic_map.r");
+        Self::clamp_log_f64(&mut self.standard_map.k, 0.0, 20.0, "standard_map.k");
+        Self::clamp_log_f64(&mut self.stochastic_lorenz.sigma, 0.1, 100.0, "stochastic_lorenz.sigma");
+        Self::clamp_log_f64(&mut self.stochastic_lorenz.rho, 0.1, 200.0, "stochastic_lorenz.rho");
+        Self::clamp_log_f64(&mut self.stochastic_lorenz.beta, 0.01, 20.0, "stochastic_lorenz.beta");
+        Self::clamp_log_f64(&mut self.stochastic_lorenz.noise_strength, 0.0, 10.0, "stochastic_lorenz.noise_strength");
+        Self::clamp_log_f64(&mut self.delayed_map.r, 0.0, 4.0, "delayed_map.r");
+        self.delayed_map.tau = self.delayed_map.tau.clamp(1, 50);
+        Self::clamp_log_f64(&mut self.oregonator.f, 0.1, 10.0, "oregonator.f");
+        Self::clamp_log_f64(&mut self.mathieu.a, -5.0, 5.0, "mathieu.a");
+        Self::clamp_log_f64(&mut self.mathieu.q, 0.0, 5.0, "mathieu.q");
+        Self::clamp_log_f64(&mut self.kuramoto_driven.coupling, 0.0, 20.0, "kuramoto_driven.coupling");
+        Self::clamp_log_f64(&mut self.kuramoto_driven.drive_amp, 0.0, 10.0, "kuramoto_driven.drive_amp");
+        Self::clamp_log_f64(&mut self.kuramoto_driven.drive_freq, 0.0, 100.0, "kuramoto_driven.drive_freq");
     }
 
     /// Clamp a `f64` field to `[min, max]`, emitting a tracing warning if clamped.

@@ -493,6 +493,11 @@ pub struct AppState {
     pub behav_aging: bool,
     pub behav_typing_resonance: bool,
     pub behav_instance_empathy: bool,
+    // ── Custom Initial Conditions ────────────────────────────────────────────
+    pub custom_ic: Vec<f64>,
+    // ── VU Meter Peak Hold ───────────────────────────────────────────────────
+    pub vu_peak_hold: [f32; 4],
+    pub vu_peak_decay_timer: f32,
 }
 
 /// Periodic session log entry (written by sim thread every ~60s).
@@ -764,6 +769,9 @@ impl AppState {
             behav_aging: true,
             behav_typing_resonance: true,
             behav_instance_empathy: true,
+            custom_ic: vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            vu_peak_hold: [0.0; 4],
+            vu_peak_decay_timer: 0.0,
         }
     }
 
@@ -1202,9 +1210,11 @@ pub fn draw_ui(
             let shift = i.modifiers.shift;
             if ctrl && !shift && i.key_pressed(Key::Z) {
                 st.undo();
+                st.toast_queue.push(Toast::info("Undone"));
             }
             if ctrl && shift && i.key_pressed(Key::Z) {
                 st.redo();
+                st.toast_queue.push(Toast::info("Redone"));
             }
         });
     } // lock released here
@@ -2539,6 +2549,33 @@ fn draw_advanced_panel(
     {
         st.paused = !st.paused;
     }
+    ui.add_space(4.0);
+
+    // ---- Undo / Redo buttons ----
+    ui.horizontal(|ui| {
+        let can_undo = !st.undo_stack.is_empty();
+        let can_redo = !st.redo_stack.is_empty();
+        let undo_col = if can_undo { Color32::from_rgb(80, 160, 255) } else { Color32::from_rgb(50, 55, 75) };
+        let redo_col = if can_redo { Color32::from_rgb(80, 220, 140) } else { Color32::from_rgb(50, 55, 75) };
+        let half_w = (ui.available_width() - 6.0) * 0.5;
+        if ui.add_enabled(
+            can_undo,
+            Button::new(RichText::new("↩ Undo").color(undo_col).size(12.0))
+                .min_size(Vec2::new(half_w, 26.0)),
+        ).on_hover_text("Undo last config change (Ctrl+Z)").clicked() {
+            st.undo();
+            st.toast_queue.push(Toast::info("Undone"));
+        }
+        ui.add_space(6.0);
+        if ui.add_enabled(
+            can_redo,
+            Button::new(RichText::new("↪ Redo").color(redo_col).size(12.0))
+                .min_size(Vec2::new(half_w, 26.0)),
+        ).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+            st.redo();
+            st.toast_queue.push(Toast::info("Redone"));
+        }
+    });
     ui.add_space(6.0);
 
     // ---- Chaos meter ----
@@ -2963,16 +3000,31 @@ fn draw_advanced_panel(
         if st.interp_enabled {
             let systems_list = [
                 "lorenz",
+                "fractional_lorenz",
                 "rossler",
                 "double_pendulum",
+                "geodesic_torus",
+                "kuramoto",
+                "three_body",
                 "duffing",
                 "van_der_pol",
                 "halvorsen",
                 "aizawa",
                 "chua",
+                "hindmarsh_rose",
+                "coupled_map_lattice",
+                "mackey_glass",
                 "nose_hoover",
                 "sprott_b",
                 "henon_map",
+                "lorenz96",
+                "logistic_map",
+                "standard_map",
+                "stochastic_lorenz",
+                "delayed_map",
+                "oregonator",
+                "mathieu",
+                "kuramoto_driven",
             ];
             let cur_interp = st.interp_system.clone();
             ComboBox::from_label("Morph to")
@@ -3101,6 +3153,58 @@ fn draw_advanced_panel(
                     ui.add(Slider::new(&mut st.config.lorenz96.f, 4.0..=16.0).text("F forcing"))
                         .on_hover_text("Atmospheric forcing. F<5: periodic, F≈8: chaos (weather-like), F>12: turbulent high-dimensional chaos with many positive Lyapunov exponents.");
                 }
+                "logistic_map" => {
+                    ui.add(Slider::new(&mut st.config.logistic_map.r, 2.5..=4.0).text("r"))
+                        .on_hover_text("Bifurcation parameter. Period-doubling cascade begins at r≈3.0; fully chaotic above r≈3.57. At r=4.0 the map is ergodic on [0,1].");
+                }
+                "standard_map" => {
+                    ui.add(Slider::new(&mut st.config.standard_map.k, 0.0..=4.0).text("k"))
+                        .on_hover_text("Stochasticity parameter. k<0.97: islands of stability; k≈0.97: KAM transition; k>1: globally chaotic. Classic value k=1.5.");
+                }
+                "stochastic_lorenz" => {
+                    ui.add(Slider::new(&mut st.config.stochastic_lorenz.sigma, 1.0..=20.0).text("sigma"))
+                        .on_hover_text("Prandtl number (same as Lorenz σ).");
+                    ui.add(Slider::new(&mut st.config.stochastic_lorenz.rho, 10.0..=50.0).text("rho"))
+                        .on_hover_text("Rayleigh number (same as Lorenz ρ). Chaos onset ≈ 24.74.");
+                    ui.add(Slider::new(&mut st.config.stochastic_lorenz.beta, 0.5..=5.0).text("beta"));
+                    ui.add(Slider::new(&mut st.config.stochastic_lorenz.noise_strength, 0.0..=2.0).text("Noise strength"))
+                        .on_hover_text("Standard deviation of Wiener process noise injected each step. 0 = deterministic Lorenz; higher values smear the attractor.");
+                }
+                "delayed_map" => {
+                    ui.add(Slider::new(&mut st.config.delayed_map.r, 2.5..=4.0).text("r"))
+                        .on_hover_text("Logistic growth parameter. Chaos above ~3.57.");
+                    let mut tau_f = st.config.delayed_map.tau as f64;
+                    if ui.add(Slider::new(&mut tau_f, 1.0..=20.0).step_by(1.0).text("τ (delay steps)"))
+                        .on_hover_text("Delay in map iterations. Longer delays increase attractor dimensionality.")
+                        .changed() {
+                        st.config.delayed_map.tau = tau_f as usize;
+                    }
+                }
+                "oregonator" => {
+                    ui.add(Slider::new(&mut st.config.oregonator.f, 0.3..=3.0).text("f"))
+                        .on_hover_text("Stoichiometric factor controlling the Belousov-Zhabotinsky oscillation frequency. Near f=1 gives robust limit cycles.");
+                }
+                "mathieu" => {
+                    ui.add(Slider::new(&mut st.config.mathieu.a, -1.0..=2.0).text("a"))
+                        .on_hover_text("Linear frequency-squared parameter. Stability boundaries in (a,q) space follow the Mathieu stability chart.");
+                    ui.add(Slider::new(&mut st.config.mathieu.q, 0.0..=1.5).text("q"))
+                        .on_hover_text("Modulation amplitude. At (a=0,q≈0.9) the system is at the primary instability tongue edge.");
+                }
+                "kuramoto_driven" => {
+                    ui.add(Slider::new(&mut st.config.kuramoto_driven.coupling, 0.0..=5.0).text("Coupling K"))
+                        .on_hover_text("Mutual coupling between oscillators. Above Kc≈1 spontaneous synchronization occurs.");
+                    ui.add(Slider::new(&mut st.config.kuramoto_driven.drive_amp, 0.0..=2.0).text("Drive amplitude"))
+                        .on_hover_text("Amplitude of external periodic forcing applied to the first oscillator.");
+                    ui.add(Slider::new(&mut st.config.kuramoto_driven.drive_freq, 0.1..=5.0).text("Drive frequency"))
+                        .on_hover_text("Frequency of external periodic forcing. Near the natural frequency → resonance and entrainment.");
+                }
+                "arnold_cat" => {
+                    ui.label(RichText::new("Arnold's Cat Map has no tunable parameters.")
+                        .color(GRAY_HINT).italics().size(11.0));
+                    ui.label(RichText::new("x'=(2x+y) mod 1\ny'=(x+y) mod 1")
+                        .color(CYAN).size(11.0)
+                        .font(egui::FontId::monospace(11.0)));
+                }
                 _ => {}
             }
         });
@@ -3135,7 +3239,80 @@ fn draw_advanced_panel(
                     st.config.kuramoto.coupling =
                         vary(st.config.kuramoto.coupling, &mut seed).clamp(0.0, 5.0);
                 }
+                "duffing" => {
+                    st.config.duffing.delta = vary(st.config.duffing.delta, &mut seed).clamp(0.1, 1.0);
+                    st.config.duffing.gamma = vary(st.config.duffing.gamma, &mut seed).clamp(0.0, 1.5);
+                    st.config.duffing.omega = vary(st.config.duffing.omega, &mut seed).clamp(0.5, 3.0);
+                }
+                "van_der_pol" => {
+                    st.config.van_der_pol.mu = vary(st.config.van_der_pol.mu, &mut seed).clamp(0.1, 5.0);
+                }
+                "halvorsen" => {
+                    st.config.halvorsen.a = vary(st.config.halvorsen.a, &mut seed).clamp(1.0, 3.0);
+                }
+                "aizawa" => {
+                    st.config.aizawa.a = vary(st.config.aizawa.a, &mut seed).clamp(0.5, 1.5);
+                    st.config.aizawa.c = vary(st.config.aizawa.c, &mut seed).clamp(0.3, 1.0);
+                    st.config.aizawa.d = vary(st.config.aizawa.d, &mut seed).clamp(2.0, 5.0);
+                }
+                "chua" => {
+                    st.config.chua.alpha = vary(st.config.chua.alpha, &mut seed).clamp(10.0, 20.0);
+                    st.config.chua.beta = vary(st.config.chua.beta, &mut seed).clamp(20.0, 35.0);
+                }
+                "mackey_glass" => {
+                    st.config.mackey_glass.tau = vary(st.config.mackey_glass.tau, &mut seed).clamp(5.0, 30.0);
+                    st.config.mackey_glass.beta = vary(st.config.mackey_glass.beta, &mut seed).clamp(0.1, 0.5);
+                }
+                "logistic_map" => {
+                    st.config.logistic_map.r = vary(st.config.logistic_map.r, &mut seed).clamp(3.0, 4.0);
+                }
+                "standard_map" => {
+                    st.config.standard_map.k = vary(st.config.standard_map.k, &mut seed).clamp(0.5, 4.0);
+                }
+                "stochastic_lorenz" => {
+                    st.config.stochastic_lorenz.sigma = vary(st.config.stochastic_lorenz.sigma, &mut seed).clamp(1.0, 20.0);
+                    st.config.stochastic_lorenz.rho = vary(st.config.stochastic_lorenz.rho, &mut seed).clamp(10.0, 50.0);
+                    st.config.stochastic_lorenz.noise_strength = vary(st.config.stochastic_lorenz.noise_strength, &mut seed).clamp(0.0, 2.0);
+                }
+                "kuramoto_driven" => {
+                    st.config.kuramoto_driven.coupling = vary(st.config.kuramoto_driven.coupling, &mut seed).clamp(0.0, 5.0);
+                    st.config.kuramoto_driven.drive_amp = vary(st.config.kuramoto_driven.drive_amp, &mut seed).clamp(0.0, 2.0);
+                    st.config.kuramoto_driven.drive_freq = vary(st.config.kuramoto_driven.drive_freq, &mut seed).clamp(0.1, 5.0);
+                }
                 _ => {}
+            }
+            st.system_changed = true;
+        }
+    });
+
+    // ---- CUSTOM INITIAL CONDITIONS ----
+    collapsing_section(ui, "CUSTOM INITIAL CONDITIONS", false, |ui| {
+        ui.label(RichText::new("Set the state vector at which the system resets.").size(11.0).color(GRAY_HINT));
+        ui.add_space(4.0);
+        // Determine dimension from current system state (up to 6)
+        let dim = st.current_state.len().min(6).max(1);
+        // Ensure custom_ic is long enough
+        while st.custom_ic.len() < dim {
+            st.custom_ic.push(0.0);
+        }
+        let var_labels = ["x₀", "x₁", "x₂", "x₃", "x₄", "x₅"];
+        for d in 0..dim {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(var_labels[d]).color(CYAN).size(11.0));
+                ui.add(egui::DragValue::new(&mut st.custom_ic[d]).speed(0.01));
+            });
+        }
+        ui.add_space(4.0);
+        if ui.add(
+            Button::new(RichText::new("Set IC").color(Color32::WHITE).size(12.0))
+                .fill(Color32::from_rgb(30, 80, 140))
+                .min_size(Vec2::new(ui.available_width(), 26.0)),
+        ).on_hover_text("Reset the system to the custom initial conditions above.").clicked() {
+            // Copy custom_ic into current_state to trigger a reset in the sim thread
+            for (i, v) in st.custom_ic.iter().enumerate() {
+                if i < st.current_state.len() {
+                    st.current_state[i] = *v;
+                }
             }
             st.system_changed = true;
         }
@@ -7156,6 +7333,21 @@ fn draw_mixer_tab(
         ui.label(egui::RichText::new("VU Meters").color(mc_cyan).strong());
         ui.add_space(4.0);
         let peaks = { *state.lock().vu_meter.lock() };
+        // Update peak hold
+        {
+            let mut st = state.lock();
+            let dt = 1.0 / 30.0_f32; // ~30fps UI rate
+            st.vu_peak_decay_timer += dt;
+            for i in 0..4 {
+                if peaks[i] > st.vu_peak_hold[i] {
+                    st.vu_peak_hold[i] = peaks[i];
+                    st.vu_peak_decay_timer = 0.0;
+                } else if st.vu_peak_decay_timer > 1.0 {
+                    st.vu_peak_hold[i] *= 0.95;
+                }
+            }
+        }
+        let peak_hold = { state.lock().vu_peak_hold };
         ui.horizontal(|ui| {
             for (i, &peak) in peaks.iter().enumerate() {
                 let (label, col) = match i {
@@ -7185,6 +7377,12 @@ fn draw_mixer_tab(
                         col
                     };
                     painter.rect_filled(fill_rect, 1.0, bar_col);
+                    // Peak hold line
+                    let hold_y = r.max.y - (peak_hold[i].clamp(0.0, 1.0) * bar_height);
+                    painter.line_segment(
+                        [egui::Pos2::new(r.min.x, hold_y), egui::Pos2::new(r.max.x, hold_y)],
+                        egui::Stroke::new(2.0, egui::Color32::WHITE),
+                    );
                     ui.label(
                         egui::RichText::new(format!("{:.0}%", peak * 100.0))
                             .size(9.0)

@@ -12,6 +12,12 @@ pub(crate) fn draw_arrangement_timeline(ui: &mut egui::Ui, scenes: &[Scene], ela
         return;
     }
 
+    // Format seconds as M:SS
+    let fmt_time = |secs: f32| -> String {
+        let s = secs as u32;
+        format!("{}:{:02}", s / 60, s % 60)
+    };
+
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::hover());
     let painter = ui.painter();
 
@@ -73,10 +79,18 @@ pub(crate) fn draw_arrangement_timeline(ui: &mut egui::Ui, scenes: &[Scene], ela
         let px = rect.left() + rect.width() * (elapsed / total).min(1.0);
         painter.line_segment(
             [Pos2::new(px, rect.top()), Pos2::new(px, rect.bottom())],
-            Stroke::new(2.0, Color32::from_rgb(255, 220, 0)),
+            Stroke::new(2.0, Color32::from_rgb(0, 240, 255)),
         );
     }
 
     // Border
     painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(50, 50, 80)));
+
+    // Elapsed / total time label below timeline
+    let time_str = format!("{} / {}", fmt_time(elapsed.min(total)), fmt_time(total));
+    ui.label(
+        egui::RichText::new(time_str)
+            .size(10.0)
+            .color(Color32::from_rgb(140, 160, 200)),
+    );
 }

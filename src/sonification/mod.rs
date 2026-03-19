@@ -257,12 +257,13 @@ pub enum Scale {
     Chromatic,
     JustIntonation,
     Microtonal,
-    Edo19,     // 19 equal divisions of the octave
-    Edo31,     // 31 equal divisions of the octave
-    Edo24,     // 24-EDO: quarter-tones
-    WholeTone, // 6-note whole-tone scale
-    Phrygian,  // E Phrygian: 0, 1, 3, 5, 7, 8, 10
-    Lydian,    // F Lydian: 0, 2, 4, 6, 7, 9, 11
+    Edo19,          // 19 equal divisions of the octave
+    Edo31,          // 31 equal divisions of the octave
+    Edo24,          // 24-EDO: quarter-tones
+    WholeTone,      // 6-note whole-tone scale
+    Phrygian,       // E Phrygian: 0, 1, 3, 5, 7, 8, 10
+    Lydian,         // F Lydian: 0, 2, 4, 6, 7, 9, 11
+    HarmonicSeries, // Integer multiples of 110 Hz (A2)
 }
 
 /// Semitone intervals for non-computed scales, relative to root.
@@ -277,8 +278,8 @@ fn scale_intervals(scale: Scale) -> &'static [f32] {
         Scale::WholeTone => &[0.0, 2.0, 4.0, 6.0, 8.0, 10.0],
         Scale::Phrygian => &[0.0, 1.0, 3.0, 5.0, 7.0, 8.0, 10.0],
         Scale::Lydian => &[0.0, 2.0, 4.0, 6.0, 7.0, 9.0, 11.0],
-        // EDO scales have computed intervals -- handled in scale_intervals_owned
-        Scale::Edo19 | Scale::Edo31 | Scale::Edo24 => &[0.0],
+        // EDO and HarmonicSeries scales have computed intervals -- handled in scale_intervals_owned
+        Scale::Edo19 | Scale::Edo31 | Scale::Edo24 | Scale::HarmonicSeries => &[0.0],
     }
 }
 
@@ -293,8 +294,30 @@ fn scale_intervals_owned(scale: Scale) -> Vec<f32> {
     }
 }
 
+/// Harmonic series frequencies: integer multiples of A2 (110 Hz).
+const HARMONIC_SERIES: &[f32] = &[
+    110.0, 220.0, 330.0, 440.0, 550.0, 660.0, 770.0, 880.0, 990.0, 1100.0, 1320.0, 1540.0,
+];
+
 /// Quantize a continuous value [0..1] to a frequency on the given scale.
 pub fn quantize_to_scale(t: f32, base_hz: f32, octave_range: f32, scale: Scale) -> f32 {
+    // HarmonicSeries: pick the nearest harmonic to the desired frequency
+    if scale == Scale::HarmonicSeries {
+        let t = t.clamp(0.0, 1.0);
+        // Map t to a target frequency across the octave_range
+        let target_hz = base_hz * 2.0f32.powf(t * octave_range);
+        return HARMONIC_SERIES
+            .iter()
+            .copied()
+            .min_by(|a, b| {
+                (a - target_hz)
+                    .abs()
+                    .partial_cmp(&(b - target_hz).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(110.0);
+    }
+
     let intervals = scale_intervals_owned(scale);
     let n = intervals.len() as f32;
     // Map t to a position in the scale across octave_range octaves
