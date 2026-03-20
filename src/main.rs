@@ -43,8 +43,8 @@ use crate::synth::OscShape;
 use crate::systems::{
     ArnoldCat, Bouali, BurkeShaw, Chen, CustomOde, Dadras, DelayedMap, FractionalLorenz,
     KuramotoDriven, LogisticMap, Lorenz84, Mathieu, NewtonLeipnik, Oregonator,
-    RabinovichFabrikant, Rikitake, Rucklidge, ShimizuMorioka, SprottC, SprottG, SprottH,
-    SprottL, StandardMap, StochasticLorenz, Thomas, *,
+    RabinovichFabrikant, Rikitake, Rucklidge, ShimizuMorioka, SprottC, SprottD, SprottE,
+    SprottF, SprottG, SprottH, SprottL, StandardMap, StochasticLorenz, Thomas, *,
 };
 use crate::ui::{draw_ui, AppState, SharedState};
 use midir;
@@ -2887,6 +2887,9 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
             s.gamma = config.rabinovich_fabrikant.gamma;
             Box::new(s)
         }
+        "sprott_d" => Box::new(SprottD::new()),
+        "sprott_e" => Box::new(SprottE::new()),
+        "sprott_f" => Box::new(SprottF::new()),
         "sprott_g" => Box::new(SprottG::new()),
         "sprott_h" => Box::new(SprottH::new()),
         "sprott_l" => Box::new(SprottL::new()),

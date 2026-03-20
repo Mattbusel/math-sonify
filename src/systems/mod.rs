@@ -231,11 +231,29 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Shimizu-Morioka",
         description: "Two-scroll oscillator with z-coupling, topologically similar to Lorenz",
     },
+    SystemEntry {
+        name: "sprott_d",
+        display_name: "Sprott D",
+        description: "Strongly dissipative attractor: y² drives chaos, −2y damps it tightly",
+    },
+    SystemEntry {
+        name: "sprott_e",
+        display_name: "Sprott E",
+        description: "Parameter-free attractor with yz product and x² feedback",
+    },
+    SystemEntry {
+        name: "sprott_f",
+        display_name: "Sprott F",
+        description: "Parameter-free attractor with x² nonlinearity and 0.5·y damping",
+    },
 ];
 
 pub mod bouali;
 pub mod newton_leipnik;
 pub mod shimizu_morioka;
+pub mod sprott_d;
+pub mod sprott_e;
+pub mod sprott_f;
 pub mod lorenz84;
 pub mod rabinovich_fabrikant;
 pub mod sprott_g;
@@ -280,6 +298,9 @@ pub mod van_der_pol;
 pub use bouali::Bouali;
 pub use newton_leipnik::NewtonLeipnik;
 pub use shimizu_morioka::ShimizuMorioka;
+pub use sprott_d::SprottD;
+pub use sprott_e::SprottE;
+pub use sprott_f::SprottF;
 pub use burke_shaw::BurkeShaw;
 pub use chen::Chen;
 pub use dadras::Dadras;

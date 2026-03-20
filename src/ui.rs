@@ -955,6 +955,9 @@ fn system_display_name(s: &str) -> &'static str {
         "bouali" => "Bouali Attractor",
         "newton_leipnik" => "Newton-Leipnik",
         "shimizu_morioka" => "Shimizu-Morioka",
+        "sprott_d" => "Sprott D",
+        "sprott_e" => "Sprott E",
+        "sprott_f" => "Sprott F",
         _ => "Unknown System",
     }
 }
@@ -1005,6 +1008,9 @@ fn system_tagline(s: &str) -> &'static str {
         "bouali" => "Double-scroll spiral with x² feedback and z-coupling",
         "newton_leipnik" => "Two coupled rigid-body oscillators spontaneously generating chaos",
         "shimizu_morioka" => "A two-scroll oscillator — x²-driven z couples back to destabilize y",
+        "sprott_d" => "Tightly bounded chaos: y² drives instability while −2y damps strongly",
+        "sprott_e" => "Minimal chaos from a yz product — equilibrium at (¼, 1/16, 0)",
+        "sprott_f" => "Slow-spiral chaos: x² drives z while y damps at half speed",
         _ => "A dynamical system evolving through state space",
     }
 }
@@ -1058,6 +1064,9 @@ fn system_internal_name(display: &str) -> &'static str {
         "Bouali Attractor" => "bouali",
         "Newton-Leipnik" => "newton_leipnik",
         "Shimizu-Morioka" => "shimizu_morioka",
+        "Sprott D" => "sprott_d",
+        "Sprott E" => "sprott_e",
+        "Sprott F" => "sprott_f",
         _ => "lorenz",
     }
 }
@@ -3237,6 +3246,9 @@ fn draw_advanced_panel(
                 "bouali",
                 "newton_leipnik",
                 "shimizu_morioka",
+                "sprott_d",
+                "sprott_e",
+                "sprott_f",
             ];
             let cur_interp = st.interp_system.clone();
             ComboBox::from_label("Morph to")
@@ -8513,6 +8525,9 @@ fn equation_text(system: &str) -> &'static str {
         "bouali" => "x' = x(4−y)+az\ny' = −y(1−x²)\nz' = −x(1−s)",
         "newton_leipnik" => "x' = −ax+y+10yz\ny' = −x−0.4y+5xz\nz' = bz−5xy",
         "shimizu_morioka" => "x' = y\ny' = (1−z)x−ay\nz' = x²−bz",
+        "sprott_d" => "x' = −0.2y\ny' = x+z\nz' = x+y²−1.1z",
+        "sprott_e" => "x' = yz\ny' = x²−y\nz' = 1−4x",
+        "sprott_f" => "x' = y+z\ny' = −x+0.5y\nz' = x²−z",
         _ => "",
     }
 }
@@ -8618,6 +8633,21 @@ fn equation_lines(system: &str) -> Vec<&'static str> {
             "x' = y",
             "y' = (1 - z)*x - a*y",
             "z' = x^2 - b*z",
+        ],
+        "sprott_d" => vec![
+            "x' = -y",
+            "y' = x + z",
+            "z' = x*z + 3*y^2",
+        ],
+        "sprott_e" => vec![
+            "x' = y*z",
+            "y' = x^2 - y",
+            "z' = 1 - 4*x",
+        ],
+        "sprott_f" => vec![
+            "x' = y + z",
+            "y' = -x + 0.5*y",
+            "z' = x^2 - z",
         ],
         "logistic_map" => vec!["x(n+1) = r * x(n) * (1 - x(n))"],
         "standard_map" => vec![
