@@ -278,6 +278,10 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             a: lf64(a.newton_leipnik.a, b.newton_leipnik.a),
             b: lf64(a.newton_leipnik.b, b.newton_leipnik.b),
         },
+        shimizu_morioka: crate::config::ShimizuMoriokaConfig {
+            a: lf64(a.shimizu_morioka.a, b.shimizu_morioka.a),
+            b: lf64(a.shimizu_morioka.b, b.shimizu_morioka.b),
+        },
         viz: a.viz.clone(), // don't morph viz settings
         ..a.clone()
     }

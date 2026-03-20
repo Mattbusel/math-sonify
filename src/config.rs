@@ -49,6 +49,7 @@ pub struct Config {
     pub fractional_lorenz: FractionalLorenzConfig,
     pub bouali: BoualiConfig,
     pub newton_leipnik: NewtonLeipnikConfig,
+    pub shimizu_morioka: ShimizuMoriokaConfig,
 }
 
 impl Default for Config {
@@ -92,6 +93,7 @@ impl Default for Config {
             fractional_lorenz: FractionalLorenzConfig::default(),
             bouali: BoualiConfig::default(),
             newton_leipnik: NewtonLeipnikConfig::default(),
+            shimizu_morioka: ShimizuMoriokaConfig::default(),
         }
     }
 }
@@ -703,6 +705,20 @@ impl Default for NewtonLeipnikConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ShimizuMoriokaConfig {
+    /// Damping coefficient (a). Default 0.75 gives chaos.
+    pub a: f64,
+    /// Linear decay of z (b). Default 0.45 gives chaos.
+    pub b: f64,
+}
+impl Default for ShimizuMoriokaConfig {
+    fn default() -> Self {
+        Self { a: 0.75, b: 0.45 }
+    }
+}
+
 impl Config {
     /// Clamp all parameters to physically sensible bounds.
     /// Call this after deserializing from user-supplied config files.
@@ -979,6 +995,9 @@ impl Config {
         // Newton-Leipnik
         Self::clamp_log_f64(&mut self.newton_leipnik.a, 0.1, 2.0, "newton_leipnik.a");
         Self::clamp_log_f64(&mut self.newton_leipnik.b, 0.01, 1.0, "newton_leipnik.b");
+        // Shimizu-Morioka
+        Self::clamp_log_f64(&mut self.shimizu_morioka.a, 0.1, 2.0, "shimizu_morioka.a");
+        Self::clamp_log_f64(&mut self.shimizu_morioka.b, 0.1, 1.5, "shimizu_morioka.b");
     }
 
     /// Clamp a `f64` field to `[min, max]`, emitting a tracing warning if clamped.

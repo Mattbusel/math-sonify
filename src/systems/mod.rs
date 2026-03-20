@@ -226,10 +226,16 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Newton-Leipnik",
         description: "Double-scroll chaos from two coupled rigid-body oscillators",
     },
+    SystemEntry {
+        name: "shimizu_morioka",
+        display_name: "Shimizu-Morioka",
+        description: "Two-scroll oscillator with z-coupling, topologically similar to Lorenz",
+    },
 ];
 
 pub mod bouali;
 pub mod newton_leipnik;
+pub mod shimizu_morioka;
 pub mod lorenz84;
 pub mod rabinovich_fabrikant;
 pub mod sprott_g;
@@ -273,6 +279,7 @@ pub mod van_der_pol;
 
 pub use bouali::Bouali;
 pub use newton_leipnik::NewtonLeipnik;
+pub use shimizu_morioka::ShimizuMorioka;
 pub use burke_shaw::BurkeShaw;
 pub use chen::Chen;
 pub use dadras::Dadras;

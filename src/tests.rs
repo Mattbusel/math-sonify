@@ -2738,4 +2738,35 @@ mod ode_property_tests {
         let r = lerp_config(&a, &b, 0.5);
         assert!((r.oregonator.f - 1.0).abs() < 1e-9, "oregonator.f not interpolated: {}", r.oregonator.f);
     }
+
+    #[test]
+    fn lerp_config_interpolates_lorenz() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.lorenz.sigma = 6.0;
+        b.lorenz.sigma = 14.0;
+        a.lorenz.rho = 20.0;
+        b.lorenz.rho = 36.0;
+        a.lorenz.beta = 2.0;
+        b.lorenz.beta = 3.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.lorenz.sigma - 10.0).abs() < 1e-9, "sigma not interpolated: {}", r.lorenz.sigma);
+        assert!((r.lorenz.rho - 28.0).abs() < 1e-9, "rho not interpolated: {}", r.lorenz.rho);
+        assert!((r.lorenz.beta - 2.5).abs() < 1e-9, "beta not interpolated: {}", r.lorenz.beta);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_shimizu_morioka() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.shimizu_morioka.a = 0.5;
+        b.shimizu_morioka.a = 1.5;
+        a.shimizu_morioka.b = 0.3;
+        b.shimizu_morioka.b = 0.7;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.shimizu_morioka.a - 1.0).abs() < 1e-9, "shimizu_morioka.a not interpolated: {}", r.shimizu_morioka.a);
+        assert!((r.shimizu_morioka.b - 0.5).abs() < 1e-9, "shimizu_morioka.b not interpolated: {}", r.shimizu_morioka.b);
+    }
 }

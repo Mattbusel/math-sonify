@@ -954,6 +954,7 @@ fn system_display_name(s: &str) -> &'static str {
         "rikitake" => "Rikitake Dynamo",
         "bouali" => "Bouali Attractor",
         "newton_leipnik" => "Newton-Leipnik",
+        "shimizu_morioka" => "Shimizu-Morioka",
         _ => "Unknown System",
     }
 }
@@ -1003,6 +1004,7 @@ fn system_tagline(s: &str) -> &'static str {
         "rikitake" => "Geomagnetic polarity reversals modeled as coupled dynamos",
         "bouali" => "Double-scroll spiral with x² feedback and z-coupling",
         "newton_leipnik" => "Two coupled rigid-body oscillators spontaneously generating chaos",
+        "shimizu_morioka" => "A two-scroll oscillator — x²-driven z couples back to destabilize y",
         _ => "A dynamical system evolving through state space",
     }
 }
@@ -1055,6 +1057,7 @@ fn system_internal_name(display: &str) -> &'static str {
         "Rikitake Dynamo" => "rikitake",
         "Bouali Attractor" => "bouali",
         "Newton-Leipnik" => "newton_leipnik",
+        "Shimizu-Morioka" => "shimizu_morioka",
         _ => "lorenz",
     }
 }
@@ -3233,6 +3236,7 @@ fn draw_advanced_panel(
                 "rikitake",
                 "bouali",
                 "newton_leipnik",
+                "shimizu_morioka",
             ];
             let cur_interp = st.interp_system.clone();
             ComboBox::from_label("Morph to")
@@ -3487,6 +3491,12 @@ fn draw_advanced_panel(
                     ui.add(Slider::new(&mut st.config.newton_leipnik.b, 0.05..=0.4).text("b"))
                         .on_hover_text("z growth rate. Default 0.175.");
                 }
+                "shimizu_morioka" => {
+                    ui.add(Slider::new(&mut st.config.shimizu_morioka.a, 0.1..=2.0).text("a"))
+                        .on_hover_text("Damping coefficient. Default 0.75 gives chaos.");
+                    ui.add(Slider::new(&mut st.config.shimizu_morioka.b, 0.1..=1.5).text("b"))
+                        .on_hover_text("z decay rate. Default 0.45 gives chaos.");
+                }
                 _ => {}
             }
         });
@@ -3605,6 +3615,10 @@ fn draw_advanced_panel(
                 "newton_leipnik" => {
                     st.config.newton_leipnik.a = vary(st.config.newton_leipnik.a, &mut seed).clamp(0.1, 1.0);
                     st.config.newton_leipnik.b = vary(st.config.newton_leipnik.b, &mut seed).clamp(0.05, 0.4);
+                }
+                "shimizu_morioka" => {
+                    st.config.shimizu_morioka.a = vary(st.config.shimizu_morioka.a, &mut seed).clamp(0.1, 2.0);
+                    st.config.shimizu_morioka.b = vary(st.config.shimizu_morioka.b, &mut seed).clamp(0.1, 1.5);
                 }
                 _ => {}
             }
@@ -8498,6 +8512,7 @@ fn equation_text(system: &str) -> &'static str {
         "rikitake" => "x' = −μx+yz\ny' = −μy+x(z−a)\nz' = 1−xy",
         "bouali" => "x' = x(4−y)+az\ny' = −y(1−x²)\nz' = −x(1−s)",
         "newton_leipnik" => "x' = −ax+y+10yz\ny' = −x−0.4y+5xz\nz' = bz−5xy",
+        "shimizu_morioka" => "x' = y\ny' = (1−z)x−ay\nz' = x²−bz",
         _ => "",
     }
 }
@@ -8598,6 +8613,11 @@ fn equation_lines(system: &str) -> Vec<&'static str> {
             "x' = -a*x + y + 10*y*z",
             "y' = -x - 0.4*y + 5*x*z",
             "z' = b*z - 5*x*y",
+        ],
+        "shimizu_morioka" => vec![
+            "x' = y",
+            "y' = (1 - z)*x - a*y",
+            "z' = x^2 - b*z",
         ],
         "logistic_map" => vec!["x(n+1) = r * x(n) * (1 - x(n))"],
         "standard_map" => vec![

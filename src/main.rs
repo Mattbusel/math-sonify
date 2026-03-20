@@ -43,8 +43,8 @@ use crate::synth::OscShape;
 use crate::systems::{
     ArnoldCat, Bouali, BurkeShaw, Chen, CustomOde, Dadras, DelayedMap, FractionalLorenz,
     KuramotoDriven, LogisticMap, Lorenz84, Mathieu, NewtonLeipnik, Oregonator,
-    RabinovichFabrikant, Rikitake, Rucklidge, SprottC, SprottG, SprottH, SprottL,
-    StandardMap, StochasticLorenz, Thomas, *,
+    RabinovichFabrikant, Rikitake, Rucklidge, ShimizuMorioka, SprottC, SprottG, SprottH,
+    SprottL, StandardMap, StochasticLorenz, Thomas, *,
 };
 use crate::ui::{draw_ui, AppState, SharedState};
 use midir;
@@ -2906,6 +2906,12 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
             let mut s = NewtonLeipnik::new();
             s.a = config.newton_leipnik.a;
             s.b = config.newton_leipnik.b;
+            Box::new(s)
+        }
+        "shimizu_morioka" => {
+            let mut s = ShimizuMorioka::new();
+            s.a = config.shimizu_morioka.a;
+            s.b = config.shimizu_morioka.b;
             Box::new(s)
         }
         _ => Box::new(Lorenz::new(
