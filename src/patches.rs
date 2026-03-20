@@ -265,6 +265,24 @@ pub const PRESETS: &[Preset] = &[
         color: Color32::from_rgb(60, 220, 200),
         category: "Rhythmic",
     },
+    Preset {
+        name: "Substorm",
+        description: "WINDMI ionospheric substorm model: exponential feedback in a jerk system evokes sudden electromagnetic bursts.",
+        color: Color32::from_rgb(80, 130, 255),
+        category: "Atmospheric",
+    },
+    Preset {
+        name: "Invisible Hand",
+        description: "Finance attractor: chaotic interest rate, investment, and price-index dynamics in a minimal 3D macroeconomic model.",
+        color: Color32::from_rgb(200, 180, 80),
+        category: "Experimental",
+    },
+    Preset {
+        name: "Hyperchaos Engine",
+        description: "Chen-Li 4D hyperchaotic system: two positive Lyapunov exponents produce maximally unpredictable trajectories.",
+        color: Color32::from_rgb(255, 40, 160),
+        category: "Experimental",
+    },
 ];
 
 pub fn load_preset(name: &str) -> Config {
@@ -1734,6 +1752,103 @@ pub fn load_preset(name: &str) -> Config {
                 ..Default::default()
             },
             liu: LiuConfig { a: 1.0, b: 2.5, c: 5.0, e: 1.0, k: 4.0, m: 4.0 },
+            ..Default::default()
+        },
+
+        "Substorm" => Config {
+            system: SystemConfig {
+                name: "windmi".into(),
+                dt: 0.01,
+                speed: 0.8,
+            },
+            sonification: SonificationConfig {
+                mode: "spectral".into(),
+                scale: "whole_tone".into(),
+                base_frequency: 110.0,
+                octave_range: 3.5,
+                chord_mode: "open_fifth".into(),
+                transpose_semitones: 0.0,
+                voice_levels: [1.0, 0.8, 0.5, 0.2],
+                portamento_ms: 60.0,
+                voice_shapes: ["sine".into(), "sine".into(), "triangle".into(), "sine".into()],
+            },
+            audio: AudioConfig {
+                reverb_wet: 0.65,
+                delay_ms: 320.0,
+                delay_feedback: 0.5,
+                master_volume: 0.72,
+                chorus_mix: 0.2,
+                chorus_rate: 0.3,
+                chorus_depth: 0.4,
+                waveshaper_drive: 1.5,
+                waveshaper_mix: 0.1,
+                ..Default::default()
+            },
+            windmi: WindmiConfig { a: 0.9, b: 2.5 },
+            ..Default::default()
+        },
+        "Invisible Hand" => Config {
+            system: SystemConfig {
+                name: "finance".into(),
+                dt: 0.002,
+                speed: 1.0,
+            },
+            sonification: SonificationConfig {
+                mode: "orbital".into(),
+                scale: "pentatonic_minor".into(),
+                base_frequency: 164.81,
+                octave_range: 2.5,
+                chord_mode: "minor".into(),
+                transpose_semitones: 0.0,
+                voice_levels: [1.0, 0.7, 0.45, 0.2],
+                portamento_ms: 80.0,
+                voice_shapes: ["triangle".into(), "sine".into(), "triangle".into(), "sine".into()],
+            },
+            audio: AudioConfig {
+                reverb_wet: 0.5,
+                delay_ms: 220.0,
+                delay_feedback: 0.35,
+                master_volume: 0.7,
+                chorus_mix: 0.25,
+                chorus_rate: 0.5,
+                chorus_depth: 0.3,
+                waveshaper_drive: 2.0,
+                waveshaper_mix: 0.15,
+                ..Default::default()
+            },
+            finance: FinanceConfig { a: 3.0, b: 0.1, c: 1.0 },
+            ..Default::default()
+        },
+        "Hyperchaos Engine" => Config {
+            system: SystemConfig {
+                name: "hyperchaos".into(),
+                dt: 0.0005,
+                speed: 1.5,
+            },
+            sonification: SonificationConfig {
+                mode: "fm".into(),
+                scale: "chromatic".into(),
+                base_frequency: 55.0,
+                octave_range: 4.0,
+                chord_mode: "cluster".into(),
+                transpose_semitones: 0.0,
+                voice_levels: [1.0, 0.85, 0.65, 0.45],
+                portamento_ms: 20.0,
+                voice_shapes: ["saw".into(), "saw".into(), "square".into(), "saw".into()],
+            },
+            audio: AudioConfig {
+                reverb_wet: 0.4,
+                delay_ms: 90.0,
+                delay_feedback: 0.6,
+                master_volume: 0.68,
+                chorus_mix: 0.3,
+                chorus_rate: 1.2,
+                chorus_depth: 0.5,
+                waveshaper_drive: 4.0,
+                waveshaper_mix: 0.4,
+                ..Default::default()
+            },
+            hyperchaos: HyperchaosConfig { a: 35.0, b: 3.0, c: 28.0, d: -7.0 },
             ..Default::default()
         },
 

@@ -42,9 +42,9 @@ use crate::sonification::{
 use crate::synth::OscShape;
 use crate::systems::{
     ArnoldCat, Bouali, BurkeShaw, Chen, CustomOde, Dadras, DelayedMap, FractionalLorenz,
-    Finance, GenesioTesi, KuramotoDriven, Liu, LogisticMap, Lorenz84, Mathieu, NewtonLeipnik, Oregonator,
+    Finance, GenesioTesi, Hyperchaos, KuramotoDriven, Liu, LogisticMap, Lorenz84, Mathieu, NewtonLeipnik, Oregonator,
     RabinovichFabrikant, Rikitake, Rucklidge, ShimizuMorioka, SprottC, SprottD, SprottE,
-    SprottF, SprottG, SprottH, SprottL, StandardMap, StochasticLorenz, Thomas, Windmi, *,
+    SprottF, SprottG, SprottH, SprottK, SprottL, StandardMap, StochasticLorenz, Thomas, Windmi, *,
 };
 use crate::ui::{draw_ui, AppState, SharedState};
 use midir;
@@ -2934,8 +2934,28 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
             s.m = config.liu.m;
             Box::new(s)
         }
-        "windmi" => Box::new(Windmi::new()),
-        "finance" => Box::new(Finance::new()),
+        "windmi" => {
+            let mut s = Windmi::new();
+            s.a = config.windmi.a;
+            s.b = config.windmi.b;
+            Box::new(s)
+        }
+        "finance" => {
+            let mut s = Finance::new();
+            s.a = config.finance.a;
+            s.b = config.finance.b;
+            s.c = config.finance.c;
+            Box::new(s)
+        }
+        "hyperchaos" => {
+            let mut s = Hyperchaos::new();
+            s.a = config.hyperchaos.a;
+            s.b = config.hyperchaos.b;
+            s.c = config.hyperchaos.c;
+            s.d = config.hyperchaos.d;
+            Box::new(s)
+        }
+        "sprott_k" => Box::new(SprottK::new()),
         _ => Box::new(Lorenz::new(
             config.lorenz.sigma,
             config.lorenz.rho,

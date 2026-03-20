@@ -295,6 +295,21 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             k: lf64(a.liu.k, b.liu.k),
             m: lf64(a.liu.m, b.liu.m),
         },
+        windmi: crate::config::WindmiConfig {
+            a: lf64(a.windmi.a, b.windmi.a),
+            b: lf64(a.windmi.b, b.windmi.b),
+        },
+        finance: crate::config::FinanceConfig {
+            a: lf64(a.finance.a, b.finance.a),
+            b: lf64(a.finance.b, b.finance.b),
+            c: lf64(a.finance.c, b.finance.c),
+        },
+        hyperchaos: crate::config::HyperchaosConfig {
+            a: lf64(a.hyperchaos.a, b.hyperchaos.a),
+            b: lf64(a.hyperchaos.b, b.hyperchaos.b),
+            c: lf64(a.hyperchaos.c, b.hyperchaos.c),
+            d: lf64(a.hyperchaos.d, b.hyperchaos.d),
+        },
         viz: a.viz.clone(), // don't morph viz settings
         ..a.clone()
     }
@@ -445,6 +460,7 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
         "Double Convection",
         "Mirror Attractor",
         "Half-Speed Spiral",
+        "Substorm",
     ];
     let rhythmic_pool: &[&str] = &[
         "Frozen Machinery",
@@ -484,6 +500,8 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
         "Equilibrium Fugue",
         "Half-Speed Spiral",
         "Jerk Circuit",
+        "Invisible Hand",
+        "Hyperchaos Engine",
     ];
 
     let melodic_pool: &[&str] = &[
@@ -725,6 +743,11 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
         let liu_b = rrange(&mut rng, 1.5, 3.5) as f64;
         let liu_k = rrange(&mut rng, 2.0, 6.0) as f64;
         let liu_m = rrange(&mut rng, 2.0, 6.0) as f64;
+        let windmi_a = rrange(&mut rng, 0.6, 1.2) as f64;
+        let windmi_b = rrange(&mut rng, 1.8, 3.2) as f64;
+        let finance_a = rrange(&mut rng, 2.0, 5.0) as f64;
+        let finance_b = rrange(&mut rng, 0.05, 0.3) as f64;
+        let finance_c = rrange(&mut rng, 0.5, 2.0) as f64;
 
         let name_idx = (i + ri(&mut rng, 3)) % name_pool.len();
         let name = name_pool[name_idx];
@@ -774,6 +797,11 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
             c.liu.b = liu_b;
             c.liu.k = liu_k;
             c.liu.m = liu_m;
+            c.windmi.a = windmi_a;
+            c.windmi.b = windmi_b;
+            c.finance.a = finance_a;
+            c.finance.b = finance_b;
+            c.finance.c = finance_c;
 
             c.audio.master_volume = c.audio.master_volume.max(0.62);
         }));

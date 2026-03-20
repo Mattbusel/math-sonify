@@ -960,6 +960,7 @@ fn system_display_name(s: &str) -> &'static str {
         "windmi" => "WINDMI",
         "finance" => "Finance",
         "hyperchaos" => "Hyperchaos",
+        "sprott_k" => "Sprott K",
         "sprott_d" => "Sprott D",
         "sprott_e" => "Sprott E",
         "sprott_f" => "Sprott F",
@@ -1018,6 +1019,7 @@ fn system_tagline(s: &str) -> &'static str {
         "windmi" => "Ionospheric substorm current model — exponential nonlinearity in a jerk-form system",
         "finance" => "Chaotic macroeconomics: interest rate, investment, and price-index feedback loops",
         "hyperchaos" => "Chen-Li 4D system with two positive Lyapunov exponents — richer than ordinary chaos",
+        "sprott_k" => "xy coupling drives chaos; 0.3z growth balanced by dissipation — one of Sprott's simplest forms",
         "sprott_d" => "Sprott Case I: y² instability with −1.1z dissipation — bounded chaotic attractor",
         "sprott_e" => "Minimal chaos from a yz product — equilibrium at (¼, 1/16, 0)",
         "sprott_f" => "Slow-spiral chaos: x² drives z while y damps at half speed",
@@ -5818,9 +5820,12 @@ fn param_range(param: &str) -> (f64, f64) {
         "b" => (0.05, 0.35),     // thomas: critical b≈0.208 separates chaos from limit cycle
         "lambda" => (3.0, 10.0), // rucklidge: forcing amplitude
         "a_rossler" => (0.0, 0.5), // rossler a: affects spiral tightness
-        "shimizu_a" => (0.3, 1.5), // shimizu-morioka a: damping → chaos boundary
+        "shimizu_a" => (0.3, 1.5),  // shimizu-morioka a: damping → chaos boundary
         "genesio_c" => (3.0, 10.0), // genesio-tesi c: restoring force → period-doubling
-        "liu_b" => (1.0, 4.0),     // liu b: y growth → chaos onset
+        "liu_b" => (1.0, 4.0),      // liu b: y growth → chaos onset
+        "windmi_b" => (1.5, 4.0),   // windmi b: drive amplitude → chaos onset
+        "finance_a" => (1.0, 6.0),  // finance a: savings rate → attractor shape
+        "hyperchaos_c" => (20.0, 40.0), // hyperchaos c: Rayleigh analog → chaos strength
         _ => (0.0, 1.0),
     }
 }
@@ -6452,6 +6457,21 @@ fn build_bifurc_system(
         (_, "liu_b") => {
             let mut s = Liu::new();
             s.b = pval;
+            Box::new(s)
+        }
+        (_, "windmi_b") => {
+            let mut s = Windmi::new();
+            s.b = pval;
+            Box::new(s)
+        }
+        (_, "finance_a") => {
+            let mut s = Finance::new();
+            s.a = pval;
+            Box::new(s)
+        }
+        (_, "hyperchaos_c") => {
+            let mut s = Hyperchaos::new();
+            s.c = pval;
             Box::new(s)
         }
         _ => Box::new(Lorenz::new(lorenz.sigma, pval.clamp(20.0, 50.0), lorenz.beta)),

@@ -10,7 +10,7 @@ use math_sonify_plugin::{
         Finance, GenesioTesi, GeodesicTorus, Halvorsen, HenonMap, HindmarshRose, Kuramoto,
         KuramotoDriven, Liu, LogisticMap, Lorenz, Lorenz84, Lorenz96, MackeyGlass, Mathieu,
         NewtonLeipnik, NoseHoover, Oregonator, RabinovichFabrikant, Rikitake, Rossler, Rucklidge,
-        ShimizuMorioka, SprottB, SprottC, SprottD, SprottE, SprottF, SprottG, SprottH, SprottL,
+        Hyperchaos, ShimizuMorioka, SprottB, SprottC, SprottD, SprottE, SprottF, SprottG, SprottH, SprottL,
         StandardMap, StochasticLorenz, Thomas, ThreeBody, VanDerPol, Windmi,
     },
 };
@@ -1858,5 +1858,36 @@ fn all_presets_load_without_panic() {
             "Preset '{}' has empty system name",
             preset.name
         );
+    }
+}
+
+// ── Hyperchaos ────────────────────────────────────────────────────────────────
+
+#[test]
+fn hyperchaos_stays_finite() {
+    let mut sys = Hyperchaos::new();
+    for _ in 0..5_000 { sys.step(0.001); }
+    assert!(all_finite(sys.state()), "Hyperchaos non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn hyperchaos_state_bounded() {
+    let mut sys = Hyperchaos::new();
+    for _ in 0..5_000 { sys.step(0.001); }
+    let s = sys.state();
+    assert!(all_finite(s), "Hyperchaos non-finite: {:?}", s);
+    assert!(s[0].abs() < 80.0, "x out of range: {}", s[0]);
+    assert!(s[1].abs() < 80.0, "y out of range: {}", s[1]);
+    assert!(s[2].abs() < 150.0, "z out of range: {}", s[2]);
+    assert!(s[3].abs() < 300.0, "w out of range: {}", s[3]);
+}
+
+#[test]
+fn hyperchaos_deterministic() {
+    let mut s1 = Hyperchaos::new();
+    let mut s2 = Hyperchaos::new();
+    for _ in 0..500 { s1.step(0.001); s2.step(0.001); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-12, "Hyperchaos not deterministic: {} vs {}", a, b);
     }
 }

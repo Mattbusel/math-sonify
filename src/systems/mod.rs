@@ -271,6 +271,11 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Hyperchaos",
         description: "Chen-Li 4D hyperchaotic system — two positive Lyapunov exponents, w injects extra instability",
     },
+    SystemEntry {
+        name: "sprott_k",
+        display_name: "Sprott K",
+        description: "xy product drives x-equation chaos while 0.3z growth balances dissipation",
+    },
 ];
 
 pub mod bouali;
@@ -281,6 +286,7 @@ pub mod liu;
 pub mod windmi;
 pub mod finance;
 pub mod hyperchaos;
+pub mod sprott_k;
 pub mod sprott_d;
 pub mod sprott_e;
 pub mod sprott_f;
@@ -333,6 +339,7 @@ pub use liu::Liu;
 pub use windmi::Windmi;
 pub use finance::Finance;
 pub use hyperchaos::Hyperchaos;
+pub use sprott_k::SprottK;
 pub use sprott_d::SprottD;
 pub use sprott_e::SprottE;
 pub use sprott_f::SprottF;
