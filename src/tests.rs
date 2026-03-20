@@ -2769,4 +2769,21 @@ mod ode_property_tests {
         assert!((r.shimizu_morioka.a - 1.0).abs() < 1e-9, "shimizu_morioka.a not interpolated: {}", r.shimizu_morioka.a);
         assert!((r.shimizu_morioka.b - 0.5).abs() < 1e-9, "shimizu_morioka.b not interpolated: {}", r.shimizu_morioka.b);
     }
+
+    #[test]
+    fn lerp_config_interpolates_genesio_tesi() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.genesio_tesi.a = 0.8;
+        b.genesio_tesi.a = 2.0;
+        a.genesio_tesi.b = 2.0;
+        b.genesio_tesi.b = 4.0;
+        a.genesio_tesi.c = 4.0;
+        b.genesio_tesi.c = 10.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.genesio_tesi.a - 1.4).abs() < 1e-9, "genesio_tesi.a not interpolated: {}", r.genesio_tesi.a);
+        assert!((r.genesio_tesi.b - 3.0).abs() < 1e-9, "genesio_tesi.b not interpolated: {}", r.genesio_tesi.b);
+        assert!((r.genesio_tesi.c - 7.0).abs() < 1e-9, "genesio_tesi.c not interpolated: {}", r.genesio_tesi.c);
+    }
 }
