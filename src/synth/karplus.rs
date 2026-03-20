@@ -178,4 +178,71 @@ mod tests {
         }
         assert!(!ks.active, "String should decay to silence");
     }
+
+    #[test]
+    fn test_karplus_higher_freq_shorter_delay() {
+        // Higher frequency → shorter delay line length
+        let mut ks_low = KarplusStrong::new(20.0, SR);
+        ks_low.trigger(220.0, SR);
+        let len_low = ks_low.length_f;
+
+        let mut ks_high = KarplusStrong::new(20.0, SR);
+        ks_high.trigger(880.0, SR);
+        let len_high = ks_high.length_f;
+
+        assert!(
+            len_high < len_low,
+            "Higher frequency should give shorter delay: 220={}, 880={}",
+            len_low,
+            len_high
+        );
+    }
+
+    #[test]
+    fn test_karplus_low_decay_fades_faster() {
+        // Lower decay coefficient → string fades faster
+        let mut ks_fast = KarplusStrong::new(20.0, SR);
+        ks_fast.decay = 0.9; // fast decay
+        ks_fast.trigger(440.0, SR);
+        let mut rms_fast = 0.0_f32;
+        for _ in 0..4410 {
+            let s = ks_fast.next_sample();
+            rms_fast += s * s;
+        }
+
+        let mut ks_slow = KarplusStrong::new(20.0, SR);
+        ks_slow.decay = 0.999; // slow decay
+        ks_slow.trigger(440.0, SR);
+        let mut rms_slow = 0.0_f32;
+        for _ in 0..4410 {
+            let s = ks_slow.next_sample();
+            rms_slow += s * s;
+        }
+
+        assert!(
+            rms_fast < rms_slow,
+            "Lower decay should produce lower RMS: fast={}, slow={}",
+            rms_fast,
+            rms_slow
+        );
+    }
+
+    #[test]
+    fn test_karplus_retrigger_reactivates() {
+        let mut ks = KarplusStrong::new(20.0, SR);
+        ks.trigger(440.0, SR);
+        // Let it fully decay
+        for _ in 0..SR as usize * 10 {
+            ks.next_sample();
+        }
+        assert!(!ks.active, "Should be inactive after full decay");
+        // Retrigger at a different frequency
+        ks.trigger(880.0, SR);
+        assert!(ks.active, "Should be active after retrigger");
+        let mut max_abs = 0.0_f32;
+        for _ in 0..4410 {
+            max_abs = max_abs.max(ks.next_sample().abs());
+        }
+        assert!(max_abs > 0.0, "Retriggered string should produce output");
+    }
 }

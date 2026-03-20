@@ -15,6 +15,8 @@ pub struct GeodesicTorus {
     pub big_r: f64,
     pub small_r: f64,
     speed: f64,
+    initial_metric_speed_sq: f64,
+    metric_speed_error: f64,
 }
 
 impl GeodesicTorus {
@@ -25,12 +27,27 @@ impl GeodesicTorus {
         // Winding number ≈ dphi/dtheta — use golden ratio for ergodic flow
         let phi_dot = 1.0;
         let theta_dot = 1.0 / 1.618_033_988_749; // irrational → ergodic
+        let state = vec![0.0, 0.0, phi_dot, theta_dot];
+        let initial_metric_speed_sq = Self::metric_speed_sq(&state, big_r, small_r);
         Self {
-            state: vec![0.0, 0.0, phi_dot, theta_dot],
+            state,
             big_r,
             small_r,
             speed: 0.0,
+            initial_metric_speed_sq,
+            metric_speed_error: 0.0,
         }
+    }
+
+    /// Metric speed squared: L = (R + r·cosθ)²·φ̇² + r²·θ̇²
+    /// Conserved along geodesics (geodesic flow preserves kinetic energy).
+    fn metric_speed_sq(s: &[f64], big_r: f64, small_r: f64) -> f64 {
+        if s.len() < 4 {
+            return 0.0;
+        }
+        let (theta, dphi, dtheta) = (s[1], s[2], s[3]);
+        let factor = big_r + small_r * theta.cos();
+        factor * factor * dphi * dphi + small_r * small_r * dtheta * dtheta
     }
 
     #[allow(clippy::similar_names)]
@@ -60,6 +77,10 @@ impl DynamicalSystem for GeodesicTorus {
         Self::deriv(state, self.big_r, self.small_r)
     }
 
+    fn energy_error(&self) -> Option<f64> {
+        Some(self.metric_speed_error)
+    }
+
     fn step(&mut self, dt: f64) {
         let (big_r, small_r) = (self.big_r, self.small_r);
         let prev = self.state.clone();
@@ -75,6 +96,12 @@ impl DynamicalSystem for GeodesicTorus {
             .sum::<f64>()
             .sqrt();
         self.speed = ds / dt;
+        // Track metric speed conservation
+        let l_now = Self::metric_speed_sq(&self.state, big_r, small_r);
+        if self.initial_metric_speed_sq > 1e-10 {
+            self.metric_speed_error =
+                ((l_now - self.initial_metric_speed_sq) / self.initial_metric_speed_sq).abs();
+        }
     }
 
     fn set_state(&mut self, s: &[f64]) {
@@ -84,6 +111,10 @@ impl DynamicalSystem for GeodesicTorus {
                 self.state[i] = s[i];
             }
         }
+        // Recompute initial metric speed so energy_error stays meaningful after reset
+        self.initial_metric_speed_sq =
+            Self::metric_speed_sq(&self.state, self.big_r, self.small_r);
+        self.metric_speed_error = 0.0;
     }
 }
 
@@ -150,5 +181,41 @@ mod tests {
         assert!((s[1] - 2.0).abs() < 1e-15);
         assert!((s[2] - 0.5).abs() < 1e-15);
         assert!((s[3] - 0.3).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_geodesic_torus_metric_speed_conserved() {
+        // Geodesic flow on a torus conserves L = (R+r·cosθ)²·φ̇² + r²·θ̇²
+        let mut sys = GeodesicTorus::new(3.0, 1.0);
+        for _ in 0..2000 {
+            sys.step(0.01);
+        }
+        let drift = sys.energy_error().expect("energy_error should return Some");
+        assert!(
+            drift < 0.01,
+            "Metric speed should be conserved to <1%: drift={}",
+            drift
+        );
+    }
+
+    #[test]
+    fn test_geodesic_torus_energy_error_starts_zero() {
+        let sys = GeodesicTorus::new(3.0, 1.0);
+        assert_eq!(sys.energy_error(), Some(0.0));
+    }
+
+    #[test]
+    fn test_geodesic_torus_energy_resets_after_set_state() {
+        let mut sys = GeodesicTorus::new(3.0, 1.0);
+        for _ in 0..500 {
+            sys.step(0.01);
+        }
+        // Reset to a state with different velocity
+        sys.set_state(&[0.0, 0.0, 2.0, 1.0]);
+        assert_eq!(
+            sys.energy_error(),
+            Some(0.0),
+            "energy_error should reset to 0 after set_state"
+        );
     }
 }

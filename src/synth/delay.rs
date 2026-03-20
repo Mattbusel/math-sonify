@@ -131,4 +131,92 @@ mod tests {
         let has_echo = echo_region.iter().any(|v| v.abs() > 0.01);
         assert!(has_echo, "Delay should produce an echo after delay_samples");
     }
+
+    #[test]
+    fn test_delay_feedback_sustains_signal() {
+        // With high feedback, the signal should persist longer than without
+        let mut dl_no_fb = DelayLine::new(200.0, SR);
+        dl_no_fb.set_delay_ms(50.0, SR);
+        dl_no_fb.mix = 0.5;
+        dl_no_fb.feedback = 0.0;
+
+        let mut dl_with_fb = DelayLine::new(200.0, SR);
+        dl_with_fb.set_delay_ms(50.0, SR);
+        dl_with_fb.mix = 0.5;
+        dl_with_fb.feedback = 0.8;
+
+        // Send one impulse then silence
+        dl_no_fb.process(1.0, 1.0);
+        dl_with_fb.process(1.0, 1.0);
+
+        let delay_s = (50.0 * 0.001 * SR) as usize;
+        let mut energy_no_fb = 0.0_f32;
+        let mut energy_with_fb = 0.0_f32;
+        for _ in 0..delay_s * 5 {
+            let (l, _) = dl_no_fb.process(0.0, 0.0);
+            energy_no_fb += l * l;
+            let (l, _) = dl_with_fb.process(0.0, 0.0);
+            energy_with_fb += l * l;
+        }
+        assert!(
+            energy_with_fb > energy_no_fb,
+            "Feedback should sustain signal longer: no_fb={}, with_fb={}",
+            energy_no_fb,
+            energy_with_fb
+        );
+    }
+
+    #[test]
+    fn test_delay_set_delay_ms_clamps_to_buffer() {
+        let mut dl = DelayLine::new(100.0, SR); // 100 ms max
+        // Request much larger than buffer — should be clamped
+        dl.set_delay_ms(9999.0, SR);
+        let max = dl.buf_l.len() as f32 - 2.0;
+        assert!(
+            dl.delay_samples <= max,
+            "delay_samples should be clamped to buffer: {}",
+            dl.delay_samples
+        );
+        // Also test requesting too-small delay
+        dl.set_delay_ms(0.0001, SR);
+        assert!(
+            dl.delay_samples >= 2.0,
+            "delay_samples should be clamped to minimum 2: {}",
+            dl.delay_samples
+        );
+    }
+
+    #[test]
+    fn test_delay_higher_mix_increases_wet_output() {
+        // With a warm-up impulse, higher mix should yield more wet signal in steady state
+        let mut dl_low = DelayLine::new(200.0, SR);
+        dl_low.set_delay_ms(10.0, SR);
+        dl_low.mix = 0.1;
+        dl_low.feedback = 0.5;
+
+        let mut dl_high = DelayLine::new(200.0, SR);
+        dl_high.set_delay_ms(10.0, SR);
+        dl_high.mix = 0.9;
+        dl_high.feedback = 0.5;
+
+        // Warm up with a sustained tone
+        let warm = (10.0 * 0.001 * SR) as usize * 3;
+        let mut rms_low = 0.0_f32;
+        let mut rms_high = 0.0_f32;
+        for i in 0..warm {
+            let x = (i as f32 * 0.1).sin();
+            let (l, _) = dl_low.process(x, x);
+            let (h, _) = dl_high.process(x, x);
+            if i > warm / 2 {
+                rms_low += l * l;
+                rms_high += h * h;
+            }
+        }
+        assert!(
+            rms_high > rms_low,
+            "Higher mix should yield more wet signal: low={}, high={}",
+            rms_low,
+            rms_high
+        );
+    }
 }

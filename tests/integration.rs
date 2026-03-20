@@ -1176,6 +1176,21 @@ fn geodesic_torus_stays_finite() {
 }
 
 #[test]
+fn geodesic_torus_metric_speed_conserved() {
+    // Geodesic flow on a Riemannian manifold conserves the metric speed
+    // L = (R+r·cosθ)²·φ̇² + r²·θ̇², which equals twice the kinetic energy.
+    // RK4 at dt=0.01 gives excellent conservation: drift should be < 1%.
+    let mut sys = GeodesicTorus::new(3.0, 1.0);
+    for _ in 0..5_000 { sys.step(0.01); }
+    let drift = sys.energy_error().expect("GeodesicTorus should implement energy_error");
+    assert!(
+        drift < 0.01,
+        "Metric speed should be conserved within 1%: drift={}",
+        drift
+    );
+}
+
+#[test]
 fn standard_map_stays_finite() {
     // k=0.97 puts the map near the chaos threshold
     let mut sys = StandardMap::new(0.97);
