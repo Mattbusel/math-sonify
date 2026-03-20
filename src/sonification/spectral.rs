@@ -235,4 +235,45 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_spectral_dft_path_nonzero() {
+        // After filling ≥32 history frames, the DFT path should produce non-zero partials
+        let mut m = SpectralMapping::new();
+        let mut last_p = None;
+        for i in 0..50 {
+            let state = vec![(i as f64 * 0.3).sin() * 5.0, (i as f64 * 0.17).cos() * 3.0];
+            last_p = Some(m.map(&state, 10.0, &default_config()));
+        }
+        let p = last_p.unwrap();
+        let nonzero = p.partials.iter().filter(|&&v| v > 0.0).count();
+        assert!(nonzero > 0, "DFT path should produce some non-zero partials after warmup");
+    }
+
+    #[test]
+    fn test_spectral_caching_same_state() {
+        // Calling map twice with the same state should yield identical partials (cache hit)
+        let mut m = SpectralMapping::new();
+        let state = vec![3.0, -1.5, 2.0];
+        let p1 = m.map(&state, 5.0, &default_config());
+        let p2 = m.map(&state, 5.0, &default_config());
+        // The smoothed partials will differ slightly (alpha smoothing), but raw cache is same
+        // Just verify both calls produce finite output
+        assert!(p1.partials.iter().all(|v| v.is_finite()), "first call should be finite");
+        assert!(p2.partials.iter().all(|v| v.is_finite()), "second call should be finite");
+    }
+
+    #[test]
+    fn test_spectral_gain_bounded() {
+        // Gain should be in [0.08, 0.5] as clamped in the implementation
+        let mut m = SpectralMapping::new();
+        for i in 0..200 {
+            let state = vec![(i as f64 * 0.2).sin() * 15.0, (i as f64 * 0.13).cos() * 8.0];
+            let p = m.map(&state, 20.0, &default_config());
+            assert!(
+                p.gain >= 0.08 && p.gain <= 0.5,
+                "gain {} out of [0.08, 0.5] at step {}", p.gain, i
+            );
+        }
+    }
 }

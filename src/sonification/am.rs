@@ -127,4 +127,36 @@ mod tests {
         assert!(p.fm_mod_ratio >= 1.0, "mod_ratio should be >= 1");
         assert!(p.fm_mod_ratio <= 2.1, "mod_ratio should be <= 2.1");
     }
+
+    #[test]
+    fn test_am_chaos_level_clamped() {
+        // Very large state magnitude → chaos should be clamped to [0, 1]
+        let mut m = AmMapping::new();
+        let p = m.map(&[1000.0, 1000.0, 1000.0], 50.0, &default_config());
+        assert!(p.chaos_level >= 0.0 && p.chaos_level <= 1.0,
+            "chaos_level {} out of [0,1]", p.chaos_level);
+        assert_eq!(p.chaos_level, 1.0, "large magnitude should saturate chaos to 1.0");
+    }
+
+    #[test]
+    fn test_am_secondary_voices_populated() {
+        // 4-dimensional state should fill freqs[0..3] with finite, positive values
+        let mut m = AmMapping::new();
+        let p = m.map(&[1.0, 5.0, -3.0, 8.0], 10.0, &default_config());
+        for i in 0..4 {
+            assert!(p.freqs[i].is_finite() && p.freqs[i] > 0.0,
+                "freqs[{}] should be finite positive: {}", i, p.freqs[i]);
+        }
+    }
+
+    #[test]
+    fn test_am_depth_in_range() {
+        // AM depth (stored in fm_mod_index) is derived from tanh → should be in [0, 1]
+        let mut m = AmMapping::new();
+        for v in [-100.0, -10.0, 0.0, 10.0, 100.0_f64] {
+            let p = m.map(&[1.0, v, 0.0], 5.0, &default_config());
+            assert!(p.fm_mod_index >= 0.0 && p.fm_mod_index <= 1.0,
+                "fm_mod_index {} out of [0,1] for state[1]={}", p.fm_mod_index, v);
+        }
+    }
 }

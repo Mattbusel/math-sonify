@@ -2473,4 +2473,104 @@ mod ode_property_tests {
             r.newton_leipnik.b
         );
     }
+
+    // -------------------------------------------------------------------------
+    // lerp_config for remaining parametric systems
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn lerp_config_interpolates_rossler() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.rossler.c = 4.0;
+        b.rossler.c = 8.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.rossler.c - 6.0).abs() < 1e-9, "rossler.c not interpolated: {}", r.rossler.c);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_duffing() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.duffing.gamma = 0.2;
+        b.duffing.gamma = 0.4;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.duffing.gamma - 0.3).abs() < 1e-9, "duffing.gamma not interpolated: {}", r.duffing.gamma);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_van_der_pol() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.van_der_pol.mu = 1.0;
+        b.van_der_pol.mu = 3.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.van_der_pol.mu - 2.0).abs() < 1e-9, "van_der_pol.mu not interpolated: {}", r.van_der_pol.mu);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_halvorsen() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.halvorsen.a = 1.0;
+        b.halvorsen.a = 2.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.halvorsen.a - 1.5).abs() < 1e-9, "halvorsen.a not interpolated: {}", r.halvorsen.a);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_thomas() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.thomas.b = 0.1;
+        b.thomas.b = 0.3;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.thomas.b - 0.2).abs() < 1e-9, "thomas.b not interpolated: {}", r.thomas.b);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_chen() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.chen.c = 20.0;
+        b.chen.c = 30.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.chen.c - 25.0).abs() < 1e-9, "chen.c not interpolated: {}", r.chen.c);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_fractional_lorenz() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.fractional_lorenz.alpha = 0.8;
+        b.fractional_lorenz.alpha = 1.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!(
+            (r.fractional_lorenz.alpha - 0.9).abs() < 1e-9,
+            "fractional_lorenz.alpha not interpolated: {}",
+            r.fractional_lorenz.alpha
+        );
+    }
+
+    #[test]
+    fn lerp_config_interpolates_geodesic_torus() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.geodesic_torus.big_r = 2.0;
+        b.geodesic_torus.big_r = 4.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!(
+            (r.geodesic_torus.big_r - 3.0).abs() < 1e-9,
+            "geodesic_torus.big_r not interpolated: {}",
+            r.geodesic_torus.big_r
+        );
+    }
 }

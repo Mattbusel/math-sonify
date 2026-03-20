@@ -187,4 +187,58 @@ mod tests {
             assert!(p.freqs.iter().all(|f| f.is_finite()), "non-finite at step {}", i);
         }
     }
+
+    #[test]
+    fn test_vocal_breathiness_increases_with_speed() {
+        // Higher speed should cause breathiness (amps[3]) to settle higher over time
+        let mut m_slow = VocalMapping::new();
+        let mut m_fast = VocalMapping::new();
+        let state = vec![1.0, 1.0, 1.0];
+        let mut breathiness_slow = 0.0_f32;
+        let mut breathiness_fast = 0.0_f32;
+        for _ in 0..200 {
+            breathiness_slow = m_slow.map(&state, 0.1, &default_config()).amps[3];
+            breathiness_fast = m_fast.map(&state, 500.0, &default_config()).amps[3];
+        }
+        assert!(
+            breathiness_fast > breathiness_slow,
+            "high speed should produce more breathiness: slow={}, fast={}",
+            breathiness_slow, breathiness_fast
+        );
+    }
+
+    #[test]
+    fn test_vocal_fundamental_changes_with_z_dim() {
+        // freqs[0] is driven by state[2]; different z values should give different fundamentals
+        let mut m = VocalMapping::new();
+        // Warm up normalization
+        for _ in 0..10 {
+            m.map(&[1.0, 1.0, -20.0], 5.0, &default_config());
+            m.map(&[1.0, 1.0, 20.0], 5.0, &default_config());
+        }
+        let mut m1 = VocalMapping::new();
+        let mut m2 = VocalMapping::new();
+        let p1 = m1.map(&[1.0, 1.0, -20.0], 5.0, &default_config());
+        let p2 = m2.map(&[1.0, 1.0, 20.0], 5.0, &default_config());
+        assert!(
+            (p1.freqs[0] - p2.freqs[0]).abs() > 1.0,
+            "different z should give different fundamental: z=-20 → {}, z=20 → {}",
+            p1.freqs[0], p2.freqs[0]
+        );
+    }
+
+    #[test]
+    fn test_vocal_interpolate_formants_boundary() {
+        // At t=0.0 we should get the first vowel's formants; at t=1.0 the last
+        let (f1_lo, f2_lo, f3_lo) = VocalMapping::interpolate_formants(0.0);
+        let (f1_hi, f2_hi, f3_hi) = VocalMapping::interpolate_formants(1.0);
+        // First vowel /a/: F1=800, F2=1200, F3=2500
+        assert!((f1_lo - 800.0).abs() < 1.0, "F1 at t=0 should be 800: {}", f1_lo);
+        assert!((f2_lo - 1200.0).abs() < 1.0, "F2 at t=0 should be 1200: {}", f2_lo);
+        assert!((f3_lo - 2500.0).abs() < 1.0, "F3 at t=0 should be 2500: {}", f3_lo);
+        // Last vowel /æ/: F1=700, F2=1700, F3=2600
+        assert!((f1_hi - 700.0).abs() < 1.0, "F1 at t=1 should be 700: {}", f1_hi);
+        assert!((f2_hi - 1700.0).abs() < 1.0, "F2 at t=1 should be 1700: {}", f2_hi);
+        assert!((f3_hi - 2600.0).abs() < 1.0, "F3 at t=1 should be 2600: {}", f3_hi);
+    }
 }

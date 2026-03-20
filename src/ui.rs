@@ -940,6 +940,20 @@ fn system_display_name(s: &str) -> &'static str {
         "oregonator" => "Oregonator",
         "mathieu" => "Mathieu Equation",
         "kuramoto_driven" => "Driven Kuramoto",
+        "thomas" => "Thomas Attractor",
+        "sprott_c" => "Sprott C",
+        "dadras" => "Dadras Attractor",
+        "rucklidge" => "Rucklidge Attractor",
+        "chen" => "Chen Attractor",
+        "burke_shaw" => "Burke-Shaw Attractor",
+        "lorenz84" => "Lorenz-84",
+        "rabinovich_fabrikant" => "Rabinovich-Fabrikant",
+        "sprott_g" => "Sprott G",
+        "sprott_h" => "Sprott H",
+        "sprott_l" => "Sprott L",
+        "rikitake" => "Rikitake Dynamo",
+        "bouali" => "Bouali Attractor",
+        "newton_leipnik" => "Newton-Leipnik",
         _ => "Unknown System",
     }
 }
@@ -975,6 +989,20 @@ fn system_tagline(s: &str) -> &'static str {
         "mathieu" => "A parametrically driven oscillator with stability tongues",
         "kuramoto_driven" => "Kuramoto oscillators forced by an external rhythm",
         "fractional_lorenz" => "Lorenz equations with fractional-order memory",
+        "thomas" => "Cyclic symmetry — three coupled oscillators in a dissipative tangle",
+        "sprott_c" => "A minimal three-term system with x² nonlinearity",
+        "dadras" => "Five-parameter multi-lobed topology with a wide attractor basin",
+        "rucklidge" => "Double-convection folded-band chaos from atmospheric physics",
+        "chen" => "A double-scroll derived from Lorenz by purposeful anti-control",
+        "burke_shaw" => "Elegant two-parameter double-lobe chaos from contraction theory",
+        "lorenz84" => "Atmospheric jet-stream model — westerlies and season-driven chaos",
+        "rabinovich_fabrikant" => "Plasma waves gone chaotic — multi-lobe topology from physics",
+        "sprott_g" => "Single-scroll simplicity: three terms, no parameters, pure chaos",
+        "sprott_h" => "Spiral chaos with a z² term from Sprott's minimal catalog",
+        "sprott_l" => "Scroll attractor with large z-coupling from Sprott's simplest forms",
+        "rikitake" => "Geomagnetic polarity reversals modeled as coupled dynamos",
+        "bouali" => "Double-scroll spiral with x² feedback and z-coupling",
+        "newton_leipnik" => "Two coupled rigid-body oscillators spontaneously generating chaos",
         _ => "A dynamical system evolving through state space",
     }
 }
@@ -1013,6 +1041,20 @@ fn system_internal_name(display: &str) -> &'static str {
         "Oregonator" => "oregonator",
         "Mathieu Equation" => "mathieu",
         "Driven Kuramoto" => "kuramoto_driven",
+        "Thomas Attractor" => "thomas",
+        "Sprott C" => "sprott_c",
+        "Dadras Attractor" => "dadras",
+        "Rucklidge Attractor" => "rucklidge",
+        "Chen Attractor" => "chen",
+        "Burke-Shaw Attractor" => "burke_shaw",
+        "Lorenz-84" => "lorenz84",
+        "Rabinovich-Fabrikant" => "rabinovich_fabrikant",
+        "Sprott G" => "sprott_g",
+        "Sprott H" => "sprott_h",
+        "Sprott L" => "sprott_l",
+        "Rikitake Dynamo" => "rikitake",
+        "Bouali Attractor" => "bouali",
+        "Newton-Leipnik" => "newton_leipnik",
         _ => "lorenz",
     }
 }
@@ -3177,6 +3219,20 @@ fn draw_advanced_panel(
                 "oregonator",
                 "mathieu",
                 "kuramoto_driven",
+                "thomas",
+                "sprott_c",
+                "dadras",
+                "rucklidge",
+                "chen",
+                "burke_shaw",
+                "lorenz84",
+                "rabinovich_fabrikant",
+                "sprott_g",
+                "sprott_h",
+                "sprott_l",
+                "rikitake",
+                "bouali",
+                "newton_leipnik",
             ];
             let cur_interp = st.interp_system.clone();
             ComboBox::from_label("Morph to")
@@ -3356,6 +3412,80 @@ fn draw_advanced_panel(
                     ui.label(RichText::new("x'=(2x+y) mod 1\ny'=(x+y) mod 1")
                         .color(CYAN).size(11.0)
                         .font(egui::FontId::monospace(11.0)));
+                }
+                "thomas" => {
+                    ui.add(Slider::new(&mut st.config.thomas.b, 0.1..=0.5).text("b"))
+                        .on_hover_text("Dissipation coefficient. b≈0.208 gives a chaotic strange attractor; b→0 gives conservative flow.");
+                }
+                "sprott_c" | "sprott_g" | "sprott_h" | "sprott_l" => {
+                    ui.label(RichText::new("This Sprott system has no tunable parameters.")
+                        .color(GRAY_HINT).italics().size(11.0));
+                }
+                "dadras" => {
+                    ui.add(Slider::new(&mut st.config.dadras.a, 1.0..=6.0).text("a"))
+                        .on_hover_text("Parameter a. Default 3.0.");
+                    ui.add(Slider::new(&mut st.config.dadras.b, 1.0..=5.0).text("b"))
+                        .on_hover_text("Parameter b. Default 2.7.");
+                    ui.add(Slider::new(&mut st.config.dadras.c, 0.5..=4.0).text("c"))
+                        .on_hover_text("Parameter c. Default 1.7.");
+                    ui.add(Slider::new(&mut st.config.dadras.d, 0.5..=4.0).text("d"))
+                        .on_hover_text("Parameter d. Default 2.0.");
+                    ui.add(Slider::new(&mut st.config.dadras.e, 4.0..=15.0).text("e"))
+                        .on_hover_text("Parameter e. Default 9.0.");
+                }
+                "rucklidge" => {
+                    ui.add(Slider::new(&mut st.config.rucklidge.kappa, 0.5..=4.0).text("κ (kappa)"))
+                        .on_hover_text("Dissipation rate. Default 2.0.");
+                    ui.add(Slider::new(&mut st.config.rucklidge.lambda, 3.0..=10.0).text("λ (lambda)"))
+                        .on_hover_text("Forcing amplitude. Default 6.7 gives chaos.");
+                }
+                "chen" => {
+                    ui.add(Slider::new(&mut st.config.chen.a, 20.0..=60.0).text("a"))
+                        .on_hover_text("Parameter a. Default 40.0.");
+                    ui.add(Slider::new(&mut st.config.chen.b, 1.0..=8.0).text("b"))
+                        .on_hover_text("Parameter b. Default 3.0.");
+                    ui.add(Slider::new(&mut st.config.chen.c, 15.0..=40.0).text("c"))
+                        .on_hover_text("Parameter c. Default 28.0.");
+                }
+                "burke_shaw" => {
+                    ui.add(Slider::new(&mut st.config.burke_shaw.sigma, 5.0..=20.0).text("σ (sigma)"))
+                        .on_hover_text("Contraction rate. Default 10.0.");
+                    ui.add(Slider::new(&mut st.config.burke_shaw.rho, 2.0..=8.0).text("ρ (rho)"))
+                        .on_hover_text("Second parameter. Default 4.272.");
+                }
+                "lorenz84" => {
+                    ui.add(Slider::new(&mut st.config.lorenz84.a, 0.1..=0.5).text("a"))
+                        .on_hover_text("Thermal relaxation rate. Default 0.25.");
+                    ui.add(Slider::new(&mut st.config.lorenz84.b, 1.0..=8.0).text("b"))
+                        .on_hover_text("Rotational forcing. Default 4.0.");
+                    ui.add(Slider::new(&mut st.config.lorenz84.f, 4.0..=12.0).text("F"))
+                        .on_hover_text("Symmetric heating forcing. Default 8.0. Above ~6 gives chaos.");
+                    ui.add(Slider::new(&mut st.config.lorenz84.g, 0.5..=3.0).text("G"))
+                        .on_hover_text("Wave (seasonal) forcing. Default 1.23.");
+                }
+                "rabinovich_fabrikant" => {
+                    ui.add(Slider::new(&mut st.config.rabinovich_fabrikant.alpha, 0.05..=0.5).text("α (alpha)"))
+                        .on_hover_text("Damping. Default 0.14.");
+                    ui.add(Slider::new(&mut st.config.rabinovich_fabrikant.gamma, 0.05..=0.3).text("γ (gamma)"))
+                        .on_hover_text("Excitation. Default 0.1.");
+                }
+                "rikitake" => {
+                    ui.add(Slider::new(&mut st.config.rikitake.mu, 0.1..=3.0).text("μ (mu)"))
+                        .on_hover_text("Dissipation rate. Default 1.0.");
+                    ui.add(Slider::new(&mut st.config.rikitake.a, 1.0..=10.0).text("a"))
+                        .on_hover_text("Coupling offset. Default 5.0.");
+                }
+                "bouali" => {
+                    ui.add(Slider::new(&mut st.config.bouali.a, 0.0..=1.0).text("a"))
+                        .on_hover_text("z-coupling coefficient. Default 0.3.");
+                    ui.add(Slider::new(&mut st.config.bouali.s, 0.1..=3.0).text("s"))
+                        .on_hover_text("z-feedback coefficient. Default 1.0.");
+                }
+                "newton_leipnik" => {
+                    ui.add(Slider::new(&mut st.config.newton_leipnik.a, 0.1..=1.0).text("a"))
+                        .on_hover_text("Damping of x. Default 0.4.");
+                    ui.add(Slider::new(&mut st.config.newton_leipnik.b, 0.05..=0.4).text("b"))
+                        .on_hover_text("z growth rate. Default 0.175.");
                 }
                 _ => {}
             }

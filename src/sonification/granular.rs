@@ -152,4 +152,41 @@ mod tests {
         // All frequencies should be finite
         assert!(freqs.iter().all(|f| f.is_finite()));
     }
+
+    #[test]
+    fn test_granular_high_speed_high_rate() {
+        // Very high speed should push spawn_rate to the maximum (200)
+        let mut m = GranularMapping::new();
+        let p = m.map(&[1.0, 2.0], 200.0, &default_config());
+        assert_eq!(p.grain_spawn_rate, 200.0,
+            "speed=200 should max out spawn_rate at 200: {}", p.grain_spawn_rate);
+    }
+
+    #[test]
+    fn test_granular_pans_spread() {
+        // 4-dimensional state should produce varying pan values across voices
+        let mut m = GranularMapping::new();
+        // Warm up normalization so the range is established
+        for i in -5..=5 {
+            let v = i as f64;
+            m.map(&[v, v * 2.0, v * 0.5, -v], 10.0, &default_config());
+        }
+        let p = m.map(&[3.0, -3.0, 1.5, -1.5], 10.0, &default_config());
+        // With different normalized positions, pans should not all be identical
+        let all_same = p.pans[0..4].windows(2).all(|w| (w[0] - w[1]).abs() < 0.01);
+        assert!(!all_same, "voices should have different pan positions: {:?}", &p.pans[0..4]);
+    }
+
+    #[test]
+    fn test_granular_chaos_level_clamped() {
+        // chaos_level is speed/200 clamped to [0,1]
+        let mut m_zero = GranularMapping::new();
+        let mut m_max = GranularMapping::new();
+        let p_zero = m_zero.map(&[1.0], 0.0, &default_config());
+        let p_max = m_max.map(&[1.0], 10000.0, &default_config());
+        assert_eq!(p_zero.chaos_level, 0.0,
+            "zero speed should give chaos=0: {}", p_zero.chaos_level);
+        assert_eq!(p_max.chaos_level, 1.0,
+            "huge speed should clamp chaos=1: {}", p_max.chaos_level);
+    }
 }

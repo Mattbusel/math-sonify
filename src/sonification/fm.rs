@@ -139,4 +139,47 @@ mod tests {
         let p = m.map(&[1.0, 2.0, 3.0], 50.0, &default_config());
         assert!(p.fm_mod_index > 0.0, "mod_index should be positive");
     }
+
+    #[test]
+    fn test_fm_higher_speed_increases_mod_index() {
+        // Higher trajectory speed should produce a larger FM mod index (brighter timbre)
+        let mut m_slow = FmMapping::new();
+        let mut m_fast = FmMapping::new();
+        let state = vec![1.0, 2.0, 1.0];
+        let p_slow = m_slow.map(&state, 1.0, &default_config());
+        let p_fast = m_fast.map(&state, 100.0, &default_config());
+        assert!(
+            p_fast.fm_mod_index > p_slow.fm_mod_index,
+            "higher speed should increase mod_index: slow={}, fast={}",
+            p_slow.fm_mod_index, p_fast.fm_mod_index
+        );
+    }
+
+    #[test]
+    fn test_fm_z_dim_affects_mod_index() {
+        // Adding a z-dimension (state[2]) should change the mod index
+        let mut m_2d = FmMapping::new();
+        let mut m_3d = FmMapping::new();
+        let speed = 30.0;
+        let p_2d = m_2d.map(&[5.0, 3.0], speed, &default_config());
+        let p_3d = m_3d.map(&[5.0, 3.0, 10.0], speed, &default_config());
+        // With z=10 (tanh contribution = ~0.3), mod_index should differ
+        assert!(
+            (p_3d.fm_mod_index - p_2d.fm_mod_index).abs() > 0.01,
+            "z-dim should change mod_index: 2d={}, 3d={}",
+            p_2d.fm_mod_index, p_3d.fm_mod_index
+        );
+    }
+
+    #[test]
+    fn test_fm_carrier_matches_freqs0() {
+        // fm_carrier_freq and freqs[0] should be the same value
+        let mut m = FmMapping::new();
+        let p = m.map(&[3.0, 1.5, 0.5], 20.0, &default_config());
+        assert_eq!(
+            p.fm_carrier_freq, p.freqs[0],
+            "fm_carrier_freq should equal freqs[0]: {} vs {}",
+            p.fm_carrier_freq, p.freqs[0]
+        );
+    }
 }

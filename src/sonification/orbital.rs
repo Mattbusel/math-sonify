@@ -201,4 +201,53 @@ mod tests {
             assert!(p.freqs[0].is_finite(), "freq[0] non-finite at step {}", i);
         }
     }
+
+    #[test]
+    fn test_orbital_freqs_ascending() {
+        // The harmonic series: f_n = f₁ · n^(1 + stretch·0.35), so freqs[1] > freqs[0]
+        let mut m = OrbitalResonance::new();
+        // Warm up smooth_fund with enough steps
+        for i in 0..50 {
+            let s = vec![(i as f64 * 0.1).cos() * 3.0, (i as f64 * 0.1).sin() * 3.0, 0.0];
+            m.map(&s, 5.0, &default_config());
+        }
+        let state = vec![3.0, 4.0, 1.0];
+        let p = m.map(&state, 5.0, &default_config());
+        // Partials are at n, n², n³, n⁴ multiples so each should be larger than previous
+        assert!(p.freqs[1] > p.freqs[0],
+            "freqs[1] should be > freqs[0]: {} vs {}", p.freqs[1], p.freqs[0]);
+        assert!(p.freqs[2] > p.freqs[1],
+            "freqs[2] should be > freqs[1]: {} vs {}", p.freqs[2], p.freqs[1]);
+    }
+
+    #[test]
+    fn test_orbital_sub_osc_with_z_dim() {
+        // A 3D state should produce a non-zero sub_osc_level
+        let mut m = OrbitalResonance::new();
+        let p = m.map(&[2.0, 3.0, 5.0], 10.0, &default_config());
+        assert!(p.sub_osc_level > 0.0,
+            "3D state should produce non-zero sub_osc_level: {}", p.sub_osc_level);
+    }
+
+    #[test]
+    fn test_orbital_filter_varies_with_chaos() {
+        // After many chaotic steps, filter_cutoff should be above the ordered minimum (400 Hz)
+        let mut m_ordered = OrbitalResonance::new();
+        let mut m_chaotic = OrbitalResonance::new();
+        // Force ordered: same state repeatedly (no lyapunov growth)
+        for _ in 0..50 {
+            m_ordered.map(&[1.0, 0.0, 0.0], 0.1, &default_config());
+        }
+        // Force chaotic: rapidly varying state
+        for i in 0..50 {
+            let big = (i as f64 * 0.5).sin() * 100.0;
+            m_chaotic.map(&[big, big * 0.7, -big], 200.0, &default_config());
+        }
+        let p_ordered = m_ordered.map(&[1.0, 0.0, 0.0], 0.1, &default_config());
+        let p_chaotic = m_chaotic.map(&[50.0, -30.0, 20.0], 200.0, &default_config());
+        assert!(
+            p_chaotic.filter_cutoff > p_ordered.filter_cutoff,
+            "chaotic filter_cutoff {} should exceed ordered {}", p_chaotic.filter_cutoff, p_ordered.filter_cutoff
+        );
+    }
 }
