@@ -62,6 +62,15 @@ impl DynamicalSystem for Rossler {
         Self::deriv(state, self.a, self.b, self.c)
     }
 
+    fn set_state(&mut self, s: &[f64]) {
+        let n = self.state.len().min(s.len());
+        for i in 0..n {
+            if s[i].is_finite() {
+                self.state[i] = s[i];
+            }
+        }
+    }
+
     /// Advances the attractor state by one RK4 integration step.
     ///
     /// # Parameters
@@ -101,6 +110,25 @@ mod tests {
             before,
             after
         );
+    }
+
+    #[test]
+    fn test_rossler_set_state() {
+        let mut sys = Rossler::new(0.2, 0.2, 5.7);
+        sys.set_state(&[2.0, 3.0, 4.0]);
+        let s = sys.state();
+        assert!((s[0] - 2.0).abs() < 1e-15);
+        assert!((s[1] - 3.0).abs() < 1e-15);
+        assert!((s[2] - 4.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_rossler_set_state_ignores_nan() {
+        let mut sys = Rossler::new(0.2, 0.2, 5.7);
+        sys.set_state(&[f64::NAN, 3.0, 4.0]);
+        let s = sys.state();
+        assert!((s[0] - 1.0).abs() < 1e-15, "NaN should not change state[0]");
+        assert!((s[1] - 3.0).abs() < 1e-15);
     }
 
     #[test]

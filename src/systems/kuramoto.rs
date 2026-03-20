@@ -86,6 +86,15 @@ impl DynamicalSystem for Kuramoto {
         Self::compute_deriv(state, &self.omega, self.coupling)
     }
 
+    fn set_state(&mut self, s: &[f64]) {
+        let n = self.state.len().min(s.len());
+        for i in 0..n {
+            if s[i].is_finite() {
+                self.state[i] = s[i];
+            }
+        }
+    }
+
     fn step(&mut self, dt: f64) {
         let omega = self.omega.clone();
         let coupling = self.coupling;
@@ -160,6 +169,16 @@ mod tests {
         }
         let r = sys.order_parameter();
         assert!(r >= 0.0 && r <= 1.0 + 1e-10, "Order param out of [0,1]: {}", r);
+    }
+
+    #[test]
+    fn test_kuramoto_set_state() {
+        let mut sys = Kuramoto::new(4, 2.0);
+        let new_phases = vec![0.1, 0.5, 1.0, 1.5];
+        sys.set_state(&new_phases);
+        for (i, &v) in sys.state().iter().enumerate() {
+            assert!((v - new_phases[i]).abs() < 1e-15, "set_state failed at i={}", i);
+        }
     }
 
     #[test]

@@ -154,6 +154,22 @@ impl DynamicalSystem for FractionalLorenz {
         (dx * dx + dy * dy + dz * dz).sqrt()
     }
 
+    fn set_state(&mut self, s: &[f64]) {
+        let n = self.state.len().min(s.len());
+        for i in 0..n {
+            if s[i].is_finite() {
+                self.state[i] = s[i];
+            }
+        }
+        // Clear history so GL approximation starts fresh from the new state
+        self.history_x.clear();
+        self.history_x.push_back(self.state[0]);
+        self.history_y.clear();
+        self.history_y.push_back(self.state[1]);
+        self.history_z.clear();
+        self.history_z.push_back(self.state[2]);
+    }
+
     fn deriv_at(&self, state: &[f64]) -> Vec<f64> {
         if state.len() < 3 {
             return vec![0.0; 3];
@@ -209,6 +225,22 @@ mod tests {
         }
         for v in sys.state().iter() {
             assert!(v.is_finite(), "State became non-finite: {}", v);
+        }
+    }
+
+    #[test]
+    fn test_fractional_lorenz_set_state() {
+        let mut sys = FractionalLorenz::new(0.95, 10.0, 28.0, 8.0 / 3.0);
+        sys.set_state(&[2.0, 3.0, 4.0]);
+        let s = sys.state();
+        assert!((s[0] - 2.0).abs() < 1e-15);
+        assert!((s[1] - 3.0).abs() < 1e-15);
+        assert!((s[2] - 4.0).abs() < 1e-15);
+        // After set_state, stepping should still produce finite results
+        let mut sys2 = sys;
+        sys2.step(0.01);
+        for v in sys2.state().iter() {
+            assert!(v.is_finite(), "State became non-finite after set_state+step: {}", v);
         }
     }
 

@@ -135,6 +135,18 @@ impl DynamicalSystem for ThreeBody {
         Some(self.energy_error)
     }
 
+    fn set_state(&mut self, s: &[f64]) {
+        let n = self.state.len().min(s.len());
+        for i in 0..n {
+            if s[i].is_finite() {
+                self.state[i] = s[i];
+            }
+        }
+        // Recompute initial energy after state reset so energy_error is meaningful
+        self.initial_energy = Self::compute_hamiltonian(&self.state, &self.masses, self.g);
+        self.energy_error = 0.0;
+    }
+
     fn step(&mut self, dt: f64) {
         let prev = self.state.clone();
         let (masses, g) = (self.masses, self.g);
@@ -218,6 +230,20 @@ mod tests {
             "Energy error too large: {}",
             sys.energy_error
         );
+    }
+
+    #[test]
+    fn test_three_body_set_state_resets_energy() {
+        let mut sys = ThreeBody::new([1.0, 1.0, 1.0]);
+        // Run to build up some energy error
+        for _ in 0..100 {
+            sys.step(0.01);
+        }
+        // Reset state to initial
+        let new_state: Vec<f64> = (0..12).map(|i| i as f64 * 0.1).collect();
+        sys.set_state(&new_state);
+        // energy_error should have been reset to 0
+        assert_eq!(sys.energy_error, 0.0, "energy_error should reset after set_state");
     }
 
     #[test]
