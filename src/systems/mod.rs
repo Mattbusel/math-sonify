@@ -176,8 +176,20 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Rucklidge",
         description: "Two-parameter double-convection chaotic attractor with folded-band topology",
     },
+    SystemEntry {
+        name: "chen",
+        display_name: "Chen",
+        description: "Three-parameter double-scroll attractor derived from Lorenz by anticontrol",
+    },
+    SystemEntry {
+        name: "burke_shaw",
+        display_name: "Burke-Shaw",
+        description: "Two-parameter double-lobe attractor with elegant algebraic structure",
+    },
 ];
 
+pub mod burke_shaw;
+pub mod chen;
 pub mod dadras;
 pub mod rucklidge;
 pub mod thomas;
@@ -211,6 +223,8 @@ pub mod sprott_b;
 pub mod three_body;
 pub mod van_der_pol;
 
+pub use burke_shaw::BurkeShaw;
+pub use chen::Chen;
 pub use dadras::Dadras;
 pub use rucklidge::Rucklidge;
 pub use thomas::Thomas;
