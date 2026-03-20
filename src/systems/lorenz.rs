@@ -164,4 +164,34 @@ mod tests {
         assert_eq!(sys.dimension(), 3);
         assert_eq!(sys.name(), "Lorenz");
     }
+
+    #[test]
+    fn test_lorenz_deriv_at_known_point() {
+        // At (1, 0, 0) with sigma=10, rho=28, beta=8/3:
+        //   dx = 10*(0-1) = -10
+        //   dy = 1*(28-0) - 0 = 28
+        //   dz = 1*0 - (8/3)*0 = 0
+        let sys = Lorenz::new(10.0, 28.0, 8.0 / 3.0);
+        let d = sys.deriv_at(&[1.0, 0.0, 0.0]);
+        assert!((d[0] - (-10.0)).abs() < 1e-10, "dx should be -10: {}", d[0]);
+        assert!((d[1] - 28.0).abs() < 1e-10, "dy should be 28: {}", d[1]);
+        assert!((d[2] - 0.0).abs() < 1e-10, "dz should be 0: {}", d[2]);
+    }
+
+    #[test]
+    fn test_lorenz_set_state() {
+        let mut sys = Lorenz::new(10.0, 28.0, 2.6667);
+        sys.set_state(&[5.0, -3.0, 10.0]);
+        let s = sys.state();
+        assert!((s[0] - 5.0).abs() < 1e-15, "x should be 5: {}", s[0]);
+        assert!((s[1] - (-3.0)).abs() < 1e-15, "y should be -3: {}", s[1]);
+        assert!((s[2] - 10.0).abs() < 1e-15, "z should be 10: {}", s[2]);
+    }
+
+    #[test]
+    fn test_lorenz_speed_positive_after_step() {
+        let mut sys = Lorenz::new(10.0, 28.0, 2.6667);
+        sys.step(0.001);
+        assert!(sys.speed() > 0.0, "speed should be positive after a step: {}", sys.speed());
+    }
 }

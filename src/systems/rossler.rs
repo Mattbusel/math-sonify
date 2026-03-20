@@ -151,4 +151,37 @@ mod tests {
             s
         );
     }
+
+    #[test]
+    fn test_rossler_deriv_at_known_point() {
+        // At (1, 0, 0) with a=0.2, b=0.2, c=5.7:
+        //   dx = -0 - 0 = 0
+        //   dy = 1 + 0.2*0 = 1
+        //   dz = 0.2 + 0*(1 - 5.7) = 0.2
+        let sys = Rossler::new(0.2, 0.2, 5.7);
+        let d = sys.deriv_at(&[1.0, 0.0, 0.0]);
+        assert!((d[0] - 0.0).abs() < 1e-10, "dx should be 0: {}", d[0]);
+        assert!((d[1] - 1.0).abs() < 1e-10, "dy should be 1: {}", d[1]);
+        assert!((d[2] - 0.2).abs() < 1e-10, "dz should be 0.2: {}", d[2]);
+    }
+
+    #[test]
+    fn test_rossler_deterministic() {
+        let mut sys1 = Rossler::new(0.2, 0.2, 5.7);
+        let mut sys2 = Rossler::new(0.2, 0.2, 5.7);
+        for _ in 0..500 {
+            sys1.step(0.001);
+            sys2.step(0.001);
+        }
+        for (a, b) in sys1.state().iter().zip(sys2.state().iter()) {
+            assert!((a - b).abs() < 1e-15, "Non-deterministic: {} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_rossler_speed_positive_after_step() {
+        let mut sys = Rossler::new(0.2, 0.2, 5.7);
+        sys.step(0.001);
+        assert!(sys.speed() > 0.0, "speed should be positive: {}", sys.speed());
+    }
 }

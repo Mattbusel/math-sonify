@@ -145,4 +145,37 @@ mod tests {
             assert!((a - b).abs() < 1e-15, "Non-deterministic: {} vs {}", a, b);
         }
     }
+
+    #[test]
+    fn test_oregonator_set_state() {
+        let mut sys = Oregonator::new(1.0);
+        sys.set_state(&[0.5, 1.5, 2.5]);
+        let s = sys.state();
+        assert!((s[0] - 0.5).abs() < 1e-15, "x should be 0.5: {}", s[0]);
+        assert!((s[1] - 1.5).abs() < 1e-15, "y should be 1.5: {}", s[1]);
+        assert!((s[2] - 2.5).abs() < 1e-15, "z should be 2.5: {}", s[2]);
+    }
+
+    #[test]
+    fn test_oregonator_speed_positive() {
+        let mut sys = Oregonator::new(1.0);
+        sys.step(0.0001);
+        assert!(sys.speed() > 0.0, "speed should be positive: {}", sys.speed());
+    }
+
+    #[test]
+    fn test_oregonator_f_param_affects_dynamics() {
+        // Different f values should produce different oscillation behavior
+        let mut sys1 = Oregonator::new(0.5);
+        let mut sys2 = Oregonator::new(2.0);
+        for _ in 0..1000 {
+            sys1.step(0.0001);
+            sys2.step(0.0001);
+        }
+        // After enough steps the two trajectories should diverge
+        let d: f64 = sys1.state().iter().zip(sys2.state().iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(d > 1e-6, "Different f should produce different dynamics: diff={}", d);
+    }
 }

@@ -172,4 +172,41 @@ mod tests {
             "State did not change after step"
         );
     }
+
+    #[test]
+    fn test_stochastic_lorenz_deterministic_zero_noise() {
+        // Zero-noise instances with same params should produce identical output
+        let mut sys1 = StochasticLorenz::new(10.0, 28.0, 2.667, 0.0);
+        let mut sys2 = StochasticLorenz::new(10.0, 28.0, 2.667, 0.0);
+        for _ in 0..500 {
+            sys1.step(0.001);
+            sys2.step(0.001);
+        }
+        for (a, b) in sys1.state().iter().zip(sys2.state().iter()) {
+            assert!((a - b).abs() < 1e-15, "Zero-noise should be deterministic: {} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_stochastic_lorenz_speed_positive() {
+        let mut sys = StochasticLorenz::new(10.0, 28.0, 2.667, 0.5);
+        sys.step(0.001);
+        assert!(sys.speed() > 0.0, "speed should be positive: {}", sys.speed());
+    }
+
+    #[test]
+    fn test_stochastic_lorenz_noise_causes_divergence_from_zero_noise() {
+        // A noisy and a noise-free version should diverge over time
+        let mut sys_noisy = StochasticLorenz::new(10.0, 28.0, 2.667, 1.0);
+        let mut sys_clean = StochasticLorenz::new(10.0, 28.0, 2.667, 0.0);
+        for _ in 0..500 {
+            sys_noisy.step(0.001);
+            sys_clean.step(0.001);
+        }
+        let d: f64 = sys_noisy.state().iter().zip(sys_clean.state().iter())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(d > 1e-6, "Noisy and clean should diverge: distance={}", d);
+    }
 }

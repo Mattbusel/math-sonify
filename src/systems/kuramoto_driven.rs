@@ -160,4 +160,36 @@ mod tests {
         let t_after = sys.state()[N];
         assert!(t_after > t_before, "t_internal should advance: {} -> {}", t_before, t_after);
     }
+
+    #[test]
+    fn test_kuramoto_driven_deterministic() {
+        let mut sys1 = KuramotoDriven::new(1.0, 0.5, 1.0);
+        let mut sys2 = KuramotoDriven::new(1.0, 0.5, 1.0);
+        for _ in 0..500 {
+            sys1.step(0.01);
+            sys2.step(0.01);
+        }
+        for (a, b) in sys1.state().iter().zip(sys2.state().iter()) {
+            assert!((a - b).abs() < 1e-12, "Non-deterministic: {} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_kuramoto_driven_state_finite_after_many_steps() {
+        let mut sys = KuramotoDriven::new(2.0, 1.0, 1.5);
+        for _ in 0..2000 {
+            sys.step(0.01);
+        }
+        assert!(
+            sys.state().iter().all(|v| v.is_finite()),
+            "State has non-finite value after many steps: {:?}", sys.state()
+        );
+    }
+
+    #[test]
+    fn test_kuramoto_driven_speed_positive() {
+        let mut sys = KuramotoDriven::new(1.0, 0.5, 1.0);
+        sys.step(0.01);
+        assert!(sys.speed() > 0.0, "speed should be positive: {}", sys.speed());
+    }
 }

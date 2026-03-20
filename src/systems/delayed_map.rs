@@ -142,4 +142,49 @@ mod tests {
         assert!((s[0] - 0.7).abs() < 1e-15, "state[0] should be 0.7");
         assert!((s[1] - 0.7).abs() < 1e-15, "state[1] should be 0.7");
     }
+
+    #[test]
+    fn test_delayed_map_r_affects_dynamics() {
+        // Different r values should produce different trajectories after warmup
+        let mut sys_low = DelayedMap::new(2.5, 3);
+        let mut sys_high = DelayedMap::new(3.9, 3);
+        for _ in 0..20 {
+            sys_low.step(0.01);
+            sys_high.step(0.01);
+        }
+        let s_low = sys_low.state()[0];
+        let s_high = sys_high.state()[0];
+        assert!(
+            (s_low - s_high).abs() > 1e-6,
+            "Different r should give different trajectories: {} vs {}", s_low, s_high
+        );
+    }
+
+    #[test]
+    fn test_delayed_map_longer_tau_different_dynamics() {
+        // tau=1 and tau=5 should diverge quickly
+        let mut sys_short = DelayedMap::new(3.9, 1);
+        let mut sys_long = DelayedMap::new(3.9, 5);
+        for _ in 0..10 {
+            sys_short.step(0.01);
+            sys_long.step(0.01);
+        }
+        let s_short = sys_short.state()[0];
+        let s_long = sys_long.state()[0];
+        assert!(
+            (s_short - s_long).abs() > 1e-6,
+            "tau=1 and tau=5 should diverge: {} vs {}", s_short, s_long
+        );
+    }
+
+    #[test]
+    fn test_delayed_map_state_finite() {
+        // With moderate r, state should remain finite
+        let mut sys = DelayedMap::new(2.0, 3);
+        for _ in 0..1000 {
+            sys.step(0.01);
+        }
+        assert!(sys.state().iter().all(|v| v.is_finite()),
+            "State should stay finite: {:?}", sys.state());
+    }
 }

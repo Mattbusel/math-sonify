@@ -133,4 +133,34 @@ mod tests {
             assert!((a - b).abs() < 1e-15, "Non-deterministic: {} vs {}", a, b);
         }
     }
+
+    #[test]
+    fn test_mathieu_set_state() {
+        let mut sys = Mathieu::new(0.0, 0.5);
+        sys.set_state(&[2.0, 1.0, 0.5]);
+        let s = sys.state();
+        assert!((s[0] - 2.0).abs() < 1e-15, "x should be 2: {}", s[0]);
+        assert!((s[1] - 1.0).abs() < 1e-15, "v should be 1: {}", s[1]);
+        assert!((s[2] - 0.5).abs() < 1e-15, "t should be 0.5: {}", s[2]);
+    }
+
+    #[test]
+    fn test_mathieu_speed_positive_after_step() {
+        let mut sys = Mathieu::new(0.0, 0.5);
+        sys.step(0.01);
+        assert!(sys.speed() > 0.0, "speed should be positive: {}", sys.speed());
+    }
+
+    #[test]
+    fn test_mathieu_state_finite_long_run() {
+        // In the stable zone (small a, q), the system should stay finite
+        let mut sys = Mathieu::new(0.0, 0.3);
+        for _ in 0..5000 {
+            sys.step(0.01);
+        }
+        assert!(
+            sys.state().iter().all(|v| v.is_finite()),
+            "State should stay finite in stable zone: {:?}", sys.state()
+        );
+    }
 }
