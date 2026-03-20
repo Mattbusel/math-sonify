@@ -319,6 +319,13 @@ fn scale_intervals_owned(scale: Scale) -> Vec<f32> {
     }
 }
 
+impl Scale {
+    /// Return the semitone intervals for this scale as an owned Vec.
+    pub fn intervals(self) -> Vec<f32> {
+        scale_intervals_owned(self)
+    }
+}
+
 /// Harmonic series frequencies: integer multiples of A2 (110 Hz).
 const HARMONIC_SERIES: &[f32] = &[
     110.0, 220.0, 330.0, 440.0, 550.0, 660.0, 770.0, 880.0, 990.0, 1100.0, 1320.0, 1540.0,
@@ -582,5 +589,87 @@ mod tests {
         assert_eq!(dorian.len(), 7, "Dorian should have 7 notes");
         assert_eq!(mixo.len(), 7, "Mixolydian should have 7 notes");
         assert_eq!(hung.len(), 7, "HungarianMinor should have 7 notes");
+    }
+
+    #[test]
+    fn test_locrian_scale_produces_finite_output() {
+        let base = 220.0_f32;
+        for &t in &[0.0_f32, 0.2, 0.5, 0.8, 1.0] {
+            let f = quantize_to_scale(t, base, 2.0, Scale::Locrian);
+            assert!(f.is_finite() && f > 0.0, "Locrian at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn test_locrian_scale_interval_count() {
+        // Locrian is a 7-note heptatonic scale
+        let intervals = Scale::Locrian.intervals();
+        assert_eq!(intervals.len(), 7, "Locrian should have 7 notes per octave");
+    }
+
+    #[test]
+    fn test_locrian_scale_intervals_correct() {
+        // B Locrian: semitones [0, 1, 3, 5, 6, 8, 10]
+        let intervals = Scale::Locrian.intervals();
+        let expected = [0.0_f32, 1.0, 3.0, 5.0, 6.0, 8.0, 10.0];
+        assert_eq!(intervals.len(), expected.len());
+        for (i, (&got, &exp)) in intervals.iter().zip(expected.iter()).enumerate() {
+            assert!((got - exp).abs() < 1e-6, "Locrian interval[{}]: expected {}, got {}", i, exp, got);
+        }
+    }
+
+    #[test]
+    fn test_octatonic_scale_produces_finite_output() {
+        let base = 220.0_f32;
+        for &t in &[0.0_f32, 0.2, 0.5, 0.8, 1.0] {
+            let f = quantize_to_scale(t, base, 2.0, Scale::Octatonic);
+            assert!(f.is_finite() && f > 0.0, "Octatonic at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn test_octatonic_scale_interval_count() {
+        // Octatonic/diminished is an 8-note scale
+        let intervals = Scale::Octatonic.intervals();
+        assert_eq!(intervals.len(), 8, "Octatonic should have 8 notes per octave");
+    }
+
+    #[test]
+    fn test_octatonic_scale_intervals_correct() {
+        // Diminished: semitones [0, 2, 3, 5, 6, 8, 9, 11]
+        let intervals = Scale::Octatonic.intervals();
+        let expected = [0.0_f32, 2.0, 3.0, 5.0, 6.0, 8.0, 9.0, 11.0];
+        assert_eq!(intervals.len(), expected.len());
+        for (i, (&got, &exp)) in intervals.iter().zip(expected.iter()).enumerate() {
+            assert!((got - exp).abs() < 1e-6, "Octatonic interval[{}]: expected {}, got {}", i, exp, got);
+        }
+    }
+
+    #[test]
+    fn test_locrian_different_from_chromatic() {
+        // Locrian has 7 notes vs chromatic 12 — outputs should differ
+        let base = 220.0_f32;
+        let t = 0.3_f32;
+        let loc = quantize_to_scale(t, base, 2.0, Scale::Locrian);
+        let chrom = quantize_to_scale(t, base, 2.0, Scale::Chromatic);
+        assert!(loc.is_finite() && loc > 0.0);
+        assert!(chrom.is_finite() && chrom > 0.0);
+        // They may coincide occasionally, but scales are structurally different
+        let loc_intervals = Scale::Locrian.intervals();
+        let chrom_intervals = Scale::Chromatic.intervals();
+        assert_ne!(loc_intervals.len(), chrom_intervals.len(), "Locrian and Chromatic should have different note counts");
+    }
+
+    #[test]
+    fn test_octatonic_symmetric_interval_structure() {
+        // Octatonic/diminished alternates whole-half steps: [2,1,2,1,2,1,2,1]
+        let intervals = Scale::Octatonic.intervals();
+        assert_eq!(intervals.len(), 8);
+        let steps: Vec<f32> = intervals.windows(2).map(|w| w[1] - w[0]).collect();
+        // Alternating 2, 1 pattern
+        for (i, &step) in steps.iter().enumerate() {
+            let expected = if i % 2 == 0 { 2.0_f32 } else { 1.0_f32 };
+            assert!((step - expected).abs() < 1e-6, "Octatonic step[{}]: expected {}, got {}", i, expected, step);
+        }
     }
 }
