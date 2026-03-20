@@ -516,20 +516,23 @@ where
     let mut t = 0.0;
     let mut dt = (total_dt * 0.1).min(0.01).max(total_dt * 1e-5);
     let mut steps = 0usize;
+    let mut iters = 0usize;
     while t < total_dt - 1e-14 {
+        iters += 1;
+        if iters > 500_000 {
+            break;
+        }
         let remaining = total_dt - t;
         let step = dt.min(remaining);
         let mut trial = state.clone();
         let (err, next_dt) = rk45_step(&mut trial, step, &f);
-        if err <= tol || step <= total_dt * 1e-7 {
+        // Accept if error within tolerance, or step is at the minimum allowed size
+        if err <= tol || step <= total_dt * 1e-6 {
             *state = trial;
             t += step;
             steps += 1;
         }
         dt = next_dt.clamp(total_dt * 1e-6, total_dt);
-        if steps > 100_000 {
-            break;
-        }
     }
     steps
 }
