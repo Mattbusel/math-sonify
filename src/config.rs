@@ -46,6 +46,7 @@ pub struct Config {
     pub lorenz84: Lorenz84Config,
     pub rabinovich_fabrikant: RabinovichFabrikantConfig,
     pub rikitake: RikitakeConfig,
+    pub fractional_lorenz: FractionalLorenzConfig,
 }
 
 impl Default for Config {
@@ -86,6 +87,7 @@ impl Default for Config {
             lorenz84: Lorenz84Config::default(),
             rabinovich_fabrikant: RabinovichFabrikantConfig::default(),
             rikitake: RikitakeConfig::default(),
+            fractional_lorenz: FractionalLorenzConfig::default(),
         }
     }
 }
@@ -652,6 +654,23 @@ impl Default for RikitakeConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FractionalLorenzConfig {
+    /// Fractional order α ∈ (0, 1]. α=1 recovers the standard Lorenz system.
+    pub alpha: f64,
+    /// σ parameter (same role as in standard Lorenz). Default 10.0.
+    pub sigma: f64,
+    /// ρ parameter (same role as in standard Lorenz). Default 28.0.
+    pub rho: f64,
+    /// β parameter (same role as in standard Lorenz). Default 8/3 ≈ 2.667.
+    pub beta: f64,
+}
+impl Default for FractionalLorenzConfig {
+    fn default() -> Self {
+        Self { alpha: 0.99, sigma: 10.0, rho: 28.0, beta: 8.0 / 3.0 }
+    }
+}
+
 impl Config {
     /// Clamp all parameters to physically sensible bounds.
     /// Call this after deserializing from user-supplied config files.
@@ -917,6 +936,11 @@ impl Config {
         // Rikitake
         Self::clamp_log_f64(&mut self.rikitake.mu, 0.1, 10.0, "rikitake.mu");
         Self::clamp_log_f64(&mut self.rikitake.a, 0.1, 20.0, "rikitake.a");
+        // Fractional Lorenz
+        Self::clamp_log_f64(&mut self.fractional_lorenz.alpha, 0.5, 1.0, "fractional_lorenz.alpha");
+        Self::clamp_log_f64(&mut self.fractional_lorenz.sigma, 0.1, 100.0, "fractional_lorenz.sigma");
+        Self::clamp_log_f64(&mut self.fractional_lorenz.rho, 0.1, 200.0, "fractional_lorenz.rho");
+        Self::clamp_log_f64(&mut self.fractional_lorenz.beta, 0.01, 20.0, "fractional_lorenz.beta");
     }
 
     /// Clamp a `f64` field to `[min, max]`, emitting a tracing warning if clamped.

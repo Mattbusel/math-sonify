@@ -43,7 +43,7 @@ use crate::synth::OscShape;
 use crate::systems::{
     ArnoldCat, BurkeShaw, Chen, CustomOde, Dadras, DelayedMap, FractionalLorenz, KuramotoDriven,
     LogisticMap, Lorenz84, Mathieu, Oregonator, RabinovichFabrikant, Rikitake, Rucklidge, SprottC,
-    SprottG, StandardMap, StochasticLorenz, Thomas, *,
+    SprottG, SprottH, SprottL, StandardMap, StochasticLorenz, Thomas, *,
 };
 use crate::ui::{draw_ui, AppState, SharedState};
 use midir;
@@ -2784,10 +2784,10 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
             ))
         }
         "fractional_lorenz" => Box::new(FractionalLorenz::new(
-            1.0,
-            config.lorenz.sigma,
-            config.lorenz.rho,
-            config.lorenz.beta,
+            config.fractional_lorenz.alpha,
+            config.fractional_lorenz.sigma,
+            config.fractional_lorenz.rho,
+            config.fractional_lorenz.beta,
         )),
         "hindmarsh_rose" => Box::new(HindmarshRose::new(
             config.hindmarsh_rose.current_i,
@@ -2887,6 +2887,8 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
             Box::new(s)
         }
         "sprott_g" => Box::new(SprottG::new()),
+        "sprott_h" => Box::new(SprottH::new()),
+        "sprott_l" => Box::new(SprottL::new()),
         "rikitake" => {
             let mut s = Rikitake::new();
             s.mu = config.rikitake.mu;

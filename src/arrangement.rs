@@ -264,6 +264,12 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             drive_amp: lf64(a.kuramoto_driven.drive_amp, b.kuramoto_driven.drive_amp),
             drive_freq: lf64(a.kuramoto_driven.drive_freq, b.kuramoto_driven.drive_freq),
         },
+        fractional_lorenz: crate::config::FractionalLorenzConfig {
+            alpha: lf64(a.fractional_lorenz.alpha, b.fractional_lorenz.alpha),
+            sigma: lf64(a.fractional_lorenz.sigma, b.fractional_lorenz.sigma),
+            rho: lf64(a.fractional_lorenz.rho, b.fractional_lorenz.rho),
+            beta: lf64(a.fractional_lorenz.beta, b.fractional_lorenz.beta),
+        },
         viz: a.viz.clone(), // don't morph viz settings
         ..a.clone()
     }

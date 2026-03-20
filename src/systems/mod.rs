@@ -206,11 +206,23 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Rikitake Dynamo",
         description: "Geomagnetic field reversal model with irregular polarity flips",
     },
+    SystemEntry {
+        name: "sprott_h",
+        display_name: "Sprott H",
+        description: "Parameter-free spiral attractor with z² nonlinearity",
+    },
+    SystemEntry {
+        name: "sprott_l",
+        display_name: "Sprott L",
+        description: "Parameter-free scroll attractor with x² nonlinearity and large z-coupling",
+    },
 ];
 
 pub mod lorenz84;
 pub mod rabinovich_fabrikant;
 pub mod sprott_g;
+pub mod sprott_h;
+pub mod sprott_l;
 pub mod rikitake;
 pub mod burke_shaw;
 pub mod chen;
@@ -254,6 +266,8 @@ pub use rucklidge::Rucklidge;
 pub use lorenz84::Lorenz84;
 pub use rabinovich_fabrikant::RabinovichFabrikant;
 pub use sprott_g::SprottG;
+pub use sprott_h::SprottH;
+pub use sprott_l::SprottL;
 pub use rikitake::Rikitake;
 pub use thomas::Thomas;
 pub use sprott_c::SprottC;
