@@ -221,6 +221,35 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             sigma: lf64(a.burke_shaw.sigma, b.burke_shaw.sigma),
             rho: lf64(a.burke_shaw.rho, b.burke_shaw.rho),
         },
+        logistic_map: crate::config::LogisticMapConfig {
+            r: lf64(a.logistic_map.r, b.logistic_map.r),
+        },
+        standard_map: crate::config::StandardMapConfig {
+            k: lf64(a.standard_map.k, b.standard_map.k),
+        },
+        stochastic_lorenz: crate::config::StochasticLorenzConfig {
+            sigma: lf64(a.stochastic_lorenz.sigma, b.stochastic_lorenz.sigma),
+            rho: lf64(a.stochastic_lorenz.rho, b.stochastic_lorenz.rho),
+            beta: lf64(a.stochastic_lorenz.beta, b.stochastic_lorenz.beta),
+            noise_strength: lf64(a.stochastic_lorenz.noise_strength, b.stochastic_lorenz.noise_strength),
+        },
+        delayed_map: crate::config::DelayedMapConfig {
+            r: lf64(a.delayed_map.r, b.delayed_map.r),
+            // tau is discrete — switch at midpoint like string fields
+            tau: if t < 0.5 { a.delayed_map.tau } else { b.delayed_map.tau },
+        },
+        oregonator: crate::config::OregonatorConfig {
+            f: lf64(a.oregonator.f, b.oregonator.f),
+        },
+        mathieu: crate::config::MathieuConfig {
+            a: lf64(a.mathieu.a, b.mathieu.a),
+            q: lf64(a.mathieu.q, b.mathieu.q),
+        },
+        kuramoto_driven: crate::config::KuramotoDrivenConfig {
+            coupling: lf64(a.kuramoto_driven.coupling, b.kuramoto_driven.coupling),
+            drive_amp: lf64(a.kuramoto_driven.drive_amp, b.kuramoto_driven.drive_amp),
+            drive_freq: lf64(a.kuramoto_driven.drive_freq, b.kuramoto_driven.drive_freq),
+        },
         viz: a.viz.clone(), // don't morph viz settings
         ..a.clone()
     }

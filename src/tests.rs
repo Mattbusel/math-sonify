@@ -1900,6 +1900,7 @@ mod tests {
 
 #[cfg(test)]
 mod ode_property_tests {
+    use crate::config::Config;
     use crate::systems::duffing::Duffing;
     use crate::systems::{DynamicalSystem, Kuramoto, Lorenz, Rossler};
     use crate::synth::grain::GrainEngine;
@@ -2330,5 +2331,79 @@ mod ode_property_tests {
             sys.step(0.01);
         }
         assert!(sys.state().iter().all(|v| v.is_finite()), "SprottC diverged");
+    }
+
+    // -------------------------------------------------------------------------
+    // lerp_config interpolates previously-missing system configs (#fix)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn lerp_config_interpolates_logistic_map() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.logistic_map.r = 3.5;
+        b.logistic_map.r = 4.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.logistic_map.r - 3.75).abs() < 1e-9, "logistic_map.r not interpolated: {}", r.logistic_map.r);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_standard_map() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.standard_map.k = 0.5;
+        b.standard_map.k = 2.5;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.standard_map.k - 1.5).abs() < 1e-9, "standard_map.k not interpolated: {}", r.standard_map.k);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_stochastic_lorenz() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.stochastic_lorenz.noise_strength = 0.0;
+        b.stochastic_lorenz.noise_strength = 1.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.stochastic_lorenz.noise_strength - 0.5).abs() < 1e-9, "noise_strength not interpolated");
+    }
+
+    #[test]
+    fn lerp_config_interpolates_mathieu() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.mathieu.q = 0.0;
+        b.mathieu.q = 1.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.mathieu.q - 0.5).abs() < 1e-9, "mathieu.q not interpolated: {}", r.mathieu.q);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_kuramoto_driven() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.kuramoto_driven.drive_freq = 1.0;
+        b.kuramoto_driven.drive_freq = 2.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.kuramoto_driven.drive_freq - 1.5).abs() < 1e-9, "drive_freq not interpolated");
+    }
+
+    #[test]
+    fn lerp_config_delayed_map_tau_snaps_at_half() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.delayed_map.tau = 3;
+        b.delayed_map.tau = 10;
+        // t < 0.5: should use a's tau
+        let r0 = lerp_config(&a, &b, 0.3);
+        assert_eq!(r0.delayed_map.tau, 3, "tau should be a's value before midpoint");
+        // t >= 0.5: should use b's tau
+        let r1 = lerp_config(&a, &b, 0.7);
+        assert_eq!(r1.delayed_map.tau, 10, "tau should be b's value after midpoint");
     }
 }
