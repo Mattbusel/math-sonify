@@ -2672,4 +2672,71 @@ mod ode_property_tests {
         let r = lerp_config(&a, &b, 0.5);
         assert!((r.nose_hoover.a - 3.0).abs() < 1e-9, "nose_hoover.a not interpolated: {}", r.nose_hoover.a);
     }
+
+    #[test]
+    fn lerp_config_interpolates_kuramoto() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.kuramoto.coupling = 1.0;
+        b.kuramoto.coupling = 3.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.kuramoto.coupling - 2.0).abs() < 1e-9, "kuramoto.coupling not interpolated: {}", r.kuramoto.coupling);
+    }
+
+    #[test]
+    fn lerp_config_interpolates_hindmarsh_rose() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.hindmarsh_rose.current_i = 2.0;
+        b.hindmarsh_rose.current_i = 4.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!(
+            (r.hindmarsh_rose.current_i - 3.0).abs() < 1e-9,
+            "hindmarsh_rose.current_i not interpolated: {}",
+            r.hindmarsh_rose.current_i
+        );
+    }
+
+    #[test]
+    fn lerp_config_interpolates_coupled_map_lattice() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.coupled_map_lattice.r = 3.0;
+        b.coupled_map_lattice.r = 4.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!(
+            (r.coupled_map_lattice.r - 3.5).abs() < 1e-9,
+            "coupled_map_lattice.r not interpolated: {}",
+            r.coupled_map_lattice.r
+        );
+    }
+
+    #[test]
+    fn lerp_config_interpolates_double_pendulum() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.double_pendulum.l1 = 0.5;
+        b.double_pendulum.l1 = 1.5;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!(
+            (r.double_pendulum.l1 - 1.0).abs() < 1e-9,
+            "double_pendulum.l1 not interpolated: {}",
+            r.double_pendulum.l1
+        );
+    }
+
+    #[test]
+    fn lerp_config_interpolates_oregonator() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.oregonator.f = 0.5;
+        b.oregonator.f = 1.5;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.oregonator.f - 1.0).abs() < 1e-9, "oregonator.f not interpolated: {}", r.oregonator.f);
+    }
 }
