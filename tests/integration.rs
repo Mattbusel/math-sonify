@@ -5,8 +5,9 @@ use math_sonify_plugin::{
         chord_intervals_for, quantize_to_scale, DirectMapping, Scale, SonifMode, Sonification,
     },
     systems::{
-        CoupledMapLattice, DoublePendulum, Duffing, DynamicalSystem, HenonMap, Kuramoto, Lorenz,
-        MackeyGlass, Rossler, ThreeBody,
+        ArnoldCat, BurkeShaw, Chen, CoupledMapLattice, Dadras, DoublePendulum, Duffing,
+        DynamicalSystem, HenonMap, Kuramoto, Lorenz, MackeyGlass, Rossler, Rucklidge, SprottC,
+        Thomas, ThreeBody,
     },
 };
 
@@ -938,5 +939,143 @@ fn synthesis_modes_all_meet_latency_sla() {
             elapsed.as_micros(),
             budget_us
         );
+    }
+}
+
+// ── New-system integration tests ─────────────────────────────────────────────
+
+#[test]
+fn burke_shaw_stays_finite() {
+    let mut sys = BurkeShaw::new();
+    for _ in 0..20_000 {
+        sys.step(0.005);
+    }
+    assert!(all_finite(sys.state()), "BurkeShaw state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn burke_shaw_state_bounded() {
+    let mut sys = BurkeShaw::new();
+    for _ in 0..20_000 {
+        sys.step(0.005);
+    }
+    let s = sys.state();
+    for v in s {
+        assert!(v.abs() < 100.0, "BurkeShaw component out of range: {}", v);
+    }
+}
+
+#[test]
+fn chen_stays_finite() {
+    let mut sys = Chen::new();
+    for _ in 0..20_000 {
+        sys.step(0.001);
+    }
+    assert!(all_finite(sys.state()), "Chen state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn chen_state_bounded() {
+    let mut sys = Chen::new();
+    for _ in 0..20_000 {
+        sys.step(0.001);
+    }
+    let s = sys.state();
+    for v in s {
+        assert!(v.abs() < 200.0, "Chen component out of range: {}", v);
+    }
+}
+
+#[test]
+fn dadras_stays_finite() {
+    let mut sys = Dadras::new();
+    for _ in 0..20_000 {
+        sys.step(0.005);
+    }
+    assert!(all_finite(sys.state()), "Dadras state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn dadras_state_bounded() {
+    let mut sys = Dadras::new();
+    for _ in 0..20_000 {
+        sys.step(0.005);
+    }
+    let s = sys.state();
+    for v in s {
+        assert!(v.abs() < 200.0, "Dadras component out of range: {}", v);
+    }
+}
+
+#[test]
+fn rucklidge_stays_finite() {
+    let mut sys = Rucklidge::new();
+    for _ in 0..20_000 {
+        sys.step(0.005);
+    }
+    assert!(all_finite(sys.state()), "Rucklidge state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn sprott_c_stays_finite() {
+    let mut sys = SprottC::new();
+    for _ in 0..20_000 {
+        sys.step(0.01);
+    }
+    assert!(all_finite(sys.state()), "SprottC state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn sprott_c_state_bounded() {
+    let mut sys = SprottC::new();
+    for _ in 0..20_000 {
+        sys.step(0.01);
+    }
+    let s = sys.state();
+    for v in s {
+        assert!(v.abs() < 50.0, "SprottC component out of range: {}", v);
+    }
+}
+
+#[test]
+fn thomas_stays_finite() {
+    let mut sys = Thomas::new(0.208186);
+    for _ in 0..20_000 {
+        sys.step(0.05);
+    }
+    assert!(all_finite(sys.state()), "Thomas state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn thomas_state_bounded() {
+    let mut sys = Thomas::new(0.208186);
+    for _ in 0..20_000 {
+        sys.step(0.05);
+    }
+    let s = sys.state();
+    for v in s {
+        assert!(v.abs() < 10.0, "Thomas component out of range: {}", v);
+    }
+}
+
+#[test]
+fn arnold_cat_stays_finite() {
+    let mut sys = ArnoldCat::new();
+    for _ in 0..10_000 {
+        sys.step(1.0);
+    }
+    assert!(all_finite(sys.state()), "ArnoldCat state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn arnold_cat_state_in_unit_square() {
+    // ArnoldCat maps the unit torus [0,1)^2; state should stay in [0,1).
+    let mut sys = ArnoldCat::new();
+    for _ in 0..10_000 {
+        sys.step(1.0);
+    }
+    let s = sys.state();
+    for v in s {
+        assert!(*v >= 0.0 && *v < 1.0, "ArnoldCat component outside [0,1): {}", v);
     }
 }
