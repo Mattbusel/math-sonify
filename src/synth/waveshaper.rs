@@ -55,3 +55,54 @@ impl Waveshaper {
         x * (1.0 - self.mix) + shaped * comp * self.mix
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_waveshaper_bypass_when_mix_zero() {
+        let ws = Waveshaper { drive: 10.0, mix: 0.0, asymmetry: 0.3 };
+        let x = 0.5_f32;
+        let y = ws.process(x);
+        assert!((y - x).abs() < 1e-6, "mix=0 should be bypass, got {}", y);
+    }
+
+    #[test]
+    fn test_waveshaper_output_finite() {
+        let ws = Waveshaper { drive: 5.0, mix: 1.0, asymmetry: 0.22 };
+        for i in 0..100 {
+            let x = (i as f32 * 0.1) - 5.0;
+            let y = ws.process(x);
+            assert!(y.is_finite(), "Output non-finite for input {}: {}", x, y);
+        }
+    }
+
+    #[test]
+    fn test_waveshaper_output_bounded() {
+        // tanh-based shaper should keep output in roughly [-2, 2] even with high drive
+        let ws = Waveshaper { drive: 100.0, mix: 1.0, asymmetry: 0.3 };
+        for i in 0..100 {
+            let x = (i as f32 * 0.1) - 5.0;
+            let y = ws.process(x);
+            assert!(y.abs() < 3.0, "Output too large ({}) for input {}", y, x);
+        }
+    }
+
+    #[test]
+    fn test_waveshaper_zero_input_zero_output() {
+        // tanh(0) = 0; both paths produce 0 for zero input
+        let ws = Waveshaper { drive: 5.0, mix: 1.0, asymmetry: 0.22 };
+        let y = ws.process(0.0);
+        assert!(y.abs() < 1e-6, "Zero input should give zero output, got {}", y);
+    }
+
+    #[test]
+    fn test_waveshaper_saturation_reduces_gain() {
+        // At high drive, the output should be smaller than input (saturation)
+        let ws = Waveshaper { drive: 50.0, mix: 1.0, asymmetry: 0.0 };
+        let x = 10.0_f32;
+        let y = ws.process(x).abs();
+        assert!(y < x, "Waveshaper should saturate large signals: {} -> {}", x, y);
+    }
+}

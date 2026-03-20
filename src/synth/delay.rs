@@ -69,3 +69,66 @@ impl DelayLine {
         (l * dry + del_l * self.mix, r * dry + del_r * self.mix)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    #[test]
+    fn test_delay_mix_zero_passes_dry() {
+        let mut dl = DelayLine::new(1000.0, SR);
+        dl.mix = 0.0;
+        dl.feedback = 0.0;
+        let (l, r) = dl.process(0.5, -0.5);
+        // With mix=0, output = l*dry + del*mix = l*1 + del*0 = l
+        assert!((l - 0.5).abs() < 1e-6, "mix=0 should pass dry signal: {}", l);
+        assert!((r - (-0.5)).abs() < 1e-6, "mix=0 should pass dry signal: {}", r);
+    }
+
+    #[test]
+    fn test_delay_output_always_finite() {
+        let mut dl = DelayLine::new(1000.0, SR);
+        dl.mix = 0.3;
+        dl.feedback = 0.5;
+        for i in 0..2000 {
+            let x = (i as f32 * 0.1).sin();
+            let (l, r) = dl.process(x, x);
+            assert!(l.is_finite(), "Left output non-finite at {}", i);
+            assert!(r.is_finite(), "Right output non-finite at {}", i);
+        }
+    }
+
+    #[test]
+    fn test_delay_nan_input_safe() {
+        let mut dl = DelayLine::new(1000.0, SR);
+        dl.mix = 0.3;
+        let (l, r) = dl.process(f32::NAN, f32::NAN);
+        assert!(l.is_finite(), "NaN input should produce finite output: {}", l);
+        assert!(r.is_finite(), "NaN input should produce finite output: {}", r);
+    }
+
+    #[test]
+    fn test_delay_produces_echo() {
+        // Send an impulse then silence; after delay_samples we should hear the echo
+        let mut dl = DelayLine::new(200.0, SR);
+        let delay_ms = 100.0_f32;
+        dl.set_delay_ms(delay_ms, SR);
+        dl.mix = 1.0;
+        dl.feedback = 0.0;
+        let delay_samples = (delay_ms * 0.001 * SR) as usize;
+
+        // Send impulse then silence
+        let mut outputs_l = Vec::new();
+        dl.process(1.0, 0.0); // impulse
+        for _ in 0..delay_samples + 10 {
+            let (l, _) = dl.process(0.0, 0.0);
+            outputs_l.push(l);
+        }
+        // Around delay_samples, there should be a non-zero echo
+        let echo_region = &outputs_l[delay_samples.saturating_sub(5)..];
+        let has_echo = echo_region.iter().any(|v| v.abs() > 0.01);
+        assert!(has_echo, "Delay should produce an echo after delay_samples");
+    }
+}

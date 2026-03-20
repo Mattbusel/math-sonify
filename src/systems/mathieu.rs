@@ -82,3 +82,55 @@ impl DynamicalSystem for Mathieu {
         self.speed = ds / dt.max(1e-15);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_mathieu_initial_state() {
+        let sys = Mathieu::new(0.0, 0.5);
+        let s = sys.state();
+        assert_eq!(s.len(), 3);
+        assert!((s[0] - 1.0).abs() < 1e-15, "Expected x=1.0");
+        assert!((s[1] - 0.0).abs() < 1e-15, "Expected v=0.0");
+        assert!((s[2] - 0.0).abs() < 1e-15, "Expected t=0.0");
+        assert_eq!(sys.name(), "Mathieu");
+        assert_eq!(sys.dimension(), 3);
+    }
+
+    #[test]
+    fn test_mathieu_step_changes_state() {
+        let mut sys = Mathieu::new(0.0, 0.5);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.01);
+        let after = sys.state();
+        assert!(
+            before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15),
+            "State did not change after step"
+        );
+    }
+
+    #[test]
+    fn test_mathieu_internal_time_advances() {
+        let mut sys = Mathieu::new(0.0, 0.5);
+        let dt = 0.01;
+        sys.step(dt);
+        // state[2] = internal time, should increase by approximately dt
+        assert!(sys.state()[2] > 0.0, "Internal time should advance");
+    }
+
+    #[test]
+    fn test_mathieu_deterministic() {
+        let mut sys1 = Mathieu::new(0.0, 0.5);
+        let mut sys2 = Mathieu::new(0.0, 0.5);
+        for _ in 0..500 {
+            sys1.step(0.01);
+            sys2.step(0.01);
+        }
+        for (a, b) in sys1.state().iter().zip(sys2.state().iter()) {
+            assert!((a - b).abs() < 1e-15, "Non-deterministic: {} vs {}", a, b);
+        }
+    }
+}

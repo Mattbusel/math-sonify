@@ -90,3 +90,59 @@ impl DynamicalSystem for Oregonator {
         self.speed = ds / dt.max(1e-15);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_oregonator_initial_state() {
+        let sys = Oregonator::new(1.0);
+        let s = sys.state();
+        assert_eq!(s.len(), 3);
+        assert!((s[0] - 1.0).abs() < 1e-15);
+        assert!((s[1] - 2.0).abs() < 1e-15);
+        assert!((s[2] - 3.0).abs() < 1e-15);
+        assert_eq!(sys.name(), "Oregonator");
+        assert_eq!(sys.dimension(), 3);
+    }
+
+    #[test]
+    fn test_oregonator_step_changes_state() {
+        let mut sys = Oregonator::new(1.0);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.0001);
+        let after = sys.state();
+        assert!(
+            before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15),
+            "State did not change after step"
+        );
+    }
+
+    #[test]
+    fn test_oregonator_state_stays_positive() {
+        // The Oregonator models chemical concentrations which must stay positive.
+        let mut sys = Oregonator::new(1.0);
+        for _ in 0..1000 {
+            sys.step(0.0001);
+        }
+        for v in sys.state().iter() {
+            assert!(*v >= 0.0, "State became negative: {}", v);
+            assert!(v.is_finite(), "State became non-finite: {}", v);
+        }
+    }
+
+    #[test]
+    fn test_oregonator_deterministic() {
+        let mut sys1 = Oregonator::new(1.0);
+        let mut sys2 = Oregonator::new(1.0);
+        for _ in 0..200 {
+            sys1.step(0.0001);
+            sys2.step(0.0001);
+        }
+        for (a, b) in sys1.state().iter().zip(sys2.state().iter()) {
+            assert!((a - b).abs() < 1e-15, "Non-deterministic: {} vs {}", a, b);
+        }
+    }
+}

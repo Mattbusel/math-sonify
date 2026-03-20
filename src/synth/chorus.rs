@@ -92,3 +92,46 @@ impl Chorus {
         (l * dry + out_l * self.mix, r * dry + out_r * self.mix)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    #[test]
+    fn test_chorus_bypass_when_mix_zero() {
+        let mut ch = Chorus::new(SR);
+        ch.mix = 0.0;
+        let (l, r) = ch.process(0.7, -0.3);
+        assert!((l - 0.7).abs() < 1e-6, "mix=0 should be bypass: {}", l);
+        assert!((r - (-0.3)).abs() < 1e-6, "mix=0 should be bypass: {}", r);
+    }
+
+    #[test]
+    fn test_chorus_output_finite() {
+        let mut ch = Chorus::new(SR);
+        ch.mix = 0.5;
+        ch.rate = 1.0;
+        ch.depth = 5.0;
+        for i in 0..2000 {
+            let x = (i as f32 * 0.05).sin();
+            let (l, r) = ch.process(x, -x);
+            assert!(l.is_finite(), "Left output non-finite at {}", i);
+            assert!(r.is_finite(), "Right output non-finite at {}", i);
+        }
+    }
+
+    #[test]
+    fn test_chorus_output_bounded() {
+        // With mix=1 and unity input, output should stay in a reasonable range
+        let mut ch = Chorus::new(SR);
+        ch.mix = 1.0;
+        for i in 0..1000 {
+            let x = (i as f32 * 0.05).sin();
+            let (l, r) = ch.process(x, x);
+            assert!(l.abs() < 2.0, "Left output too large: {}", l);
+            assert!(r.abs() < 2.0, "Right output too large: {}", r);
+        }
+    }
+}
