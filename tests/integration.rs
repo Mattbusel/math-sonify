@@ -5,11 +5,12 @@ use math_sonify_plugin::{
         chord_intervals_for, quantize_to_scale, DirectMapping, Scale, SonifMode, Sonification,
     },
     systems::{
-        Aizawa, ArnoldCat, BurkeShaw, Chen, Chua, CoupledMapLattice, Dadras, DelayedMap,
-        DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz, GeodesicTorus, Halvorsen,
-        HenonMap, HindmarshRose, Kuramoto, KuramotoDriven, LogisticMap, Lorenz, Lorenz96,
-        MackeyGlass, Mathieu, NoseHoover, Oregonator, Rossler, Rucklidge, SprottB, SprottC,
-        StandardMap, StochasticLorenz, Thomas, ThreeBody, VanDerPol,
+        validate_exprs, Aizawa, ArnoldCat, BurkeShaw, Chen, Chua, CoupledMapLattice, Dadras,
+        DelayedMap, DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz, GeodesicTorus,
+        Halvorsen, HenonMap, HindmarshRose, Kuramoto, KuramotoDriven, LogisticMap, Lorenz,
+        Lorenz84, Lorenz96, MackeyGlass, Mathieu, NoseHoover, Oregonator, RabinovichFabrikant,
+        Rossler, Rucklidge, SprottB, SprottC, StandardMap, StochasticLorenz, Thomas, ThreeBody,
+        VanDerPol,
     },
 };
 
@@ -1233,4 +1234,96 @@ fn kuramoto_driven_stays_finite() {
     let mut sys = KuramotoDriven::new(1.0, 0.5, 1.0);
     for _ in 0..10_000 { sys.step(0.01); }
     assert!(all_finite(sys.state()), "KuramotoDriven state non-finite: {:?}", sys.state());
+}
+
+// ── Lorenz84 integration tests ────────────────────────────────────────────────
+
+#[test]
+fn lorenz84_stays_finite() {
+    let mut sys = Lorenz84::new();
+    for _ in 0..20_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "Lorenz84 state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn lorenz84_state_bounded() {
+    // With a=0.25, b=4, F=8, G=1.23 the attractor is centred near x∈[-2,5].
+    // Use conservative bounds with margin for transient excursions.
+    let mut sys = Lorenz84::new();
+    for _ in 0..20_000 { sys.step(0.01); }
+    let s = sys.state();
+    assert!(s[0] > -5.0 && s[0] < 10.0, "Lorenz84 x out of expected range: {}", s[0]);
+    assert!(s[1].abs() < 15.0, "Lorenz84 y out of expected range: {}", s[1]);
+    assert!(s[2].abs() < 15.0, "Lorenz84 z out of expected range: {}", s[2]);
+}
+
+#[test]
+fn lorenz84_deterministic() {
+    let (mut s1, mut s2) = (Lorenz84::new(), Lorenz84::new());
+    for _ in 0..5_000 { s1.step(0.01); s2.step(0.01); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-14, "Lorenz84 non-deterministic: {} vs {}", a, b);
+    }
+}
+
+// ── Rabinovich–Fabrikant integration tests ────────────────────────────────────
+
+#[test]
+fn rabinovich_fabrikant_stays_finite() {
+    // Use small dt; RF is more sensitive than Lorenz due to cubic nonlinearity.
+    let mut sys = RabinovichFabrikant::new();
+    for _ in 0..10_000 { sys.step(0.001); }
+    assert!(all_finite(sys.state()), "RabinovichFabrikant state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn rabinovich_fabrikant_state_bounded() {
+    // With α=0.14, γ=0.1 the attractor stays within moderate bounds.
+    let mut sys = RabinovichFabrikant::new();
+    for _ in 0..10_000 { sys.step(0.001); }
+    for v in sys.state() {
+        assert!(v.abs() < 5.0, "RabinovichFabrikant component out of range: {}", v);
+    }
+}
+
+// ── Van der Pol physics test ──────────────────────────────────────────────────
+
+#[test]
+fn van_der_pol_limit_cycle_amplitude() {
+    // For μ=2, the stable limit cycle has x-amplitude ≈ 2. After a transient
+    // the peak should land solidly in [1.5, 3.5] regardless of initial conditions.
+    let mut sys = VanDerPol::new();
+    for _ in 0..5_000 { sys.step(0.01); }   // burn through transient
+    let mut max_x = 0.0_f64;
+    for _ in 0..5_000 {
+        sys.step(0.01);
+        max_x = max_x.max(sys.state()[0].abs());
+    }
+    assert!(
+        max_x > 1.5 && max_x < 3.5,
+        "Van der Pol x amplitude = {:.3} (expected ≈ 2.0)", max_x
+    );
+}
+
+// ── CustomOde / validate_exprs integration tests ──────────────────────────────
+
+#[test]
+fn validate_exprs_accepts_valid_lorenz_like_equations() {
+    // Simple Lorenz-like derivatives should pass validation.
+    let result = validate_exprs("y - x", "-x*z + 28*x - y", "x*y - 2.667*z", "");
+    assert!(result.is_ok(), "Valid Lorenz-like exprs rejected: {:?}", result);
+}
+
+#[test]
+fn validate_exprs_accepts_harmonic_oscillator() {
+    let result = validate_exprs("y", "-x", "0", "");
+    assert!(result.is_ok(), "Valid harmonic oscillator rejected: {:?}", result);
+}
+
+#[test]
+fn validate_exprs_rejects_unknown_identifier() {
+    // 'sigma' and 'rho' are not in the known variable/function list; the
+    // typo-detection path in validate_exprs should flag them as an error.
+    let result = validate_exprs("sigma * (y - x)", "-x*rho + 28*x - y", "x*y - 2.667*z", "");
+    assert!(result.is_err(), "Unknown identifiers 'sigma'/'rho' should be rejected");
 }
