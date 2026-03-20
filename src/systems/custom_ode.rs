@@ -109,6 +109,9 @@ struct Parser<'a> {
     z: f64,
     w: f64,
     t: f64,
+    /// When `true`, division by zero propagates `f64::NAN` rather than 0.0.
+    /// Used by `eval_expr_4d_raw` so that `validate_exprs` can detect it.
+    strict: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -121,7 +124,12 @@ impl<'a> Parser<'a> {
             z,
             w,
             t,
+            strict: false,
         }
+    }
+
+    fn new_strict(tokens: &'a [Token], x: f64, y: f64, z: f64, w: f64, t: f64) -> Self {
+        Self { strict: true, ..Self::new(tokens, x, y, z, w, t) }
     }
 
     fn peek(&self) -> &Token {
@@ -168,7 +176,13 @@ impl<'a> Parser<'a> {
                 Token::Slash => {
                     self.consume();
                     let r = self.power();
-                    val = if r.abs() > 1e-300 { val / r } else { 0.0 };
+                    val = if self.strict {
+                        val / r  // propagate inf/NaN for validate_exprs detection
+                    } else if r.abs() > 1e-300 {
+                        val / r
+                    } else {
+                        0.0  // safe coercion during integration
+                    };
                 }
                 _ => break,
             }
@@ -291,15 +305,15 @@ pub fn eval_expr_4d(src: &str, x: f64, y: f64, z: f64, w: f64, t: f64) -> f64 {
     if val.is_finite() { val } else { 0.0 }
 }
 
-/// Like `eval_expr_4d` but returns the raw value without coercing non-finite
-/// results to 0.0.  Used by `validate_exprs` so that division-by-zero and
-/// overflow are detectable.
+/// Like `eval_expr_4d` but uses strict division (propagates NaN/inf for
+/// division-by-zero rather than coercing to 0.0).  Used by `validate_exprs`
+/// so that problematic sub-expressions are detectable.
 fn eval_expr_4d_raw(src: &str, x: f64, y: f64, z: f64, w: f64, t: f64) -> f64 {
     let tokens = tokenize(src);
     if tokens.is_empty() {
         return 0.0;
     }
-    let mut parser = Parser::new(&tokens, x, y, z, w, t);
+    let mut parser = Parser::new_strict(&tokens, x, y, z, w, t);
     parser.expression()
 }
 

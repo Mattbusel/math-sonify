@@ -3218,11 +3218,11 @@ fn draw_advanced_panel(
                         .on_hover_text("β (geometric factor): controls dissipation. Typical value 8/3 ≈ 2.667.");
                 }
                 "fractional_lorenz" => {
-                    ui.add(Slider::new(&mut st.lorenz_alpha, 0.5..=1.0).text("α (order)"))
+                    ui.add(Slider::new(&mut st.config.fractional_lorenz.alpha, 0.5..=1.0).text("α (order)"))
                         .on_hover_text("Fractional derivative order — 1.0 = classic Lorenz");
-                    ui.add(Slider::new(&mut st.config.lorenz.sigma, 1.0..=20.0).text("sigma"));
-                    ui.add(Slider::new(&mut st.config.lorenz.rho, 10.0..=50.0).text("rho"));
-                    ui.add(Slider::new(&mut st.config.lorenz.beta, 0.5..=5.0).text("beta"));
+                    ui.add(Slider::new(&mut st.config.fractional_lorenz.sigma, 1.0..=20.0).text("sigma"));
+                    ui.add(Slider::new(&mut st.config.fractional_lorenz.rho, 10.0..=50.0).text("rho"));
+                    ui.add(Slider::new(&mut st.config.fractional_lorenz.beta, 0.5..=5.0).text("beta"));
                 }
                 "rossler" => {
                     ui.add(Slider::new(&mut st.config.rossler.a, 0.01..=0.5).text("a"))
