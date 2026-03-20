@@ -2034,7 +2034,7 @@ pub fn draw_ui(
         // Bifurcation controls
         if viz_tab == 6 {
             ui.horizontal(|ui| {
-                let param_opts = ["rho", "sigma", "coupling", "c"];
+                let param_opts = ["rho", "sigma", "coupling", "c", "r", "k", "b", "lambda", "a_rossler"];
                 let (current_bp, current_bp2, computing, mode_2d) = {
                     let st = state.lock();
                     (
@@ -5679,6 +5679,11 @@ fn param_range(param: &str) -> (f64, f64) {
         "sigma" => (5.0, 20.0),
         "coupling" => (0.0, 5.0),
         "c" => (3.0, 10.0),
+        "r" => (2.4, 4.0),       // logistic map: period-doubling onset to full chaos
+        "k" => (0.0, 2.0),       // standard map: KAM to fully chaotic
+        "b" => (0.05, 0.35),     // thomas: critical b≈0.208 separates chaos from limit cycle
+        "lambda" => (3.0, 10.0), // rucklidge: forcing amplitude
+        "a_rossler" => (0.0, 0.5), // rossler a: affects spiral tightness
         _ => (0.0, 1.0),
     }
 }
@@ -6279,16 +6284,25 @@ fn build_bifurc_system(
     rossler: &crate::config::RosslerConfig,
     kuramoto: &crate::config::KuramotoConfig,
 ) -> Box<dyn DynamicalSystem> {
+    use crate::systems::*;
     match (sys_name, param) {
-        ("lorenz", "rho") => Box::new(Lorenz::new(lorenz.sigma, pval, lorenz.beta)),
-        ("lorenz", "sigma") => Box::new(Lorenz::new(pval, lorenz.rho, lorenz.beta)),
-        ("rossler", "c") => Box::new(Rossler::new(rossler.a, rossler.b, pval)),
-        ("kuramoto", "coupling") => Box::new(Kuramoto::new(kuramoto.n_oscillators, pval)),
-        _ => Box::new(Lorenz::new(
-            lorenz.sigma,
-            pval.clamp(20.0, 50.0),
-            lorenz.beta,
-        )),
+        ("lorenz", "rho") | (_, "rho") => Box::new(Lorenz::new(lorenz.sigma, pval, lorenz.beta)),
+        ("lorenz", "sigma") | (_, "sigma") => Box::new(Lorenz::new(pval, lorenz.rho, lorenz.beta)),
+        ("rossler", "c") | ("rossler", _) => Box::new(Rossler::new(rossler.a, rossler.b, pval)),
+        (_, "c") => Box::new(Rossler::new(rossler.a, rossler.b, pval)),
+        ("kuramoto", "coupling") | (_, "coupling") => {
+            Box::new(Kuramoto::new(kuramoto.n_oscillators, pval))
+        }
+        ("logistic_map", "r") | (_, "r") => Box::new(LogisticMap::new(pval)),
+        ("standard_map", "k") | (_, "k") => Box::new(StandardMap::new(pval)),
+        ("thomas", "b") | (_, "b") => Box::new(Thomas::new(pval)),
+        ("rucklidge", "lambda") | (_, "lambda") => {
+            let mut s = Rucklidge::new();
+            s.lambda = pval;
+            Box::new(s)
+        }
+        (_, "a_rossler") => Box::new(Rossler::new(pval, rossler.b, rossler.c)),
+        _ => Box::new(Lorenz::new(lorenz.sigma, pval.clamp(20.0, 50.0), lorenz.beta)),
     }
 }
 
