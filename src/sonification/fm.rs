@@ -25,7 +25,7 @@ impl Sonification for FmMapping {
         let octave_range = config.octave_range as f32;
 
         // Use first state dimension to determine carrier frequency
-        let norm0 = if state.len() > 0 {
+        let norm0 = if !state.is_empty() {
             // tanh-based soft normalisation: smoothly maps any real value to [0,1]
             // without hard-clipping at ±30, so attractors with large state ranges
             // (three-body, Lorenz ρ=100) still produce musical frequency sweeps.
@@ -37,10 +37,16 @@ impl Sonification for FmMapping {
 
         let carrier_freq = quantize_to_scale(norm0, base_hz, octave_range, scale);
 
-        // Mod ratio from second state dimension
-        // Bound mod_ratio to musical range [1.0, 7.0]
+        // Mod ratio from second state dimension.
+        // Quantize to integer harmonic ratios for musical FM spectra.
+        // Continuous float ratios produce inharmonic beating; integer ratios
+        // produce stable, recognizable timbres (octaves, fifths, thirds, etc.).
+        const HARMONIC_RATIOS: [f32; 8] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let mod_ratio = if state.len() > 1 {
-            1.0 + (state[1].abs() as f32 % 6.0)
+            // tanh maps state[1] to (-1,1), shift+scale → index in 0..8
+            let norm = (state[1] as f32 / 10.0).tanh() * 0.5 + 0.5; // [0, 1)
+            let idx = (norm * HARMONIC_RATIOS.len() as f32) as usize;
+            HARMONIC_RATIOS[idx.min(HARMONIC_RATIOS.len() - 1)]
         } else {
             2.0
         };
