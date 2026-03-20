@@ -164,4 +164,64 @@ mod tests {
         }
         assert!(max_abs > 0.0, "Non-zero excitation should produce output");
     }
+
+    #[test]
+    fn test_tune_to_scale_empty_intervals_is_noop() {
+        let mut bank = ResonatorBank::new(SR);
+        let freqs_before = bank.frequencies;
+        bank.tune_to_scale(220.0, 2.0, &[]);
+        assert_eq!(bank.frequencies, freqs_before, "Empty intervals should leave freqs unchanged");
+    }
+
+    #[test]
+    fn test_tune_to_scale_frequencies_in_valid_range() {
+        let mut bank = ResonatorBank::new(SR);
+        let pentatonic = [0.0f32, 2.0, 4.0, 7.0, 9.0];
+        bank.tune_to_scale(220.0, 2.0, &pentatonic);
+        let nyquist = SR * 0.45;
+        for &f in bank.frequencies.iter() {
+            assert!(f >= 20.0, "Frequency {} below 20 Hz", f);
+            assert!(f <= nyquist, "Frequency {} above Nyquist ({})", f, nyquist);
+            assert!(f.is_finite(), "Frequency {} is non-finite", f);
+        }
+    }
+
+    #[test]
+    fn test_tune_to_scale_frequencies_monotone() {
+        // Pentatonic across 2 octaves: resonators should be non-decreasing
+        let mut bank = ResonatorBank::new(SR);
+        let pentatonic = [0.0f32, 2.0, 4.0, 7.0, 9.0];
+        bank.tune_to_scale(220.0, 2.0, &pentatonic);
+        for i in 1..bank.frequencies.len() {
+            assert!(
+                bank.frequencies[i] >= bank.frequencies[i - 1],
+                "Frequencies not monotone at [{}]: {} < {}",
+                i,
+                bank.frequencies[i],
+                bank.frequencies[i - 1]
+            );
+        }
+    }
+
+    #[test]
+    fn test_tune_to_scale_base_frequency_is_lowest() {
+        let mut bank = ResonatorBank::new(SR);
+        bank.tune_to_scale(440.0, 2.0, &[0.0, 4.0, 7.0]);
+        // First resonator (t=0) should be at base frequency
+        assert!(
+            (bank.frequencies[0] - 440.0).abs() < 1.0,
+            "First resonator should be near base 440 Hz, got {}",
+            bank.frequencies[0]
+        );
+    }
+
+    #[test]
+    fn test_tune_to_scale_output_still_finite_after_retune() {
+        let mut bank = ResonatorBank::new(SR);
+        bank.tune_to_scale(330.0, 3.0, &[0.0, 2.0, 4.0, 7.0, 9.0]);
+        for _ in 0..1000 {
+            let (l, r) = bank.next_sample();
+            assert!(l.is_finite() && r.is_finite(), "Output non-finite after retune");
+        }
+    }
 }

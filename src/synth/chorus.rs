@@ -134,4 +134,25 @@ mod tests {
             assert!(r.abs() < 2.0, "Right output too large: {}", r);
         }
     }
+
+    #[test]
+    fn test_chorus_both_channels_produce_output() {
+        // Both L and R channels should produce non-zero output when fully wet.
+        // Uses noise-like input to avoid cancellation artifacts.
+        let mut ch = Chorus::new(SR);
+        ch.mix = 1.0;
+        ch.rate = 0.5;
+        ch.depth = 3.0;
+        let mut max_l = 0.0f32;
+        let mut max_r = 0.0f32;
+        for i in 0..4000 {
+            // Use coprime-frequency sum to avoid perfect cancellation
+            let x = (i as f32 * 0.07).sin() + (i as f32 * 0.13).sin();
+            let (l, r) = ch.process(x, x);
+            max_l = max_l.max(l.abs());
+            max_r = max_r.max(r.abs());
+        }
+        assert!(max_l > 0.01, "Left channel has no output: max={}", max_l);
+        assert!(max_r > 0.01, "Right channel has no output: max={}", max_r);
+    }
 }

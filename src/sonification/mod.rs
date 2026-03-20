@@ -360,3 +360,127 @@ pub trait Sonification: Send {
     /// * `config` - Active sonification configuration (scale, base frequency, etc.).
     fn map(&mut self, state: &[f64], speed: f64, config: &SonificationConfig) -> AudioParams;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -------------------------------------------------------------------------
+    // chord_intervals_for
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn chord_intervals_major() {
+        let iv = chord_intervals_for("major");
+        assert!((iv[0] - 4.0).abs() < 1e-6, "major: expected 4 semitones, got {}", iv[0]);
+        assert!((iv[1] - 7.0).abs() < 1e-6, "major: expected 7 semitones, got {}", iv[1]);
+    }
+
+    #[test]
+    fn chord_intervals_dom7_three_voices() {
+        let iv = chord_intervals_for("dom7");
+        assert!((iv[0] - 4.0).abs() < 1e-6);
+        assert!((iv[1] - 7.0).abs() < 1e-6);
+        assert!((iv[2] - 10.0).abs() < 1e-6, "dom7 third voice: expected 10, got {}", iv[2]);
+    }
+
+    #[test]
+    fn chord_intervals_unknown_returns_zeros() {
+        let iv = chord_intervals_for("definitely_not_a_chord");
+        assert_eq!(iv, [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn chord_intervals_all_named_modes_return_finite() {
+        for mode in &["major", "minor", "power", "sus2", "octave", "dom7", "min7", "maj7", "aug", "dim", "sus4"] {
+            let iv = chord_intervals_for(mode);
+            for (i, &v) in iv.iter().enumerate() {
+                assert!(v.is_finite(), "chord {} interval[{}] non-finite", mode, i);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // quantize_to_scale — new scale variants
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn quantize_whole_tone_returns_finite_in_range() {
+        let base = 220.0f32;
+        let oct = 2.0f32;
+        for i in 0..=20 {
+            let t = i as f32 / 20.0;
+            let f = quantize_to_scale(t, base, oct, Scale::WholeTone);
+            assert!(f.is_finite() && f > 0.0, "WholeTone: non-positive at t={}: {}", t, f);
+            assert!(f >= base * 0.99, "WholeTone: below base at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn quantize_phrygian_returns_finite() {
+        let base = 220.0f32;
+        for i in 0..=10 {
+            let t = i as f32 / 10.0;
+            let f = quantize_to_scale(t, base, 2.0, Scale::Phrygian);
+            assert!(f.is_finite() && f > 0.0, "Phrygian: invalid at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn quantize_lydian_returns_finite() {
+        let base = 440.0f32;
+        for i in 0..=10 {
+            let t = i as f32 / 10.0;
+            let f = quantize_to_scale(t, base, 2.0, Scale::Lydian);
+            assert!(f.is_finite() && f > 0.0, "Lydian: invalid at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn quantize_harmonic_series_snaps_to_harmonics() {
+        // HarmonicSeries should return values from the known harmonic series
+        let known: &[f32] = &[110.0, 220.0, 330.0, 440.0, 550.0, 660.0, 770.0, 880.0, 990.0, 1100.0, 1320.0, 1540.0];
+        for i in 0..=10 {
+            let t = i as f32 / 10.0;
+            let f = quantize_to_scale(t, 110.0, 4.0, Scale::HarmonicSeries);
+            assert!(
+                known.iter().any(|&h| (f - h).abs() < 1.0),
+                "HarmonicSeries: {} not in known harmonics at t={}",
+                f,
+                t
+            );
+        }
+    }
+
+    #[test]
+    fn quantize_edo19_returns_monotone_frequencies() {
+        let base = 220.0f32;
+        let mut prev = 0.0f32;
+        for i in 0..=20 {
+            let t = i as f32 / 20.0;
+            let f = quantize_to_scale(t, base, 2.0, Scale::Edo19);
+            assert!(f >= prev, "EDO19 not monotone at t={}: {} < {}", t, f, prev);
+            prev = f;
+        }
+    }
+
+    #[test]
+    fn quantize_edo31_frequencies_in_range() {
+        let base = 220.0f32;
+        for i in 0..=20 {
+            let t = i as f32 / 20.0;
+            let f = quantize_to_scale(t, base, 2.0, Scale::Edo31);
+            assert!(f >= base * 0.99 && f.is_finite(), "EDO31 out of range at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn quantize_just_intonation_returns_valid_frequencies() {
+        let base = 220.0f32;
+        for i in 0..=10 {
+            let t = i as f32 / 10.0;
+            let f = quantize_to_scale(t, base, 2.0, Scale::JustIntonation);
+            assert!(f >= base * 0.99 && f.is_finite(), "JustIntonation at t={}: {}", t, f);
+        }
+    }
+}
