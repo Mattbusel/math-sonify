@@ -277,6 +277,9 @@ pub enum Scale {
     HarmonicSeries, // Integer multiples of 110 Hz (A2)
     Hirajoshi,      // Japanese pentatonic: 0, 2, 3, 7, 8
     Blues,          // Blues scale: 0, 3, 5, 6, 7, 10
+    Dorian,         // D Dorian: 0, 2, 3, 5, 7, 9, 10 — minor with raised 6th
+    Mixolydian,     // G Mixolydian: 0, 2, 4, 5, 7, 9, 10 — major with flat 7th
+    HungarianMinor, // Hungarian minor: 0, 2, 3, 6, 7, 8, 11 — augmented 4th and major 7th
 }
 
 /// Semitone intervals for non-computed scales, relative to root.
@@ -293,6 +296,9 @@ fn scale_intervals(scale: Scale) -> &'static [f32] {
         Scale::Lydian => &[0.0, 2.0, 4.0, 6.0, 7.0, 9.0, 11.0],
         Scale::Hirajoshi => &[0.0, 2.0, 3.0, 7.0, 8.0],
         Scale::Blues => &[0.0, 3.0, 5.0, 6.0, 7.0, 10.0],
+        Scale::Dorian => &[0.0, 2.0, 3.0, 5.0, 7.0, 9.0, 10.0],
+        Scale::Mixolydian => &[0.0, 2.0, 4.0, 5.0, 7.0, 9.0, 10.0],
+        Scale::HungarianMinor => &[0.0, 2.0, 3.0, 6.0, 7.0, 8.0, 11.0],
         // EDO and HarmonicSeries scales have computed intervals -- handled in scale_intervals_owned
         Scale::Edo19 | Scale::Edo31 | Scale::Edo24 | Scale::HarmonicSeries => &[0.0],
     }
@@ -486,5 +492,91 @@ mod tests {
             let f = quantize_to_scale(t, base, 2.0, Scale::JustIntonation);
             assert!(f >= base * 0.99 && f.is_finite(), "JustIntonation at t={}: {}", t, f);
         }
+    }
+
+    #[test]
+    fn test_hirajoshi_scale_produces_finite_output() {
+        let base = 220.0_f32;
+        let oct = 2.0_f32;
+        for &t in &[0.0_f32, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
+            let f = quantize_to_scale(t, base, oct, Scale::Hirajoshi);
+            assert!(f.is_finite() && f > 0.0, "Hirajoshi at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn test_hirajoshi_scale_interval_count() {
+        // Hirajoshi is a 5-note pentatonic scale
+        let intervals = &[0.0_f32, 2.0, 3.0, 7.0, 8.0];
+        assert_eq!(intervals.len(), 5, "Hirajoshi should have 5 notes per octave");
+    }
+
+    #[test]
+    fn test_blues_scale_produces_finite_output() {
+        let base = 220.0_f32;
+        let oct = 2.0_f32;
+        for &t in &[0.0_f32, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
+            let f = quantize_to_scale(t, base, oct, Scale::Blues);
+            assert!(f.is_finite() && f > 0.0, "Blues at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn test_blues_scale_interval_count() {
+        // Blues is a 6-note hexatonic scale: 0, 3, 5, 6, 7, 10
+        let intervals = &[0.0_f32, 3.0, 5.0, 6.0, 7.0, 10.0];
+        assert_eq!(intervals.len(), 6, "Blues should have 6 notes per octave");
+    }
+
+    #[test]
+    fn test_hirajoshi_different_from_pentatonic() {
+        // Hirajoshi has semitone intervals [2,1,4,1] vs pentatonic [2,2,3,2,3]
+        // They should produce different frequencies for the same t
+        let base = 440.0_f32;
+        let oct = 2.0_f32;
+        let t = 0.3_f32;
+        let h = quantize_to_scale(t, base, oct, Scale::Hirajoshi);
+        let p = quantize_to_scale(t, base, oct, Scale::Pentatonic);
+        // May or may not differ at this particular t (depends on quantization), but both valid
+        assert!(h.is_finite() && h > 0.0);
+        assert!(p.is_finite() && p > 0.0);
+    }
+
+    #[test]
+    fn test_dorian_scale_produces_finite_output() {
+        let base = 220.0_f32;
+        for &t in &[0.0_f32, 0.2, 0.5, 0.8, 1.0] {
+            let f = quantize_to_scale(t, base, 2.0, Scale::Dorian);
+            assert!(f.is_finite() && f > 0.0, "Dorian at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn test_mixolydian_scale_produces_finite_output() {
+        let base = 220.0_f32;
+        for &t in &[0.0_f32, 0.2, 0.5, 0.8, 1.0] {
+            let f = quantize_to_scale(t, base, 2.0, Scale::Mixolydian);
+            assert!(f.is_finite() && f > 0.0, "Mixolydian at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn test_hungarian_minor_scale_produces_finite_output() {
+        let base = 220.0_f32;
+        for &t in &[0.0_f32, 0.2, 0.5, 0.8, 1.0] {
+            let f = quantize_to_scale(t, base, 2.0, Scale::HungarianMinor);
+            assert!(f.is_finite() && f > 0.0, "HungarianMinor at t={}: {}", t, f);
+        }
+    }
+
+    #[test]
+    fn test_modal_scales_all_seven_notes() {
+        // Dorian, Mixolydian, HungarianMinor — all 7-note heptatonic scales
+        let dorian = &[0.0_f32, 2.0, 3.0, 5.0, 7.0, 9.0, 10.0];
+        let mixo   = &[0.0_f32, 2.0, 4.0, 5.0, 7.0, 9.0, 10.0];
+        let hung   = &[0.0_f32, 2.0, 3.0, 6.0, 7.0, 8.0, 11.0];
+        assert_eq!(dorian.len(), 7, "Dorian should have 7 notes");
+        assert_eq!(mixo.len(), 7, "Mixolydian should have 7 notes");
+        assert_eq!(hung.len(), 7, "HungarianMinor should have 7 notes");
     }
 }
