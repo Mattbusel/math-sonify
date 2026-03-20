@@ -239,7 +239,7 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
     SystemEntry {
         name: "sprott_d",
         display_name: "Sprott D",
-        description: "Strongly dissipative attractor: y² drives chaos, −2y damps it tightly",
+        description: "Sprott Case I: y² nonlinearity with −1.1z dissipation — bounded strange attractor",
     },
     SystemEntry {
         name: "sprott_e",

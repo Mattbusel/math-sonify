@@ -275,6 +275,8 @@ pub enum Scale {
     Phrygian,       // E Phrygian: 0, 1, 3, 5, 7, 8, 10
     Lydian,         // F Lydian: 0, 2, 4, 6, 7, 9, 11
     HarmonicSeries, // Integer multiples of 110 Hz (A2)
+    Hirajoshi,      // Japanese pentatonic: 0, 2, 3, 7, 8
+    Blues,          // Blues scale: 0, 3, 5, 6, 7, 10
 }
 
 /// Semitone intervals for non-computed scales, relative to root.
@@ -289,6 +291,8 @@ fn scale_intervals(scale: Scale) -> &'static [f32] {
         Scale::WholeTone => &[0.0, 2.0, 4.0, 6.0, 8.0, 10.0],
         Scale::Phrygian => &[0.0, 1.0, 3.0, 5.0, 7.0, 8.0, 10.0],
         Scale::Lydian => &[0.0, 2.0, 4.0, 6.0, 7.0, 9.0, 11.0],
+        Scale::Hirajoshi => &[0.0, 2.0, 3.0, 7.0, 8.0],
+        Scale::Blues => &[0.0, 3.0, 5.0, 6.0, 7.0, 10.0],
         // EDO and HarmonicSeries scales have computed intervals -- handled in scale_intervals_owned
         Scale::Edo19 | Scale::Edo31 | Scale::Edo24 | Scale::HarmonicSeries => &[0.0],
     }

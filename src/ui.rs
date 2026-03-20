@@ -1087,6 +1087,8 @@ fn scale_description(scale: &str) -> &'static str {
         "phrygian" => "E Phrygian: dark and tense — flamenco and metal favourite",
         "lydian" => "F Lydian: bright and ethereal — raised 4th creates tension",
         "harmonic_series" => "Integer multiples of A2 (110 Hz) — natural overtone series",
+        "hirajoshi" => "Japanese pentatonic — sparse, austere, evokes koto and shakuhachi",
+        "blues" => "Blues hexatonic — flat third and fifth give a soulful bent-note feel",
         _ => "",
     }
 }
@@ -3045,6 +3047,8 @@ fn draw_advanced_panel(
             ("phrygian", "Phrygian"),
             ("lydian", "Lydian"),
             ("harmonic_series", "Harmonic Series"),
+            ("hirajoshi", "Hirajoshi"),
+            ("blues", "Blues"),
         ];
         let current_scale = st.config.sonification.scale.clone();
         let current_scale_label = scales

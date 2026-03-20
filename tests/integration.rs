@@ -7,10 +7,10 @@ use math_sonify_plugin::{
     systems::{
         validate_exprs, Aizawa, ArnoldCat, Bouali, BurkeShaw, Chen, Chua, CoupledMapLattice,
         Dadras, DelayedMap, DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz,
-        GeodesicTorus, Halvorsen, HenonMap, HindmarshRose, Kuramoto, KuramotoDriven, LogisticMap,
-        Lorenz, Lorenz84, Lorenz96, MackeyGlass, Mathieu, NewtonLeipnik, NoseHoover, Oregonator,
-        RabinovichFabrikant, Rikitake, Rossler, Rucklidge, ShimizuMorioka, SprottB, SprottC,
-        SprottD, SprottE, SprottF, SprottG, SprottH, SprottL, StandardMap, StochasticLorenz,
+        GenesioTesi, GeodesicTorus, Halvorsen, HenonMap, HindmarshRose, Kuramoto, KuramotoDriven,
+        LogisticMap, Lorenz, Lorenz84, Lorenz96, MackeyGlass, Mathieu, NewtonLeipnik, NoseHoover,
+        Oregonator, RabinovichFabrikant, Rikitake, Rossler, Rucklidge, ShimizuMorioka, SprottB,
+        SprottC, SprottD, SprottE, SprottF, SprottG, SprottH, SprottL, StandardMap, StochasticLorenz,
         Thomas, ThreeBody, VanDerPol,
     },
 };
@@ -1722,5 +1722,36 @@ fn sprott_l_deterministic() {
     for _ in 0..500 { s1.step(0.01); s2.step(0.01); }
     for (a, b) in s1.state().iter().zip(s2.state().iter()) {
         assert!((a - b).abs() < 1e-12, "Sprott-L not deterministic: {} vs {}", a, b);
+    }
+}
+
+// ── Genesio-Tesi integration tests ────────────────────────────────────────────
+
+#[test]
+fn genesio_tesi_stays_finite() {
+    let mut sys = GenesioTesi::new();
+    for _ in 0..10_000 { sys.step(0.005); }
+    assert!(all_finite(sys.state()), "Genesio-Tesi state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn genesio_tesi_state_bounded() {
+    let mut sys = GenesioTesi::new();
+    for _ in 0..10_000 { sys.step(0.005); }
+    let s = sys.state();
+    assert!(all_finite(s), "Genesio-Tesi non-finite: {:?}", s);
+    // Attractor stays within moderate bounds with NaN guard active
+    assert!(s[0].abs() < 10.0, "Genesio-Tesi x out of range: {}", s[0]);
+    assert!(s[1].abs() < 15.0, "Genesio-Tesi y out of range: {}", s[1]);
+    assert!(s[2].abs() < 30.0, "Genesio-Tesi z out of range: {}", s[2]);
+}
+
+#[test]
+fn genesio_tesi_deterministic() {
+    let mut s1 = GenesioTesi::new();
+    let mut s2 = GenesioTesi::new();
+    for _ in 0..500 { s1.step(0.005); s2.step(0.005); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-12, "Genesio-Tesi not deterministic: {} vs {}", a, b);
     }
 }
