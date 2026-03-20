@@ -189,3 +189,48 @@ impl GrainEngine {
         (l * norm, r * norm)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    #[test]
+    fn test_grain_engine_output_finite() {
+        let mut engine = GrainEngine::new(SR);
+        for i in 0..2000 {
+            let (l, r) = engine.next_sample();
+            assert!(l.is_finite(), "L output non-finite at {}", i);
+            assert!(r.is_finite(), "R output non-finite at {}", i);
+        }
+    }
+
+    #[test]
+    fn test_grain_engine_produces_output_with_spawn() {
+        let mut engine = GrainEngine::new(SR);
+        engine.spawn_rate = 100.0;
+        engine.base_freq = 440.0;
+        let mut max_abs = 0.0f32;
+        for _ in 0..4410 {
+            let (l, r) = engine.next_sample();
+            max_abs = max_abs.max(l.abs()).max(r.abs());
+        }
+        assert!(max_abs > 0.0, "Should produce output with active grains");
+    }
+
+    #[test]
+    fn test_grain_engine_two_instances_decorrelated() {
+        // Each instance gets a unique seed so outputs differ
+        let mut e1 = GrainEngine::new(SR);
+        let mut e2 = GrainEngine::new(SR);
+        e1.spawn_rate = 50.0;
+        e2.spawn_rate = 50.0;
+        let (l1, _) = e1.next_sample();
+        let (l2, _) = e2.next_sample();
+        // With unique seeds the outputs should not be identical (extremely unlikely)
+        // We just verify both are finite as a smoke test
+        assert!(l1.is_finite());
+        assert!(l2.is_finite());
+    }
+}

@@ -171,3 +171,65 @@ impl DynamicalSystem for ThreeBody {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_three_body_initial_state() {
+        let sys = ThreeBody::new([1.0, 1.0, 1.0]);
+        let s = sys.state();
+        assert_eq!(s.len(), 12);
+        assert_eq!(sys.dimension(), 12);
+        assert_eq!(sys.name(), "Three-Body");
+        assert!(s.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_three_body_step_changes_state() {
+        let mut sys = ThreeBody::new([1.0, 1.0, 1.0]);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.001);
+        assert!(before.iter().zip(sys.state().iter()).any(|(a, b)| (a - b).abs() > 1e-15));
+    }
+
+    #[test]
+    fn test_three_body_state_stays_finite() {
+        let mut sys = ThreeBody::new([1.0, 1.0, 1.0]);
+        for _ in 0..500 {
+            sys.step(0.001);
+        }
+        for v in sys.state().iter() {
+            assert!(v.is_finite(), "State became non-finite: {}", v);
+        }
+    }
+
+    #[test]
+    fn test_three_body_energy_conserved() {
+        // Leapfrog should conserve energy to within a small relative error
+        let mut sys = ThreeBody::new([1.0, 1.0, 1.0]);
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(
+            sys.energy_error < 0.01,
+            "Energy error too large: {}",
+            sys.energy_error
+        );
+    }
+
+    #[test]
+    fn test_three_body_deterministic() {
+        let mut s1 = ThreeBody::new([1.0, 1.0, 1.0]);
+        let mut s2 = ThreeBody::new([1.0, 1.0, 1.0]);
+        for _ in 0..200 {
+            s1.step(0.001);
+            s2.step(0.001);
+        }
+        for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+            assert!((a - b).abs() < 1e-12, "Non-deterministic: {} vs {}", a, b);
+        }
+    }
+}

@@ -75,6 +75,12 @@ impl Lorenz96 {
     }
 }
 
+impl Default for Lorenz96 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DynamicalSystem for Lorenz96 {
     fn state(&self) -> &[f64] {
         &self.state
@@ -114,5 +120,72 @@ impl DynamicalSystem for Lorenz96 {
             .sum::<f64>()
             .sqrt();
         self.speed = ds / dt;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_lorenz96_initial_state() {
+        let sys = Lorenz96::new();
+        let s = sys.state();
+        assert_eq!(s.len(), 8);
+        assert!(s.iter().all(|v| v.is_finite()));
+        assert_eq!(sys.name(), "lorenz96");
+        assert_eq!(sys.dimension(), 8);
+        assert!((s[0] - 0.01).abs() < 1e-15, "state[0] should be 0.01");
+    }
+
+    #[test]
+    fn test_lorenz96_step_changes_state() {
+        let mut sys = Lorenz96::new();
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.01);
+        let after = sys.state();
+        assert!(before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15));
+    }
+
+    #[test]
+    fn test_lorenz96_state_stays_finite() {
+        let mut sys = Lorenz96::new();
+        for _ in 0..1000 {
+            sys.step(0.01);
+        }
+        for v in sys.state().iter() {
+            assert!(v.is_finite(), "State became non-finite: {}", v);
+        }
+    }
+
+    #[test]
+    fn test_lorenz96_deterministic() {
+        let mut s1 = Lorenz96::new();
+        let mut s2 = Lorenz96::new();
+        for _ in 0..200 {
+            s1.step(0.01);
+            s2.step(0.01);
+        }
+        for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+            assert!((a - b).abs() < 1e-12, "Non-deterministic: {} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_lorenz96_set_state() {
+        let mut sys = Lorenz96::new();
+        let new_state: Vec<f64> = (0..8).map(|i| i as f64 * 0.1).collect();
+        sys.set_state(&new_state);
+        for (i, &v) in sys.state().iter().enumerate() {
+            assert!((v - i as f64 * 0.1).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn test_lorenz96_with_forcing() {
+        let sys = Lorenz96::with_forcing(8, 8.0, 1.0);
+        assert_eq!(sys.dimension(), 8);
+        assert!(sys.state().iter().all(|v| v.is_finite()));
     }
 }

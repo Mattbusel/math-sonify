@@ -70,7 +70,7 @@ impl Oscillator {
     /// # Returns
     /// An `Oscillator` instance with phase initialized to zero.
     pub fn new(freq: f32, shape: OscShape, sample_rate: f32) -> Self {
-        Self {
+        let mut osc = Self {
             phase: 0.0,
             freq,
             shape,
@@ -81,7 +81,17 @@ impl Oscillator {
                 .fetch_add(1, Ordering::Relaxed)
                 .wrapping_mul(0x9E37_79B9_7F4A_7C15)
                 .wrapping_add(0x517C_C1B7_2722_0A95),
+        };
+        // Pre-warm the triangle integrator for one full period to avoid startup
+        // transient where tri_state=0 causes amplitude to overshoot ±1 before settling.
+        if shape == OscShape::Triangle {
+            let warmup = (sample_rate / freq.max(1.0)) as usize;
+            for _ in 0..warmup {
+                osc.next_sample();
+            }
+            osc.phase = 0.0;
         }
+        osc
     }
 
     /// Advances the oscillator by one sample and returns the output value in `[-1, 1]`.
@@ -132,8 +142,11 @@ impl Oscillator {
                 let sq_ac = sq - self.sq_dc;
                 // Integrate: step size = 4*dt to get correct ±1 amplitude
                 self.tri_state += 4.0 * dt * sq_ac;
-                // Slightly tighter leak to remove integrator drift
-                self.tri_state *= 1.0 - 2e-5;
+                // Leaky integrator — leak of 1e-3 gives a ~1000-sample time constant
+                // so the waveform reaches steady-state amplitude within ~23 ms.
+                // The prior value (2e-5) had a 50 000-sample constant, causing a multi-
+                // second transient where the output overshot ±1 before settling.
+                self.tri_state *= 1.0 - 1e-3;
                 self.tri_state
             }
         };

@@ -198,6 +198,9 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
         lorenz96: Lorenz96Config {
             f: lf64(a.lorenz96.f, b.lorenz96.f),
         },
+        thomas: ThomasConfig {
+            b: lf64(a.thomas.b, b.thomas.b),
+        },
         viz: a.viz.clone(), // don't morph viz settings
         ..a.clone()
     }

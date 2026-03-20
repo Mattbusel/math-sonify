@@ -80,6 +80,46 @@ impl BiquadFilter {
         }
     }
 
+    /// Construct a notch (band-reject) biquad (RBJ audio cookbook §"notch filter").
+    ///
+    /// Attenuates a narrow band around `center_hz` while passing all other frequencies.
+    ///
+    /// # Parameters
+    /// - `center_hz`: Notch center frequency in Hz.
+    /// - `q`: Quality factor; higher Q = narrower notch.
+    /// - `sample_rate`: Audio sample rate in Hz.
+    pub fn notch(center_hz: f32, q: f32, sample_rate: f32) -> Self {
+        let w0 = std::f32::consts::TAU * center_hz / sample_rate;
+        let alpha = w0.sin() / (2.0 * q);
+        let cos_w0 = w0.cos();
+        let a0 = 1.0 + alpha;
+        Self {
+            b0: 1.0 / a0,
+            b1: -2.0 * cos_w0 / a0,
+            b2: 1.0 / a0,
+            a1: -2.0 * cos_w0 / a0,
+            a2: (1.0 - alpha) / a0,
+            z1: 0.0,
+            z2: 0.0,
+        }
+    }
+
+    /// Update notch coefficients in place, preserving filter state.
+    pub fn update_notch(&mut self, center_hz: f32, q: f32, sample_rate: f32) {
+        let center = center_hz.clamp(20.0, sample_rate * 0.45);
+        let q_safe = q.max(0.1);
+        let new = Self::notch(center, q_safe, sample_rate);
+        self.b0 = new.b0;
+        self.b1 = new.b1;
+        self.b2 = new.b2;
+        self.a1 = new.a1;
+        self.a2 = new.a2;
+        if !self.z1.is_finite() || !self.z2.is_finite() {
+            self.z1 = 0.0;
+            self.z2 = 0.0;
+        }
+    }
+
     /// Construct a new band-pass biquad (constant skirt gain, unity peak gain).
     ///
     /// # Parameters

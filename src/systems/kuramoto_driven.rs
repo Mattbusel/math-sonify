@@ -115,3 +115,49 @@ impl DynamicalSystem for KuramotoDriven {
         self.speed = ds / dt.max(1e-15);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_kuramoto_driven_initial_state() {
+        let sys = KuramotoDriven::new(1.0, 0.5, 1.0);
+        let s = sys.state();
+        assert_eq!(s.len(), 7); // 6 phases + t_internal
+        assert_eq!(sys.dimension(), 6);
+        assert_eq!(sys.name(), "Kuramoto Driven");
+        assert!(s.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_kuramoto_driven_step_changes_state() {
+        let mut sys = KuramotoDriven::new(1.0, 0.5, 1.0);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.01);
+        assert!(before.iter().zip(sys.state().iter()).any(|(a, b)| (a - b).abs() > 1e-15));
+    }
+
+    #[test]
+    fn test_kuramoto_driven_phases_wrapped() {
+        let mut sys = KuramotoDriven::new(1.0, 0.5, 1.0);
+        for _ in 0..1000 {
+            sys.step(0.01);
+        }
+        for &th in sys.state()[0..N].iter() {
+            assert!(th >= 0.0 && th < std::f64::consts::TAU, "Phase unwrapped: {}", th);
+        }
+    }
+
+    #[test]
+    fn test_kuramoto_driven_t_internal_advances() {
+        let mut sys = KuramotoDriven::new(1.0, 0.5, 1.0);
+        let t_before = sys.state()[N];
+        for _ in 0..10 {
+            sys.step(0.01);
+        }
+        let t_after = sys.state()[N];
+        assert!(t_after > t_before, "t_internal should advance: {} -> {}", t_before, t_after);
+    }
+}

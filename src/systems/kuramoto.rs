@@ -113,3 +113,63 @@ impl DynamicalSystem for Kuramoto {
         self.speed = ds / dt;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_kuramoto_initial_state() {
+        let sys = Kuramoto::new(8, 2.0);
+        let s = sys.state();
+        assert_eq!(s.len(), 8);
+        assert_eq!(sys.dimension(), 8);
+        assert_eq!(sys.name(), "Kuramoto");
+        assert!(s.iter().all(|v| v.is_finite()));
+        // Phases should be in [0, 2π)
+        for &th in s.iter() {
+            assert!(th >= 0.0 && th < std::f64::consts::TAU, "Phase out of range: {}", th);
+        }
+    }
+
+    #[test]
+    fn test_kuramoto_step_changes_state() {
+        let mut sys = Kuramoto::new(8, 2.0);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.01);
+        assert!(before.iter().zip(sys.state().iter()).any(|(a, b)| (a - b).abs() > 1e-15));
+    }
+
+    #[test]
+    fn test_kuramoto_phases_stay_wrapped() {
+        let mut sys = Kuramoto::new(8, 2.0);
+        for _ in 0..1000 {
+            sys.step(0.01);
+        }
+        for &th in sys.state().iter() {
+            assert!(th >= 0.0 && th < std::f64::consts::TAU, "Phase unwrapped: {}", th);
+        }
+    }
+
+    #[test]
+    fn test_kuramoto_order_parameter_in_range() {
+        let mut sys = Kuramoto::new(8, 2.0);
+        for _ in 0..500 {
+            sys.step(0.01);
+        }
+        let r = sys.order_parameter();
+        assert!(r >= 0.0 && r <= 1.0 + 1e-10, "Order param out of [0,1]: {}", r);
+    }
+
+    #[test]
+    fn test_kuramoto_high_coupling_synchronizes() {
+        // With very high coupling, order parameter should approach 1
+        let mut sys = Kuramoto::new(8, 20.0);
+        for _ in 0..2000 {
+            sys.step(0.01);
+        }
+        let r = sys.order_parameter();
+        assert!(r > 0.8, "High coupling should synchronize: r={}", r);
+    }
+}

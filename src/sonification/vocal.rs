@@ -1,4 +1,4 @@
-use super::{AudioParams, SonifMode, Sonification};
+use super::{quantize_to_scale, AudioParams, Scale, SonifMode, Sonification};
 use crate::config::SonificationConfig;
 
 /// Vowel formant definitions: (F1, F2, F3) in Hz
@@ -76,7 +76,7 @@ impl VocalMapping {
 }
 
 impl Sonification for VocalMapping {
-    fn map(&mut self, state: &[f64], speed: f64, _config: &SonificationConfig) -> AudioParams {
+    fn map(&mut self, state: &[f64], speed: f64, config: &SonificationConfig) -> AudioParams {
         let norm = self.normalize(state);
 
         // state[0] drives vowel position
@@ -93,6 +93,21 @@ impl Sonification for VocalMapping {
         let chaos = (speed.abs() as f32 / 100.0).clamp(0.0, 1.0);
         self.breathiness += 0.01 * ((chaos * 0.6).max(0.08) - self.breathiness);
 
+        // Fundamental pitch from the third state dimension (if available), quantized
+        // to the configured scale and base frequency.  Gives vocal mode a musical
+        // pitch center rather than relying solely on formant frequencies (which are
+        // fixed phoneme positions, not musical notes).
+        let fundamental = if state.len() >= 3 {
+            let scale = Scale::from(config.scale.as_str());
+            let base = config.base_frequency as f32;
+            let oct = config.octave_range as f32;
+            // tanh normalise state[2] to [0,1]
+            let z_norm = (state[2] as f32 / 30.0).tanh() * 0.5 + 0.5;
+            quantize_to_scale(z_norm, base, oct, scale)
+        } else {
+            config.base_frequency as f32
+        };
+
         let mut params = AudioParams {
             mode: SonifMode::Vocal,
             gain: 0.3,
@@ -102,11 +117,13 @@ impl Sonification for VocalMapping {
             ..Default::default()
         };
 
-        // F1, F2, F3 in freqs[0..3]
-        params.freqs[0] = f1;
-        params.freqs[1] = f2;
-        params.freqs[2] = f3;
-        params.freqs[3] = 0.0;
+        // freqs[0] = musical fundamental (new); F1/F2/F3 formants stored in freqs[1..3]
+        // so the audio thread can drive the glottal source at the right pitch while
+        // the formant filters shape the vowel timbre.
+        params.freqs[0] = fundamental;
+        params.freqs[1] = f1;
+        params.freqs[2] = f2;
+        params.freqs[3] = f3;
 
         // Amplitude envelope: formant amplitudes (lower formants louder)
         params.amps[0] = 0.8;

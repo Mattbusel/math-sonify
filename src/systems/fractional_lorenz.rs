@@ -173,3 +173,53 @@ impl std::ops::Index<usize> for FractionalLorenz {
         &self.state[i]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_fractional_lorenz_initial_state() {
+        let sys = FractionalLorenz::new(0.95, 10.0, 28.0, 8.0 / 3.0);
+        let s = sys.state();
+        assert_eq!(s.len(), 3);
+        assert!(s.iter().all(|v| v.is_finite()));
+        assert_eq!(sys.name(), "fractional_lorenz");
+        assert_eq!(sys.dimension(), 3);
+    }
+
+    #[test]
+    fn test_fractional_lorenz_step_changes_state() {
+        let mut sys = FractionalLorenz::new(0.95, 10.0, 28.0, 8.0 / 3.0);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.01);
+        let after = sys.state();
+        assert!(
+            before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15),
+            "State did not change after step"
+        );
+    }
+
+    #[test]
+    fn test_fractional_lorenz_state_stays_finite() {
+        let mut sys = FractionalLorenz::new(0.95, 10.0, 28.0, 8.0 / 3.0);
+        for _ in 0..500 {
+            sys.step(0.01);
+        }
+        for v in sys.state().iter() {
+            assert!(v.is_finite(), "State became non-finite: {}", v);
+        }
+    }
+
+    #[test]
+    fn test_fractional_lorenz_alpha_one_like_lorenz() {
+        // With alpha=1.0 the system should behave similarly to classical Lorenz
+        let mut sys = FractionalLorenz::new(1.0, 10.0, 28.0, 8.0 / 3.0);
+        for _ in 0..100 {
+            sys.step(0.01);
+        }
+        let s = sys.state();
+        assert!(s.iter().all(|v| v.is_finite()));
+    }
+}

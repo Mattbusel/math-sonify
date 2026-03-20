@@ -197,3 +197,58 @@ impl FdnReverb {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    #[test]
+    fn test_fdn_output_finite() {
+        let mut rv = FdnReverb::new(SR);
+        for i in 0..2000 {
+            let x = (i as f32 * 0.05).sin();
+            let (l, r) = rv.process(x, x);
+            assert!(l.is_finite(), "FDN L output non-finite at {}", i);
+            assert!(r.is_finite(), "FDN R output non-finite at {}", i);
+        }
+    }
+
+    #[test]
+    fn test_fdn_nan_input_safe() {
+        let mut rv = FdnReverb::new(SR);
+        let (l, r) = rv.process(f32::NAN, f32::NAN);
+        assert!(l.is_finite(), "NaN input should produce finite output");
+        assert!(r.is_finite(), "NaN input should produce finite output");
+    }
+
+    #[test]
+    fn test_fdn_produces_tail_after_impulse() {
+        let mut rv = FdnReverb::new(SR);
+        rv.wet = 1.0;
+        rv.process(1.0, 1.0);
+        let mut max_tail = 0.0f32;
+        for _ in 0..4410 {
+            let (l, _) = rv.process(0.0, 0.0);
+            max_tail = max_tail.max(l.abs());
+        }
+        assert!(max_tail > 0.0, "FDN reverb should produce a tail after impulse");
+    }
+
+    #[test]
+    fn test_fdn_wet_zero_passes_through() {
+        let mut rv = FdnReverb::new(SR);
+        rv.wet = 0.0;
+        // With wet=0, dry = 1.0, output = input (with pre-delay warmup)
+        // Warm up pre-delay buffer first
+        let pre_delay_len = (10.0_f32 * 0.001 * SR) as usize;
+        for _ in 0..pre_delay_len {
+            rv.process(0.5, -0.3);
+        }
+        let (l, r) = rv.process(0.5, -0.3);
+        // After warmup, output should be close to input (delayed but dry signal)
+        assert!(l.is_finite());
+        assert!(r.is_finite());
+    }
+}

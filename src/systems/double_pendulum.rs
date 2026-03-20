@@ -1,4 +1,4 @@
-use super::{yoshida4, DynamicalSystem};
+use super::{rk4, DynamicalSystem};
 
 /// Double pendulum in Hamiltonian form.
 /// State: [θ1, θ2, p1, p2] where p_i are conjugate momenta.
@@ -96,35 +96,33 @@ impl DynamicalSystem for DoublePendulum {
     }
 
     fn step(&mut self, dt: f64) {
-        // Yoshida 4th-order symplectic integrator
+        // RK4 integration using the full canonical equations of motion.
+        //
+        // The Yoshida symplectic integrator was previously used here, but the
+        // double pendulum's Hamiltonian is non-separable (kinetic energy depends
+        // on both momenta AND angles through the mass matrix), so Yoshida cannot
+        // preserve the symplectic structure and caused large energy drift.
+        // RK4 conserves energy to O(dt^4) per step, sufficient for simulation use.
         let prev = self.state.clone();
         let (m1, m2, l1, l2, g) = (self.m1, self.m2, self.l1, self.l2, self.g);
 
-        let velocity = |s: &[f64]| -> Vec<f64> {
+        rk4(&mut self.state, dt, |s| {
+            if s.len() < 4 {
+                return vec![0.0; s.len()];
+            }
             let (th1, th2, p1, p2) = (s[0], s[1], s[2], s[3]);
             let delta = th2 - th1;
             let denom = (m1 + m2 - m2 * delta.cos().powi(2)).max(1e-10);
-            let dth1 =
-                (m2 * l2 * p1 - m2 * l1 * p2 * delta.cos()) / (m1 * m2 * l1.powi(2) * l2 * denom);
+            let dth1 = (m2 * l2 * p1 - m2 * l1 * p2 * delta.cos())
+                / (m1 * m2 * l1.powi(2) * l2 * denom);
             let dth2 = ((m1 + m2) * l1 * p2 - m2 * l2 * p1 * delta.cos())
                 / (m1 * m2 * l1 * l2.powi(2) * denom);
-            vec![dth1, dth2]
-        };
-
-        let force = |s: &[f64]| -> Vec<f64> {
-            let (th1, th2, p1, p2) = (s[0], s[1], s[2], s[3]);
-            let delta = th2 - th1;
-            let denom = (m1 + m2 - m2 * delta.cos().powi(2)).max(1e-10);
-            let dth1 =
-                (m2 * l2 * p1 - m2 * l1 * p2 * delta.cos()) / (m1 * m2 * l1.powi(2) * l2 * denom);
-            let dth2 = ((m1 + m2) * l1 * p2 - m2 * l2 * p1 * delta.cos())
-                / (m1 * m2 * l1 * l2.powi(2) * denom);
-            let dp1 = -(m1 + m2) * g * l1 * th1.sin() - m2 * l1 * l2 * dth1 * dth2 * delta.sin();
-            let dp2 = -m2 * g * l2 * th2.sin() + m2 * l1 * l2 * dth1 * dth2 * delta.sin();
-            vec![dp1, dp2]
-        };
-
-        yoshida4(&mut self.state, &[0, 1], &[2, 3], dt, velocity, force);
+            let dp1 = -(m1 + m2) * g * l1 * th1.sin()
+                - m2 * l1 * l2 * dth1 * dth2 * delta.sin();
+            let dp2 = -m2 * g * l2 * th2.sin()
+                + m2 * l1 * l2 * dth1 * dth2 * delta.sin();
+            vec![dth1, dth2, dp1, dp2]
+        });
 
         let ds: f64 = self
             .state

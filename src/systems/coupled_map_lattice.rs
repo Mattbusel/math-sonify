@@ -103,3 +103,63 @@ impl DynamicalSystem for CoupledMapLattice {
             .fold(0.0f64, f64::max);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_cml_initial_state() {
+        let sys = CoupledMapLattice::new(3.7, 0.1);
+        let s = sys.state();
+        assert_eq!(s.len(), 16);
+        assert_eq!(sys.dimension(), 16);
+        assert_eq!(sys.name(), "Coupled Map Lattice");
+        assert!(s.iter().all(|v| v.is_finite()));
+        assert!(s.iter().all(|&v| v > 0.0 && v < 1.0), "Initial values should be in (0,1)");
+    }
+
+    #[test]
+    fn test_cml_step_changes_state() {
+        let mut sys = CoupledMapLattice::new(3.7, 0.1);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.01);
+        assert!(before.iter().zip(sys.state().iter()).any(|(a, b)| (a - b).abs() > 1e-15));
+    }
+
+    #[test]
+    fn test_cml_values_stay_in_unit_interval() {
+        let mut sys = CoupledMapLattice::new(3.9, 0.2);
+        for _ in 0..1000 {
+            sys.step(0.01);
+            for &v in sys.state().iter() {
+                assert!(v > 0.0 && v < 1.0, "Value out of (0,1): {}", v);
+            }
+        }
+    }
+
+    #[test]
+    fn test_cml_deterministic() {
+        let mut s1 = CoupledMapLattice::new(3.7, 0.1);
+        let mut s2 = CoupledMapLattice::new(3.7, 0.1);
+        for _ in 0..200 {
+            s1.step(0.01);
+            s2.step(0.01);
+        }
+        for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+            assert!((a - b).abs() < 1e-12, "Non-deterministic: {} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_cml_set_state_clamped() {
+        let mut sys = CoupledMapLattice::new(3.7, 0.1);
+        // set_state clamps values to [0.001, 0.999]
+        let new_s: Vec<f64> = (0..16).map(|i| i as f64 * 0.06 + 0.01).collect();
+        sys.set_state(&new_s);
+        for &v in sys.state().iter() {
+            assert!(v > 0.0 && v < 1.0, "set_state value out of (0,1): {}", v);
+        }
+    }
+}

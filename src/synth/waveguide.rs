@@ -153,3 +153,55 @@ impl WaveguideString {
         fwd_read
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    #[test]
+    fn test_waveguide_silent_before_excite() {
+        let mut s = WaveguideString::new(SR);
+        let mut sum = 0.0f32;
+        for _ in 0..100 {
+            sum += s.next_sample().abs();
+        }
+        assert_eq!(sum, 0.0, "Should be silent before excitation");
+    }
+
+    #[test]
+    fn test_waveguide_produces_output_after_excite() {
+        let mut s = WaveguideString::new(SR);
+        s.set_freq(440.0);
+        s.excite = true;
+        let mut max_abs = 0.0f32;
+        for _ in 0..4410 {
+            let out = s.next_sample();
+            max_abs = max_abs.max(out.abs());
+        }
+        assert!(max_abs > 0.0, "Should produce output after excitation");
+    }
+
+    #[test]
+    fn test_waveguide_output_finite() {
+        let mut s = WaveguideString::new(SR);
+        s.set_freq(220.0);
+        s.excite = true;
+        for i in 0..22050 {
+            let out = s.next_sample();
+            assert!(out.is_finite(), "Output non-finite at sample {}", i);
+        }
+    }
+
+    #[test]
+    fn test_waveguide_set_freq_changes_length() {
+        let mut s = WaveguideString::new(SR);
+        let len_before = s.length;
+        s.set_freq(880.0);
+        assert!(
+            (s.length - len_before).abs() > 1.0,
+            "set_freq should change length"
+        );
+    }
+}

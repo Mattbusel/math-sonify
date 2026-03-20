@@ -161,9 +161,15 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Thomas",
         description: "Cyclically symmetric dissipative chaotic attractor",
     },
+    SystemEntry {
+        name: "sprott_c",
+        display_name: "Sprott C",
+        description: "Minimal algebraically simple attractor (variant C)",
+    },
 ];
 
 pub mod thomas;
+pub mod sprott_c;
 pub mod arnold_cat;
 pub mod aizawa;
 pub mod delayed_map;
@@ -194,6 +200,7 @@ pub mod three_body;
 pub mod van_der_pol;
 
 pub use thomas::Thomas;
+pub use sprott_c::SprottC;
 pub use arnold_cat::ArnoldCat;
 pub use aizawa::Aizawa;
 pub use delayed_map::DelayedMap;

@@ -64,9 +64,18 @@ impl Sonification for AmMapping {
         params.gain = 0.5;
         params.chaos_level = chaos;
 
-        // Also set freqs[0] for display purposes
+        // Voice 0: primary carrier
         params.freqs[0] = carrier_freq;
         params.amps[0] = 0.8;
+
+        // Higher-dimension voice distribution: voices 1-3 use state dims 1-3
+        // with the same tanh normalisation, giving systems with many state
+        // variables (Kuramoto, Lorenz96) more timbral richness in AM mode.
+        for i in 1..4.min(state.len()) {
+            let norm_i = (state[i] as f32 / 30.0).tanh() * 0.5 + 0.5;
+            params.freqs[i] = super::quantize_to_scale(norm_i, base_hz, octave_range, scale);
+            params.amps[i] = 0.4; // quieter secondary voices to avoid clipping
+        }
 
         let _ = speed; // speed not used directly but available for future use
 

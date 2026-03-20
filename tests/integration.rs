@@ -91,6 +91,9 @@ fn rossler_z_stays_positive() {
 fn double_pendulum_energy_conserved_small_angles() {
     let (m1, m2, l1, l2, g) = (1.0_f64, 1.0, 1.0, 1.0, 9.81);
     let mut sys = DoublePendulum::new(m1, m2, l1, l2);
+    // Override default large-angle initial state (π/2) with genuinely small angles.
+    // Small angles ≈ 6° give near-linear dynamics and much better energy conservation.
+    sys.set_state(&[0.1, 0.12, 0.0, 0.0]);
     let hamiltonian = |s: &[f64]| -> f64 {
         let (th1, th2, p1, p2) = (s[0], s[1], s[2], s[3]);
         let delta = th2 - th1;

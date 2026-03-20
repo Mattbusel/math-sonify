@@ -79,11 +79,19 @@ impl Bitcrusher {
         // current input, independently quantized, then averaged.
         let crushed = if self.bit_depth < 15.9 {
             let steps = 2.0f32.powi(self.bit_depth.clamp(1.0, 16.0) as i32 - 1);
-            let s0 = x;
-            let s1 = (x + self.prev_input) * 0.5;
-            let q0 = self.quantize(s0, steps);
-            let q1 = self.quantize(s1, steps);
-            0.5 * (q0 + q1)
+            if steps <= 1.0 {
+                // 1-bit: sign quantization gives exactly two levels {-1, +1}.
+                // Oversampling is skipped because averaging two sign-quantized samples
+                // can produce a third intermediate value (0.0), defeating 1-bit behaviour.
+                if x >= 0.0 { 1.0 } else { -1.0 }
+            } else {
+                // Higher bits: anti-aliased via 2× oversampling + linear interpolation.
+                let s0 = x;
+                let s1 = (x + self.prev_input) * 0.5;
+                let q0 = self.quantize(s0, steps);
+                let q1 = self.quantize(s1, steps);
+                0.5 * (q0 + q1)
+            }
         } else {
             x
         };
