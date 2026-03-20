@@ -115,3 +115,69 @@ impl Bitcrusher {
         self.sample_hold
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bitcrusher_16bit_is_transparent() {
+        // At max bit depth (16) without rate crush, output should equal input
+        let mut bc = Bitcrusher::new();
+        bc.bit_depth = 16.0;
+        bc.rate_crush = 0.0;
+        bc.dither = false;
+        let x = 0.5_f32;
+        let y = bc.process(x);
+        assert!((y - x).abs() < 1e-4, "16-bit should be transparent, got {}", y);
+    }
+
+    #[test]
+    fn test_bitcrusher_reduces_resolution_at_low_bitdepth() {
+        // At 2-bit depth, only a few distinct output levels should appear
+        let mut bc = Bitcrusher::new();
+        bc.bit_depth = 2.0;
+        bc.rate_crush = 0.0;
+        bc.dither = false;
+        let mut unique: std::collections::HashSet<i32> = std::collections::HashSet::new();
+        for i in 0..200 {
+            let x = (i as f32 / 100.0) - 1.0;
+            let y = bc.process(x);
+            unique.insert((y * 1000.0).round() as i32);
+        }
+        assert!(
+            unique.len() <= 8,
+            "2-bit should produce very few distinct levels, got {}",
+            unique.len()
+        );
+    }
+
+    #[test]
+    fn test_bitcrusher_output_always_finite() {
+        let mut bc = Bitcrusher::new();
+        bc.bit_depth = 4.0;
+        bc.rate_crush = 0.5;
+        for i in 0..1000 {
+            let x = (i as f32 * 0.1).sin();
+            let y = bc.process(x);
+            assert!(y.is_finite(), "Output non-finite at {}", i);
+        }
+    }
+
+    #[test]
+    fn test_bitcrusher_sample_hold_repeats_on_rate_crush() {
+        // With high rate_crush, many consecutive outputs should be identical
+        let mut bc = Bitcrusher::new();
+        bc.bit_depth = 16.0;
+        bc.rate_crush = 1.0;
+        bc.dither = false;
+        let mut outputs = Vec::new();
+        for i in 0..100 {
+            let x = (i as f32 * 0.1).sin();
+            outputs.push(bc.process(x));
+        }
+        // Count runs of repeated values — should be many
+        let runs: usize = outputs.windows(2).filter(|w| (w[0] - w[1]).abs() < 1e-6).count();
+        assert!(runs > 50, "High rate_crush should produce many held samples, runs={}", runs);
+    }
+}

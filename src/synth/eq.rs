@@ -192,3 +192,83 @@ impl ThreeBandEq {
         (l, r)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 44100.0;
+
+    fn sine_rms(eq: &mut ThreeBandEq, freq_hz: f32, n: usize) -> f32 {
+        let mut sum_sq = 0.0_f32;
+        let dt = std::f32::consts::TAU * freq_hz / SR;
+        for i in 0..n {
+            let x = (dt * i as f32).sin();
+            let (y, _) = eq.process(x, x);
+            sum_sq += y * y;
+        }
+        (sum_sq / n as f32).sqrt()
+    }
+
+    #[test]
+    fn test_eq_flat_is_transparent() {
+        // All gains at 0 dB — output should equal input
+        let mut eq = ThreeBandEq::new(SR);
+        // Biquad::unity is 1.0 passthrough
+        let (l, r) = eq.process(0.5, -0.3);
+        assert!((l - 0.5).abs() < 1e-6, "Flat EQ should pass signal: {}", l);
+        assert!((r - (-0.3)).abs() < 1e-6, "Flat EQ should pass signal: {}", r);
+    }
+
+    #[test]
+    fn test_eq_output_finite() {
+        let mut eq = ThreeBandEq::new(SR);
+        eq.low_gain_db = 6.0;
+        eq.mid_gain_db = -3.0;
+        eq.high_gain_db = 9.0;
+        eq.update();
+        for i in 0..2000 {
+            let x = (i as f32 * 0.05).sin();
+            let (l, r) = eq.process(x, x);
+            assert!(l.is_finite(), "EQ output non-finite at {}", i);
+            assert!(r.is_finite(), "EQ output non-finite at {}", i);
+        }
+    }
+
+    #[test]
+    fn test_eq_low_boost_increases_bass() {
+        // Low boost should increase RMS for a low-frequency sine
+        let mut eq_flat = ThreeBandEq::new(SR);
+        let rms_flat = sine_rms(&mut eq_flat, 100.0, 4000);
+
+        let mut eq_boost = ThreeBandEq::new(SR);
+        eq_boost.low_gain_db = 6.0;
+        eq_boost.update();
+        let rms_boost = sine_rms(&mut eq_boost, 100.0, 4000);
+
+        assert!(
+            rms_boost > rms_flat,
+            "Low boost should increase bass RMS: flat={}, boost={}",
+            rms_flat,
+            rms_boost
+        );
+    }
+
+    #[test]
+    fn test_eq_high_boost_increases_treble() {
+        let mut eq_flat = ThreeBandEq::new(SR);
+        let rms_flat = sine_rms(&mut eq_flat, 10000.0, 4000);
+
+        let mut eq_boost = ThreeBandEq::new(SR);
+        eq_boost.high_gain_db = 6.0;
+        eq_boost.update();
+        let rms_boost = sine_rms(&mut eq_boost, 10000.0, 4000);
+
+        assert!(
+            rms_boost > rms_flat,
+            "High boost should increase treble RMS: flat={}, boost={}",
+            rms_flat,
+            rms_boost
+        );
+    }
+}

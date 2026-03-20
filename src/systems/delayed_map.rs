@@ -87,3 +87,59 @@ impl DynamicalSystem for DelayedMap {
         self.speed = (x_next - prev_x).abs();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_delayed_map_initial_state() {
+        let sys = DelayedMap::new(3.9, 3);
+        let s = sys.state();
+        assert_eq!(s.len(), 2);
+        assert!((s[0] - 0.5).abs() < 1e-15, "Expected x=0.5");
+        assert!((s[1] - 0.5).abs() < 1e-15, "Expected x_delayed=0.5");
+        assert_eq!(sys.name(), "Delayed Map");
+        assert_eq!(sys.dimension(), 2);
+    }
+
+    #[test]
+    fn test_delayed_map_step_changes_state() {
+        let mut sys = DelayedMap::new(3.9, 3);
+        let before: Vec<f64> = sys.state().to_vec();
+        // Need a few steps to get past the constant history warm-up
+        for _ in 0..5 {
+            sys.step(0.01);
+        }
+        let after = sys.state();
+        assert!(
+            before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15),
+            "State did not change after step"
+        );
+    }
+
+    #[test]
+    fn test_delayed_map_step_runs_without_panic() {
+        // Verify that stepping the delayed map does not panic.
+        // Note: unlike the local logistic map, the delayed version can diverge
+        // because the stabilizing (1-x) feedback uses old state, not current.
+        let mut sys = DelayedMap::new(3.9, 3);
+        for _ in 0..100 {
+            sys.step(0.01);
+        }
+        // At minimum, state should be accessible (not panic)
+        let _ = sys.state();
+        let _ = sys.speed();
+    }
+
+    #[test]
+    fn test_delayed_map_set_state() {
+        let mut sys = DelayedMap::new(3.9, 3);
+        sys.set_state(&[0.7]);
+        // After set_state, state[0] and state[1] should both be 0.7
+        let s = sys.state();
+        assert!((s[0] - 0.7).abs() < 1e-15, "state[0] should be 0.7");
+        assert!((s[1] - 0.7).abs() < 1e-15, "state[1] should be 0.7");
+    }
+}

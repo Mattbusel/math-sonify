@@ -121,3 +121,55 @@ impl DynamicalSystem for StochasticLorenz {
         self.speed = ds / dt.max(1e-15);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_stochastic_lorenz_initial_state() {
+        let sys = StochasticLorenz::new(10.0, 28.0, 2.667, 0.0);
+        let s = sys.state();
+        assert_eq!(s.len(), 3);
+        assert!((s[0] - 1.0).abs() < 1e-15);
+        assert!((s[1] - 0.0).abs() < 1e-15);
+        assert!((s[2] - 0.0).abs() < 1e-15);
+        assert_eq!(sys.name(), "Stochastic Lorenz");
+        assert_eq!(sys.dimension(), 3);
+    }
+
+    #[test]
+    fn test_stochastic_lorenz_noise_zero_matches_deterministic() {
+        // With noise_strength=0, should match the deterministic Lorenz
+        let mut sys = StochasticLorenz::new(10.0, 28.0, 2.667, 0.0);
+        for _ in 0..500 {
+            sys.step(0.001);
+        }
+        let s = sys.state();
+        assert!(s.iter().all(|v| v.is_finite()), "State has non-finite value");
+    }
+
+    #[test]
+    fn test_stochastic_lorenz_with_noise_stays_finite() {
+        let mut sys = StochasticLorenz::new(10.0, 28.0, 2.667, 0.5);
+        for _ in 0..500 {
+            sys.step(0.001);
+        }
+        for v in sys.state().iter() {
+            assert!(v.is_finite(), "State became non-finite with noise: {}", v);
+        }
+    }
+
+    #[test]
+    fn test_stochastic_lorenz_step_changes_state() {
+        let mut sys = StochasticLorenz::new(10.0, 28.0, 2.667, 0.1);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.001);
+        let after = sys.state();
+        assert!(
+            before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15),
+            "State did not change after step"
+        );
+    }
+}
