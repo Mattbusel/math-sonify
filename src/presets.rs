@@ -29,6 +29,8 @@ pub const PRESETS: &[Preset] = &[
     Preset { name: "Sprott Minimal", description: "Algebraically simplest chaos, clean AM sonification" },
     Preset { name: "Substorm Pulse", description: "WINDMI ionospheric current model, blues scale, waveguide mode" },
     Preset { name: "Market Collapse", description: "Finance chaotic attractor, spectral mode, Locrian scale" },
+    Preset { name: "Hyperdimensional", description: "4D Chen-Li hyperchaos, octatonic scale, FM synthesis" },
+    Preset { name: "Magyar Trance", description: "Dadras attractor, Hungarian minor, vocal mode, deep reverb" },
 ];
 
 /// Load the [`Config`] for a named preset.
@@ -197,6 +199,28 @@ pub fn load_preset(name: &str) -> Config {
                 voice_levels: [1.0, 0.8, 0.5, 0.2], portamento_ms: 40.0,
             },
             audio: AudioConfig { reverb_wet: 0.3, delay_ms: 170.0, delay_feedback: 0.5, master_volume: 0.7, ..Default::default() },
+            ..Default::default()
+        },
+        "Hyperdimensional" => Config {
+            system: SystemConfig { name: "hyperchaos".into(), dt: 0.0005, speed: 1.5 },
+            sonification: SonificationConfig {
+                mode: "fm".into(), scale: "octatonic".into(),
+                base_frequency: 82.4, octave_range: 4.0,
+                chord_mode: "dim7".into(), transpose_semitones: 0.0,
+                voice_levels: [1.0, 0.75, 0.5, 0.25], portamento_ms: 100.0,
+            },
+            audio: AudioConfig { reverb_wet: 0.6, delay_ms: 333.0, delay_feedback: 0.4, master_volume: 0.7, ..Default::default() },
+            ..Default::default()
+        },
+        "Magyar Trance" => Config {
+            system: SystemConfig { name: "dadras".into(), dt: 0.005, speed: 1.0 },
+            sonification: SonificationConfig {
+                mode: "vocal".into(), scale: "hungarian_minor".into(),
+                base_frequency: 146.8, octave_range: 2.5,
+                chord_mode: "minor".into(), transpose_semitones: 7.0,
+                voice_levels: [1.0, 0.6, 0.4, 0.2], portamento_ms: 350.0,
+            },
+            audio: AudioConfig { reverb_wet: 0.8, delay_ms: 480.0, delay_feedback: 0.38, master_volume: 0.68, ..Default::default() },
             ..Default::default()
         },
         _ => Config::default(),

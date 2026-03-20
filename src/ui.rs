@@ -959,6 +959,7 @@ fn system_display_name(s: &str) -> &'static str {
         "liu" => "Liu Attractor",
         "windmi" => "WINDMI",
         "finance" => "Finance",
+        "hyperchaos" => "Hyperchaos",
         "sprott_d" => "Sprott D",
         "sprott_e" => "Sprott E",
         "sprott_f" => "Sprott F",
@@ -1016,6 +1017,7 @@ fn system_tagline(s: &str) -> &'static str {
         "liu" => "Single-band scroll: y² drags x down while mxy and kxz exchange energy",
         "windmi" => "Ionospheric substorm current model — exponential nonlinearity in a jerk-form system",
         "finance" => "Chaotic macroeconomics: interest rate, investment, and price-index feedback loops",
+        "hyperchaos" => "Chen-Li 4D system with two positive Lyapunov exponents — richer than ordinary chaos",
         "sprott_d" => "Sprott Case I: y² instability with −1.1z dissipation — bounded chaotic attractor",
         "sprott_e" => "Minimal chaos from a yz product — equilibrium at (¼, 1/16, 0)",
         "sprott_f" => "Slow-spiral chaos: x² drives z while y damps at half speed",
@@ -1076,6 +1078,7 @@ fn system_internal_name(display: &str) -> &'static str {
         "Liu Attractor" => "liu",
         "WINDMI" => "windmi",
         "Finance" => "finance",
+        "Hyperchaos" => "hyperchaos",
         "Sprott D" => "sprott_d",
         "Sprott E" => "sprott_e",
         "Sprott F" => "sprott_f",
@@ -2065,7 +2068,7 @@ pub fn draw_ui(
         // Bifurcation controls
         if viz_tab == 6 {
             ui.horizontal(|ui| {
-                let param_opts = ["rho", "sigma", "coupling", "c", "r", "k", "b", "lambda", "a_rossler", "shimizu_a", "genesio_c", "liu_b"];
+                let param_opts = ["rho", "sigma", "coupling", "c", "r", "k", "b", "lambda", "a_rossler", "shimizu_a", "genesio_c", "liu_b", "windmi_b", "finance_a", "hyperchaos_c"];
                 let (current_bp, current_bp2, computing, mode_2d) = {
                     let st = state.lock();
                     (
@@ -3276,6 +3279,7 @@ fn draw_advanced_panel(
                 "liu",
                 "windmi",
                 "finance",
+                "hyperchaos",
                 "sprott_d",
                 "sprott_e",
                 "sprott_f",
@@ -3561,6 +3565,30 @@ fn draw_advanced_panel(
                     ui.add(Slider::new(&mut st.config.liu.m, 0.5..=10.0).text("m"))
                         .on_hover_text("xy coupling in z equation. Default 4.0.");
                 }
+                "windmi" => {
+                    ui.add(Slider::new(&mut st.config.windmi.a, 0.3..=2.0).text("a"))
+                        .on_hover_text("Damping coefficient. Default 0.9 gives chaos.");
+                    ui.add(Slider::new(&mut st.config.windmi.b, 1.0..=4.0).text("b"))
+                        .on_hover_text("Drive parameter. Default 2.5 gives a strange attractor.");
+                }
+                "finance" => {
+                    ui.add(Slider::new(&mut st.config.finance.a, 1.0..=6.0).text("a"))
+                        .on_hover_text("Savings rate. Default 3.0 gives chaos.");
+                    ui.add(Slider::new(&mut st.config.finance.b, 0.01..=0.5).text("b"))
+                        .on_hover_text("Cost per investment. Default 0.1.");
+                    ui.add(Slider::new(&mut st.config.finance.c, 0.2..=3.0).text("c"))
+                        .on_hover_text("Elasticity of demand. Default 1.0.");
+                }
+                "hyperchaos" => {
+                    ui.add(Slider::new(&mut st.config.hyperchaos.a, 20.0..=50.0).text("a"))
+                        .on_hover_text("Coupling strength. Default 35.0.");
+                    ui.add(Slider::new(&mut st.config.hyperchaos.b, 1.0..=6.0).text("b"))
+                        .on_hover_text("z dissipation. Default 3.0.");
+                    ui.add(Slider::new(&mut st.config.hyperchaos.c, 20.0..=40.0).text("c"))
+                        .on_hover_text("Rayleigh number analog. Default 28.0.");
+                    ui.add(Slider::new(&mut st.config.hyperchaos.d, -15.0..=-0.5).text("d"))
+                        .on_hover_text("4th dimension feedback (must be negative). Default −7.0.");
+                }
                 _ => {}
             }
         });
@@ -3696,6 +3724,21 @@ fn draw_advanced_panel(
                     st.config.liu.e = vary(st.config.liu.e, &mut seed).clamp(0.1, 5.0);
                     st.config.liu.k = vary(st.config.liu.k, &mut seed).clamp(0.5, 10.0);
                     st.config.liu.m = vary(st.config.liu.m, &mut seed).clamp(0.5, 10.0);
+                }
+                "windmi" => {
+                    st.config.windmi.a = vary(st.config.windmi.a, &mut seed).clamp(0.3, 2.0);
+                    st.config.windmi.b = vary(st.config.windmi.b, &mut seed).clamp(1.0, 4.0);
+                }
+                "finance" => {
+                    st.config.finance.a = vary(st.config.finance.a, &mut seed).clamp(1.0, 6.0);
+                    st.config.finance.b = vary(st.config.finance.b, &mut seed).clamp(0.01, 0.5);
+                    st.config.finance.c = vary(st.config.finance.c, &mut seed).clamp(0.2, 3.0);
+                }
+                "hyperchaos" => {
+                    st.config.hyperchaos.a = vary(st.config.hyperchaos.a, &mut seed).clamp(20.0, 50.0);
+                    st.config.hyperchaos.b = vary(st.config.hyperchaos.b, &mut seed).clamp(1.0, 6.0);
+                    st.config.hyperchaos.c = vary(st.config.hyperchaos.c, &mut seed).clamp(20.0, 40.0);
+                    st.config.hyperchaos.d = vary(st.config.hyperchaos.d, &mut seed).clamp(-15.0, -0.5);
                 }
                 _ => {}
             }
@@ -8610,6 +8653,9 @@ fn equation_text(system: &str) -> &'static str {
         "shimizu_morioka" => "x' = y\ny' = (1−z)x−ay\nz' = x²−bz",
         "genesio_tesi" => "x' = y\ny' = z\nz' = −cx−by−az+x²",
         "liu" => "x' = −ax−ey²\ny' = by−kxz\nz' = −cz+mxy",
+        "windmi" => "x' = y\ny' = z\nz' = −az−y+b−eˣ",
+        "finance" => "x' = z+(y−a)x\ny' = 1−by−x²\nz' = −x−cz",
+        "hyperchaos" => "x' = a(y−x)+w\ny' = (c−a)x−xz+cy\nz' = xy−bz\nw' = −yz+dw",
         "sprott_d" => "x' = −0.2y\ny' = x+z\nz' = x+y²−1.1z",
         "sprott_e" => "x' = yz\ny' = x²−y\nz' = 1−4x",
         "sprott_f" => "x' = y+z\ny' = −x+0.5y\nz' = x²−z",
@@ -8743,6 +8789,22 @@ fn equation_lines(system: &str) -> Vec<&'static str> {
             "x' = -a*x - e*y^2",
             "y' = b*y - k*x*z",
             "z' = -c*z + m*x*y",
+        ],
+        "windmi" => vec![
+            "x' = y",
+            "y' = z",
+            "z' = -a*z - y + b - exp(x)",
+        ],
+        "finance" => vec![
+            "x' = z + (y - a)*x",
+            "y' = 1 - b*y - x^2",
+            "z' = -x - c*z",
+        ],
+        "hyperchaos" => vec![
+            "x' = a*(y - x) + w",
+            "y' = (c - a)*x - x*z + c*y",
+            "z' = x*y - b*z",
+            "w' = -y*z + d*w",
         ],
         "logistic_map" => vec!["x(n+1) = r * x(n) * (1 - x(n))"],
         "standard_map" => vec![
