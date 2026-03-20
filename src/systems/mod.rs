@@ -196,10 +196,22 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Rabinovich-Fabrikant",
         description: "Plasma-physics derived attractor with complex multi-lobe topology",
     },
+    SystemEntry {
+        name: "sprott_g",
+        display_name: "Sprott G",
+        description: "Parameter-free single-scroll chaotic flow from Sprott's simplest systems",
+    },
+    SystemEntry {
+        name: "rikitake",
+        display_name: "Rikitake Dynamo",
+        description: "Geomagnetic field reversal model with irregular polarity flips",
+    },
 ];
 
 pub mod lorenz84;
 pub mod rabinovich_fabrikant;
+pub mod sprott_g;
+pub mod rikitake;
 pub mod burke_shaw;
 pub mod chen;
 pub mod dadras;
@@ -241,6 +253,8 @@ pub use dadras::Dadras;
 pub use rucklidge::Rucklidge;
 pub use lorenz84::Lorenz84;
 pub use rabinovich_fabrikant::RabinovichFabrikant;
+pub use sprott_g::SprottG;
+pub use rikitake::Rikitake;
 pub use thomas::Thomas;
 pub use sprott_c::SprottC;
 pub use arnold_cat::ArnoldCat;

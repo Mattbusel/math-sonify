@@ -233,4 +233,67 @@ mod tests {
         assert!(l1.is_finite());
         assert!(l2.is_finite());
     }
+
+    #[test]
+    fn test_grain_engine_output_bounded() {
+        // Even with many concurrent grains, normalization keeps output below 2.0.
+        let mut engine = GrainEngine::new(SR);
+        engine.spawn_rate = 500.0;
+        engine.base_freq = 220.0;
+        let mut max_abs = 0.0f32;
+        for _ in 0..4410 {
+            let (l, r) = engine.next_sample();
+            max_abs = max_abs.max(l.abs()).max(r.abs());
+        }
+        assert!(
+            max_abs < 2.0,
+            "Grain engine output exceeded expected bounds: {}",
+            max_abs
+        );
+    }
+
+    #[test]
+    fn test_grain_engine_higher_spawn_rate_increases_activity() {
+        // Higher spawn rate should produce higher RMS after warmup.
+        let mut engine_lo = GrainEngine::new(SR);
+        engine_lo.spawn_rate = 5.0;
+        let mut engine_hi = GrainEngine::new(SR);
+        engine_hi.spawn_rate = 200.0;
+
+        let mut rms_lo = 0.0f32;
+        let mut rms_hi = 0.0f32;
+        let n = 4410usize;
+        for _ in 0..n {
+            let (l, _) = engine_lo.next_sample();
+            rms_lo += l * l;
+            let (l2, _) = engine_hi.next_sample();
+            rms_hi += l2 * l2;
+        }
+        rms_lo = (rms_lo / n as f32).sqrt();
+        rms_hi = (rms_hi / n as f32).sqrt();
+        assert!(
+            rms_hi > rms_lo,
+            "Higher spawn rate should increase RMS: lo={}, hi={}",
+            rms_lo,
+            rms_hi
+        );
+    }
+
+    #[test]
+    fn test_grain_hann_window_zero_at_endpoints() {
+        // The Hann window must be 0 at t=0 and t=1 to prevent clicks.
+        assert!(Grain::hann(0.0).abs() < 1e-6, "Hann window should be 0 at t=0");
+        assert!(Grain::hann(1.0).abs() < 1e-6, "Hann window should be 0 at t=1");
+    }
+
+    #[test]
+    fn test_grain_hann_window_peak_at_midpoint() {
+        // Hann window peaks at t=0.5 with value 1.0.
+        let peak = Grain::hann(0.5);
+        assert!(
+            (peak - 1.0).abs() < 1e-6,
+            "Hann window should peak at 1.0 at t=0.5, got {}",
+            peak
+        );
+    }
 }

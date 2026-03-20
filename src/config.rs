@@ -45,6 +45,7 @@ pub struct Config {
     pub rucklidge: RucklidgeConfig,
     pub lorenz84: Lorenz84Config,
     pub rabinovich_fabrikant: RabinovichFabrikantConfig,
+    pub rikitake: RikitakeConfig,
 }
 
 impl Default for Config {
@@ -84,6 +85,7 @@ impl Default for Config {
             rucklidge: RucklidgeConfig::default(),
             lorenz84: Lorenz84Config::default(),
             rabinovich_fabrikant: RabinovichFabrikantConfig::default(),
+            rikitake: RikitakeConfig::default(),
         }
     }
 }
@@ -636,6 +638,20 @@ impl Default for RabinovichFabrikantConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RikitakeConfig {
+    /// Dissipation rate (μ). Default 1.0.
+    pub mu: f64,
+    /// Coupling offset (a). Default 5.0.
+    pub a: f64,
+}
+impl Default for RikitakeConfig {
+    fn default() -> Self {
+        Self { mu: 1.0, a: 5.0 }
+    }
+}
+
 impl Config {
     /// Clamp all parameters to physically sensible bounds.
     /// Call this after deserializing from user-supplied config files.
@@ -898,6 +914,9 @@ impl Config {
         // Rabinovich-Fabrikant
         Self::clamp_log_f64(&mut self.rabinovich_fabrikant.alpha, 0.01, 2.0, "rabinovich_fabrikant.alpha");
         Self::clamp_log_f64(&mut self.rabinovich_fabrikant.gamma, 0.01, 1.0, "rabinovich_fabrikant.gamma");
+        // Rikitake
+        Self::clamp_log_f64(&mut self.rikitake.mu, 0.1, 10.0, "rikitake.mu");
+        Self::clamp_log_f64(&mut self.rikitake.a, 0.1, 20.0, "rikitake.a");
     }
 
     /// Clamp a `f64` field to `[min, max]`, emitting a tracing warning if clamped.

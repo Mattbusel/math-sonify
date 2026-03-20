@@ -231,6 +231,10 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             alpha: lf64(a.rabinovich_fabrikant.alpha, b.rabinovich_fabrikant.alpha),
             gamma: lf64(a.rabinovich_fabrikant.gamma, b.rabinovich_fabrikant.gamma),
         },
+        rikitake: crate::config::RikitakeConfig {
+            mu: lf64(a.rikitake.mu, b.rikitake.mu),
+            a: lf64(a.rikitake.a, b.rikitake.a),
+        },
         logistic_map: crate::config::LogisticMapConfig {
             r: lf64(a.logistic_map.r, b.logistic_map.r),
         },

@@ -251,4 +251,81 @@ mod tests {
         assert!(l.is_finite());
         assert!(r.is_finite());
     }
+
+    #[test]
+    fn test_fdn_tail_decays_over_time() {
+        // After an impulse, the reverb tail should decay over time.
+        // We compare energy in a window starting after the longest delay line has
+        // returned (~85 ms = ~3750 samples at 44100 Hz) versus a window 2 seconds later.
+        let mut rv = FdnReverb::new(SR);
+        rv.wet = 1.0;
+        rv.feedback = 0.80; // moderate feedback so tail decays measurably
+        rv.process(1.0, 1.0);
+        // Skip first 4000 samples to let all delay lines engage
+        for _ in 0..4000 {
+            rv.process(0.0, 0.0);
+        }
+        // Measure 0.1s window — energy should be higher than 2s later
+        let window = 4410usize; // 0.1 s
+        let mut energy_near = 0.0f32;
+        for _ in 0..window {
+            let (l, _) = rv.process(0.0, 0.0);
+            energy_near += l * l;
+        }
+        // Skip 2 more seconds
+        for _ in 0..(SR as usize * 2) {
+            rv.process(0.0, 0.0);
+        }
+        let mut energy_far = 0.0f32;
+        for _ in 0..window {
+            let (l, _) = rv.process(0.0, 0.0);
+            energy_far += l * l;
+        }
+        assert!(
+            energy_far < energy_near,
+            "Reverb tail should decay: near={}, far={}",
+            energy_near,
+            energy_far
+        );
+    }
+
+    #[test]
+    fn test_fdn_stereo_injection_uses_both_channels() {
+        // L and R inputs should produce different reverb tails (true stereo).
+        let mut rv_l = FdnReverb::new(SR);
+        rv_l.wet = 1.0;
+        rv_l.process(1.0, 0.0); // impulse only on left
+
+        let mut rv_r = FdnReverb::new(SR);
+        rv_r.wet = 1.0;
+        rv_r.process(0.0, 1.0); // impulse only on right
+
+        let mut diff = 0.0f32;
+        for _ in 0..4410 {
+            let (ll, _) = rv_l.process(0.0, 0.0);
+            let (_, rr) = rv_r.process(0.0, 0.0);
+            diff += (ll - rr).abs();
+        }
+        assert!(
+            diff > 0.01,
+            "L and R impulses should produce different reverb tails (diff={})",
+            diff
+        );
+    }
+
+    #[test]
+    fn test_hadamard8_energy_preserving() {
+        // The normalized Hadamard8 should preserve the L2 norm of the input vector.
+        let input = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let energy_in: f32 = input.iter().map(|x| x * x).sum();
+        let mut v = input;
+        hadamard8(&mut v);
+        let energy_out: f32 = v.iter().map(|x| x * x).sum();
+        assert!(
+            (energy_in - energy_out).abs() < 1e-3,
+            "Hadamard8 should preserve energy: in={}, out={}",
+            energy_in,
+            energy_out
+        );
+    }
 }
