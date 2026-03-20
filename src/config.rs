@@ -39,6 +39,10 @@ pub struct Config {
     pub mathieu: MathieuConfig,
     pub kuramoto_driven: KuramotoDrivenConfig,
     pub thomas: ThomasConfig,
+    pub burke_shaw: BurkeShawConfig,
+    pub chen: ChenConfig,
+    pub dadras: DadrasConfig,
+    pub rucklidge: RucklidgeConfig,
 }
 
 impl Default for Config {
@@ -72,6 +76,10 @@ impl Default for Config {
             mathieu: MathieuConfig::default(),
             kuramoto_driven: KuramotoDrivenConfig::default(),
             thomas: ThomasConfig::default(),
+            burke_shaw: BurkeShawConfig::default(),
+            chen: ChenConfig::default(),
+            dadras: DadrasConfig::default(),
+            rucklidge: RucklidgeConfig::default(),
         }
     }
 }
@@ -533,6 +541,65 @@ impl Default for ThomasConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct BurkeShawConfig {
+    /// Contraction rate (σ). Default 10.0 gives robust chaos.
+    pub sigma: f64,
+    /// Second parameter (ρ). Default 4.272 maintains the two-scroll attractor.
+    pub rho: f64,
+}
+impl Default for BurkeShawConfig {
+    fn default() -> Self {
+        Self { sigma: 10.0, rho: 4.272 }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ChenConfig {
+    /// First parameter (a). Default 40 gives chaotic double-scroll.
+    pub a: f64,
+    /// Second parameter (b). Default 3.
+    pub b: f64,
+    /// Third parameter (c). Default 28 (same as Lorenz rho).
+    pub c: f64,
+}
+impl Default for ChenConfig {
+    fn default() -> Self {
+        Self { a: 40.0, b: 3.0, c: 28.0 }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct DadrasConfig {
+    pub a: f64,
+    pub b: f64,
+    pub c: f64,
+    pub d: f64,
+    pub e: f64,
+}
+impl Default for DadrasConfig {
+    fn default() -> Self {
+        Self { a: 3.0, b: 2.7, c: 1.7, d: 2.0, e: 9.0 }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RucklidgeConfig {
+    /// Dissipation (κ). Default 2.0.
+    pub kappa: f64,
+    /// Forcing amplitude (λ). Default 6.7 gives chaos.
+    pub lambda: f64,
+}
+impl Default for RucklidgeConfig {
+    fn default() -> Self {
+        Self { kappa: 2.0, lambda: 6.7 }
+    }
+}
+
 impl Config {
     /// Clamp all parameters to physically sensible bounds.
     /// Call this after deserializing from user-supplied config files.
@@ -771,6 +838,22 @@ impl Config {
         Self::clamp_log_f64(&mut self.kuramoto_driven.drive_freq, 0.0, 100.0, "kuramoto_driven.drive_freq");
         // Thomas attractor: b controls dissipation (strange attractor near 0.208186)
         Self::clamp_log_f64(&mut self.thomas.b, 0.05, 0.5, "thomas.b");
+        // Burke-Shaw
+        Self::clamp_log_f64(&mut self.burke_shaw.sigma, 1.0, 50.0, "burke_shaw.sigma");
+        Self::clamp_log_f64(&mut self.burke_shaw.rho, 0.1, 20.0, "burke_shaw.rho");
+        // Chen
+        Self::clamp_log_f64(&mut self.chen.a, 1.0, 100.0, "chen.a");
+        Self::clamp_log_f64(&mut self.chen.b, 0.1, 20.0, "chen.b");
+        Self::clamp_log_f64(&mut self.chen.c, 1.0, 100.0, "chen.c");
+        // Dadras
+        Self::clamp_log_f64(&mut self.dadras.a, 0.1, 10.0, "dadras.a");
+        Self::clamp_log_f64(&mut self.dadras.b, 0.1, 10.0, "dadras.b");
+        Self::clamp_log_f64(&mut self.dadras.c, 0.1, 10.0, "dadras.c");
+        Self::clamp_log_f64(&mut self.dadras.d, 0.1, 10.0, "dadras.d");
+        Self::clamp_log_f64(&mut self.dadras.e, 0.1, 30.0, "dadras.e");
+        // Rucklidge
+        Self::clamp_log_f64(&mut self.rucklidge.kappa, 0.1, 20.0, "rucklidge.kappa");
+        Self::clamp_log_f64(&mut self.rucklidge.lambda, 0.1, 20.0, "rucklidge.lambda");
     }
 
     /// Clamp a `f64` field to `[min, max]`, emitting a tracing warning if clamped.

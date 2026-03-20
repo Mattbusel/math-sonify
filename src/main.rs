@@ -2843,10 +2843,34 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
         )),
         "thomas" => Box::new(Thomas::new(config.thomas.b)),
         "sprott_c" => Box::new(SprottC::new()),
-        "dadras" => Box::new(Dadras::new()),
-        "rucklidge" => Box::new(Rucklidge::new()),
-        "chen" => Box::new(Chen::new()),
-        "burke_shaw" => Box::new(BurkeShaw::new()),
+        "dadras" => {
+            let mut s = Dadras::new();
+            s.a = config.dadras.a;
+            s.b = config.dadras.b;
+            s.c = config.dadras.c;
+            s.d = config.dadras.d;
+            s.e = config.dadras.e;
+            Box::new(s)
+        }
+        "rucklidge" => {
+            let mut s = Rucklidge::new();
+            s.kappa = config.rucklidge.kappa;
+            s.lambda = config.rucklidge.lambda;
+            Box::new(s)
+        }
+        "chen" => {
+            let mut s = Chen::new();
+            s.a = config.chen.a;
+            s.b = config.chen.b;
+            s.c = config.chen.c;
+            Box::new(s)
+        }
+        "burke_shaw" => {
+            let mut s = BurkeShaw::new();
+            s.sigma = config.burke_shaw.sigma;
+            s.rho = config.burke_shaw.rho;
+            Box::new(s)
+        }
         _ => Box::new(Lorenz::new(
             config.lorenz.sigma,
             config.lorenz.rho,

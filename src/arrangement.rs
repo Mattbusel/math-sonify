@@ -201,6 +201,26 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
         thomas: ThomasConfig {
             b: lf64(a.thomas.b, b.thomas.b),
         },
+        dadras: DadrasConfig {
+            a: lf64(a.dadras.a, b.dadras.a),
+            b: lf64(a.dadras.b, b.dadras.b),
+            c: lf64(a.dadras.c, b.dadras.c),
+            d: lf64(a.dadras.d, b.dadras.d),
+            e: lf64(a.dadras.e, b.dadras.e),
+        },
+        rucklidge: RucklidgeConfig {
+            kappa: lf64(a.rucklidge.kappa, b.rucklidge.kappa),
+            lambda: lf64(a.rucklidge.lambda, b.rucklidge.lambda),
+        },
+        chen: ChenConfig {
+            a: lf64(a.chen.a, b.chen.a),
+            b: lf64(a.chen.b, b.chen.b),
+            c: lf64(a.chen.c, b.chen.c),
+        },
+        burke_shaw: BurkeShawConfig {
+            sigma: lf64(a.burke_shaw.sigma, b.burke_shaw.sigma),
+            rho: lf64(a.burke_shaw.rho, b.burke_shaw.rho),
+        },
         viz: a.viz.clone(), // don't morph viz settings
         ..a.clone()
     }

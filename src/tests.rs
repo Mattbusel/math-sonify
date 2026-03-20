@@ -2281,4 +2281,54 @@ mod ode_property_tests {
         assert_eq!(t.name(), "thomas");
         assert_eq!(t.dimension(), 3);
     }
+
+    #[test]
+    fn burke_shaw_stays_finite_after_1000_steps() {
+        use crate::systems::{BurkeShaw, DynamicalSystem};
+        let mut sys = BurkeShaw::new();
+        for _ in 0..1000 {
+            sys.step(0.01);
+        }
+        assert!(sys.state().iter().all(|v| v.is_finite()), "BurkeShaw diverged");
+    }
+
+    #[test]
+    fn chen_stays_finite_after_1000_steps() {
+        use crate::systems::{Chen, DynamicalSystem};
+        let mut sys = Chen::new();
+        for _ in 0..1000 {
+            sys.step(0.001);
+        }
+        assert!(sys.state().iter().all(|v| v.is_finite()), "Chen diverged");
+    }
+
+    #[test]
+    fn dadras_stays_finite_after_1000_steps() {
+        use crate::systems::{Dadras, DynamicalSystem};
+        let mut sys = Dadras::new();
+        for _ in 0..1000 {
+            sys.step(0.01);
+        }
+        assert!(sys.state().iter().all(|v| v.is_finite()), "Dadras diverged");
+    }
+
+    #[test]
+    fn rucklidge_stays_finite_after_1000_steps() {
+        use crate::systems::{DynamicalSystem, Rucklidge};
+        let mut sys = Rucklidge::new();
+        for _ in 0..1000 {
+            sys.step(0.01);
+        }
+        assert!(sys.state().iter().all(|v| v.is_finite()), "Rucklidge diverged");
+    }
+
+    #[test]
+    fn sprott_c_stays_finite_after_1000_steps() {
+        use crate::systems::{DynamicalSystem, SprottC};
+        let mut sys = SprottC::new();
+        for _ in 0..1000 {
+            sys.step(0.01);
+        }
+        assert!(sys.state().iter().all(|v| v.is_finite()), "SprottC diverged");
+    }
 }
