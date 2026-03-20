@@ -432,6 +432,7 @@ fn warn_unknown_idents(src: &str) -> Option<String> {
 /// Returns Ok(()) if all equations produce finite results at all test points.
 /// Returns Err with a descriptive message if an issue is detected, including
 /// warnings about unknown identifiers (likely typos).
+#[allow(dead_code)]
 pub fn validate_exprs(ex: &str, ey: &str, ez: &str, ew: &str) -> Result<(), String> {
     let test_points: &[(f64, f64, f64, f64, f64)] = &[
         (1.0, 1.0, 1.0, 0.5, 0.0),
@@ -471,4 +472,107 @@ pub fn validate_exprs(ex: &str, ey: &str, ez: &str, ew: &str) -> Result<(), Stri
         return Err(format!("Warning — {}", warnings.join("; ")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_eval_expr_basic_arithmetic() {
+        assert!((eval_expr("2 + 3", 0.0, 0.0, 0.0, 0.0) - 5.0).abs() < 1e-10);
+        assert!((eval_expr("4 * 2", 0.0, 0.0, 0.0, 0.0) - 8.0).abs() < 1e-10);
+        assert!((eval_expr("10 / 2", 0.0, 0.0, 0.0, 0.0) - 5.0).abs() < 1e-10);
+        assert!((eval_expr("3 - 1", 0.0, 0.0, 0.0, 0.0) - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_eval_expr_variables() {
+        assert!((eval_expr("x", 3.0, 0.0, 0.0, 0.0) - 3.0).abs() < 1e-10);
+        assert!((eval_expr("y + z", 0.0, 2.0, 4.0, 0.0) - 6.0).abs() < 1e-10);
+        assert!((eval_expr("t", 0.0, 0.0, 0.0, 5.0) - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_eval_expr_functions() {
+        assert!((eval_expr("sin(0)", 0.0, 0.0, 0.0, 0.0)).abs() < 1e-10);
+        assert!((eval_expr("cos(0)", 0.0, 0.0, 0.0, 0.0) - 1.0).abs() < 1e-10);
+        assert!((eval_expr("exp(0)", 0.0, 0.0, 0.0, 0.0) - 1.0).abs() < 1e-10);
+        assert!((eval_expr("abs(-3)", 0.0, 0.0, 0.0, 0.0) - 3.0).abs() < 1e-10);
+        assert!((eval_expr("sqrt(4)", 0.0, 0.0, 0.0, 0.0) - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_eval_expr_constants() {
+        let pi = eval_expr("pi", 0.0, 0.0, 0.0, 0.0);
+        assert!((pi - std::f64::consts::PI).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_eval_expr_div_zero_safe() {
+        // Division by zero should return 0 rather than NaN/inf
+        let result = eval_expr("1 / 0", 0.0, 0.0, 0.0, 0.0);
+        assert!(result.is_finite(), "1/0 should produce finite output, got {}", result);
+    }
+
+    #[test]
+    fn test_custom_ode_lorenz_like() {
+        // Approximate Lorenz: dx=10*(y-x), dy=x*(28-z)-y, dz=x*y-2.667*z
+        let mut sys = CustomOde::new(
+            "10*(y-x)".into(),
+            "x*(28-z)-y".into(),
+            "x*y-2.667*z".into(),
+        );
+        assert_eq!(sys.name(), "custom");
+        assert_eq!(sys.dimension(), 3);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.001);
+        let after = sys.state();
+        assert!(before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15));
+    }
+
+    #[test]
+    fn test_custom_ode_state_stays_finite() {
+        let mut sys = CustomOde::new(
+            "y".into(),
+            "-x".into(),
+            "0".into(),
+        );
+        for _ in 0..1000 {
+            sys.step(0.01);
+        }
+        for v in sys.state().iter() {
+            assert!(v.is_finite(), "State became non-finite: {}", v);
+        }
+    }
+
+    #[test]
+    fn test_custom_ode_blowup_resets() {
+        // An unstable ODE: dx = 1e8 * x should blow up and auto-reset
+        let mut sys = CustomOde::new(
+            "1e8*x".into(),
+            "0".into(),
+            "0".into(),
+        );
+        for _ in 0..100 {
+            sys.step(0.1);
+        }
+        // After blow-up, state should have been reset to finite values
+        for v in sys.state().iter() {
+            assert!(v.is_finite(), "State should be reset after blowup: {}", v);
+        }
+    }
+
+    #[test]
+    fn test_validate_exprs_ok() {
+        let result = validate_exprs("y", "-x", "0", "");
+        assert!(result.is_ok(), "Simple harmonic should validate: {:?}", result);
+    }
+
+    #[test]
+    fn test_validate_exprs_rejects_unknown_ident() {
+        let result = validate_exprs("foo*x", "y", "z", "");
+        assert!(result.is_err(), "Unknown identifier should produce error");
+    }
 }

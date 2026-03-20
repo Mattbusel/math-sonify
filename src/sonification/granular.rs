@@ -5,6 +5,10 @@ use crate::config::SonificationConfig;
 pub struct GranularMapping {
     min_state: Vec<f64>,
     max_state: Vec<f64>,
+    /// EMA decay for min/max tracking (0.002 ≈ 500-sample time constant at 120 Hz).
+    /// Prevents normalization from becoming permanently stuck at old extremes when
+    /// the attractor moves to a different region of phase space.
+    alpha: f64,
 }
 
 impl GranularMapping {
@@ -15,6 +19,7 @@ impl GranularMapping {
         Self {
             min_state: Vec::new(),
             max_state: Vec::new(),
+            alpha: 0.002,
         }
     }
 }
@@ -27,17 +32,25 @@ impl Default for GranularMapping {
 
 impl Sonification for GranularMapping {
     fn map(&mut self, state: &[f64], speed: f64, config: &SonificationConfig) -> AudioParams {
-        // Initialize or expand tracking
+        // Initialize on first call or dimension change
         if self.min_state.len() != state.len() {
             self.min_state = state.to_vec();
             self.max_state = state.to_vec();
         }
+        // EMA min/max tracking: hard-expand on new extremes, then slowly relax
+        // the bounds back toward the current value.  This prevents the normalizer
+        // from getting permanently anchored to a single outlier point while still
+        // covering the full attractor range during initial warmup.
         for (i, &v) in state.iter().enumerate() {
             if v < self.min_state[i] {
-                self.min_state[i] = v;
+                self.min_state[i] = v; // instant expansion on new minimum
+            } else {
+                self.min_state[i] += self.alpha * (v - self.min_state[i]); // slow relaxation
             }
             if v > self.max_state[i] {
-                self.max_state[i] = v;
+                self.max_state[i] = v; // instant expansion on new maximum
+            } else {
+                self.max_state[i] += self.alpha * (v - self.max_state[i]); // slow relaxation
             }
         }
 
