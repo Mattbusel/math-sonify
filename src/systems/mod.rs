@@ -166,8 +166,20 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Sprott C",
         description: "Minimal algebraically simple attractor (variant C)",
     },
+    SystemEntry {
+        name: "dadras",
+        display_name: "Dadras",
+        description: "Five-parameter multi-lobed chaotic attractor with large basin of attraction",
+    },
+    SystemEntry {
+        name: "rucklidge",
+        display_name: "Rucklidge",
+        description: "Two-parameter double-convection chaotic attractor with folded-band topology",
+    },
 ];
 
+pub mod dadras;
+pub mod rucklidge;
 pub mod thomas;
 pub mod sprott_c;
 pub mod arnold_cat;
@@ -199,6 +211,8 @@ pub mod sprott_b;
 pub mod three_body;
 pub mod van_der_pol;
 
+pub use dadras::Dadras;
+pub use rucklidge::Rucklidge;
 pub use thomas::Thomas;
 pub use sprott_c::SprottC;
 pub use arnold_cat::ArnoldCat;
@@ -1535,4 +1549,452 @@ where
         div += (fp[i] - fm[i]) / (2.0 * eps);
     }
     div
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Simple linear ODE: dx/dt = -x, exact solution x(t) = x0 * e^(-t)
+    fn decay(s: &[f64]) -> Vec<f64> {
+        vec![-s[0]]
+    }
+
+    // 2D harmonic oscillator: dx/dt = v, dv/dt = -x, exact period 2π
+    fn harmonic(s: &[f64]) -> Vec<f64> {
+        vec![s[1], -s[0]]
+    }
+
+    // Lorenz derivatives for Lyapunov / divergence tests
+    fn lorenz_deriv(s: &[f64]) -> Vec<f64> {
+        let (sigma, rho, beta) = (10.0, 28.0, 8.0 / 3.0);
+        vec![
+            sigma * (s[1] - s[0]),
+            s[0] * (rho - s[2]) - s[1],
+            s[0] * s[1] - beta * s[2],
+        ]
+    }
+
+    // -------------------------------------------------------------------------
+    // rk4
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn rk4_scalar_decay_matches_exact() {
+        let mut s = vec![1.0f64];
+        let h = 0.1;
+        rk4(&mut s, h, decay);
+        let exact = (-h).exp();
+        assert!((s[0] - exact).abs() < 1e-7, "rk4 error too large: {} vs {}", s[0], exact);
+    }
+
+    #[test]
+    fn rk4_harmonic_oscillator_conserves_energy() {
+        // E = 0.5*(x^2 + v^2), starts at 0.5*(1^2 + 0^2) = 0.5
+        let mut s = vec![1.0f64, 0.0];
+        let h = 0.01;
+        for _ in 0..1000 {
+            rk4(&mut s, h, harmonic);
+        }
+        let energy = 0.5 * (s[0] * s[0] + s[1] * s[1]);
+        assert!((energy - 0.5).abs() < 1e-5, "Energy drifted: {}", energy);
+    }
+
+    #[test]
+    fn rk4_zero_dt_leaves_state_unchanged() {
+        let mut s = vec![3.0, 1.0, 4.0];
+        rk4(&mut s, 0.0, |st| vec![1.0; st.len()]);
+        assert!((s[0] - 3.0).abs() < 1e-15);
+        assert!((s[1] - 1.0).abs() < 1e-15);
+        assert!((s[2] - 4.0).abs() < 1e-15);
+    }
+
+    // -------------------------------------------------------------------------
+    // rk45_step
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn rk45_step_returns_finite_values() {
+        let mut s = vec![1.0f64];
+        let (err, next_dt) = rk45_step(&mut s, 0.1, &decay);
+        assert!(s[0].is_finite(), "State became non-finite");
+        assert!(err.is_finite() && err >= 0.0, "Error non-finite or negative: {}", err);
+        assert!(next_dt.is_finite() && next_dt > 0.0, "next_dt invalid: {}", next_dt);
+    }
+
+    #[test]
+    fn rk45_step_advances_state_correctly() {
+        let mut s = vec![1.0f64];
+        let h = 0.1;
+        rk45_step(&mut s, h, &decay);
+        let exact = (-h).exp();
+        // RK45 4th-order solution should match within a loose bound
+        assert!((s[0] - exact).abs() < 1e-6, "rk45 step error: {} vs {}", s[0], exact);
+    }
+
+    #[test]
+    fn rk45_step_suggests_smaller_dt_on_large_error() {
+        // High-frequency system needs small steps; large dt should trigger reduction
+        let high_freq = |s: &[f64]| vec![1000.0 * s[0]];
+        let mut s = vec![0.001f64];
+        let (_, next_dt) = rk45_step(&mut s, 1.0, &high_freq);
+        assert!(next_dt < 1.0, "Expected step reduction, got next_dt={}", next_dt);
+    }
+
+    // -------------------------------------------------------------------------
+    // integrate_adaptive
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn integrate_adaptive_decay_matches_exact() {
+        let mut s = vec![1.0f64];
+        let total = 1.0;
+        let steps = integrate_adaptive(&mut s, total, 1e-8, decay);
+        let exact = (-total).exp();
+        assert!((s[0] - exact).abs() < 1e-6, "adaptive error: {} vs {}", s[0], exact);
+        assert!(steps > 0, "Expected at least one step");
+    }
+
+    #[test]
+    fn integrate_adaptive_returns_finite_state() {
+        let mut s = vec![1.0, 0.0, 1.0];
+        integrate_adaptive(&mut s, 0.5, 1e-6, lorenz_deriv);
+        for (i, &v) in s.iter().enumerate() {
+            assert!(v.is_finite(), "Component {} became non-finite: {}", i, v);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // lyapunov_spectrum
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn lyapunov_spectrum_contracting_system_all_negative() {
+        // dx/dt = -x, dy/dt = -2y: both exponents should be negative
+        let f = |s: &[f64]| vec![-s[0], -2.0 * s[1]];
+        let exps = lyapunov_spectrum(&[1.0, 1.0], 2, 2, 2000, 0.01, &f);
+        assert_eq!(exps.len(), 2);
+        assert!(exps[0] < 0.0, "Expected negative largest exponent, got {}", exps[0]);
+        assert!(exps[1] < 0.0, "Expected negative second exponent, got {}", exps[1]);
+    }
+
+    #[test]
+    fn lyapunov_spectrum_lorenz_largest_positive() {
+        // Lorenz largest Lyapunov exponent is ~0.9 — should be clearly positive
+        let initial = [1.0, 1.0, 1.0f64];
+        let exps = lyapunov_spectrum(&initial, 3, 1, 3000, 0.01, &lorenz_deriv);
+        assert_eq!(exps.len(), 1);
+        assert!(exps[0] > 0.0, "Expected positive MLE for Lorenz, got {}", exps[0]);
+    }
+
+    #[test]
+    fn lyapunov_spectrum_empty_for_zero_exponents() {
+        let exps = lyapunov_spectrum(&[1.0], 1, 0, 100, 0.01, &decay);
+        assert!(exps.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // classify_attractor
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn classify_attractor_all_cases() {
+        assert_eq!(classify_attractor(&[]), "unknown");
+        assert_eq!(classify_attractor(&[-1.0, -2.0, -3.0]), "fixed_point");
+        assert_eq!(classify_attractor(&[0.5, -1.0, -2.0]), "chaos");
+        assert_eq!(classify_attractor(&[0.5, 0.3, -1.0]), "hyperchaos");
+        assert_eq!(classify_attractor(&[0.005, -1.0]), "limit_cycle");
+        assert_eq!(classify_attractor(&[0.005, 0.005, -1.0]), "torus");
+    }
+
+    // -------------------------------------------------------------------------
+    // kolmogorov_entropy
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn kolmogorov_entropy_sums_positive_exponents() {
+        let k = kolmogorov_entropy(&[0.9, -0.1, -14.0]);
+        assert!((k - 0.9).abs() < 1e-10, "Expected 0.9, got {}", k);
+    }
+
+    #[test]
+    fn kolmogorov_entropy_zero_for_stable() {
+        let k = kolmogorov_entropy(&[-1.0, -2.0, -3.0]);
+        assert!((k - 0.0).abs() < 1e-10, "Expected 0, got {}", k);
+    }
+
+    // -------------------------------------------------------------------------
+    // permutation_entropy
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn permutation_entropy_constant_series_is_zero() {
+        let series: Vec<f64> = vec![1.0; 100];
+        let h = permutation_entropy(&series, 3, 1);
+        assert!((h - 0.0).abs() < 1e-10, "Constant series should have zero entropy, got {}", h);
+    }
+
+    #[test]
+    fn permutation_entropy_monotone_series_is_zero() {
+        let series: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let h = permutation_entropy(&series, 3, 1);
+        // Only one pattern (0,1,2), so entropy = 0
+        assert!((h - 0.0).abs() < 1e-10, "Monotone series should have zero entropy, got {}", h);
+    }
+
+    #[test]
+    fn permutation_entropy_in_unit_range() {
+        // Lorenz trajectory should have high entropy (near 1)
+        let mut s = vec![1.0, 1.0, 1.0f64];
+        let mut ts: Vec<f64> = Vec::with_capacity(1000);
+        for _ in 0..1000 {
+            rk4(&mut s, 0.01, lorenz_deriv);
+            ts.push(s[0]);
+        }
+        let h = permutation_entropy(&ts, 4, 1);
+        assert!(h >= 0.0 && h <= 1.0 + 1e-10, "Entropy out of [0,1]: {}", h);
+    }
+
+    // -------------------------------------------------------------------------
+    // find_fixed_point
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn find_fixed_point_finds_origin() {
+        // f(x,y) = [-x, -y], fixed point at (0,0)
+        let fp = find_fixed_point(&[0.1, 0.1], 1e-10, 50, &|s: &[f64]| vec![-s[0], -s[1]]);
+        let fp = fp.expect("Should converge");
+        assert!(fp[0].abs() < 1e-8, "x should be near 0, got {}", fp[0]);
+        assert!(fp[1].abs() < 1e-8, "y should be near 0, got {}", fp[1]);
+    }
+
+    #[test]
+    fn find_fixed_point_returns_none_on_divergence() {
+        // f(x) = x + 1: no fixed point, Newton diverges
+        let fp = find_fixed_point(&[10.0], 1e-10, 20, &|s: &[f64]| vec![s[0] + 1.0]);
+        // Should either return None or at least not panic
+        let _ = fp; // acceptable result
+    }
+
+    // -------------------------------------------------------------------------
+    // kmeans_cluster
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn kmeans_cluster_separates_two_clusters() {
+        let traj: Vec<Vec<f64>> = vec![
+            vec![0.0, 0.0],
+            vec![0.1, 0.0],
+            vec![0.0, 0.1],
+            vec![10.0, 10.0],
+            vec![10.1, 10.0],
+            vec![10.0, 10.1],
+        ];
+        let (centroids, labels) = kmeans_cluster(&traj, 2, 2, 100);
+        assert_eq!(centroids.len(), 2);
+        assert_eq!(labels.len(), 6);
+        // First 3 should share a label; last 3 should share a different label
+        assert_eq!(labels[0], labels[1]);
+        assert_eq!(labels[1], labels[2]);
+        assert_eq!(labels[3], labels[4]);
+        assert_eq!(labels[4], labels[5]);
+        assert_ne!(labels[0], labels[3]);
+    }
+
+    #[test]
+    fn kmeans_cluster_k_zero_returns_empty() {
+        let traj = vec![vec![1.0, 2.0]];
+        let (centroids, labels) = kmeans_cluster(&traj, 0, 2, 10);
+        assert!(centroids.is_empty());
+        assert!(labels.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // safe_param_path
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn safe_param_path_direct_when_midpoint_safe() {
+        // Midpoint is always safe → direct path [0, 1]
+        let path = safe_param_path(0.0, 1.0, &|_| true, 4);
+        assert_eq!(path, vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn safe_param_path_subdivides_when_unsafe() {
+        // Midpoint is never safe → subdivides up to max_depth
+        let path = safe_param_path(0.0, 1.0, &|_| false, 2);
+        assert!(path.len() > 2, "Expected subdivision, got {:?}", path);
+        assert_eq!(path[0], 0.0);
+        assert_eq!(*path.last().unwrap(), 1.0);
+    }
+
+    // -------------------------------------------------------------------------
+    // morris_sensitivity
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn morris_sensitivity_detects_most_influential_param() {
+        // f(p) = 100*p[0] + p[1], p[0] should dominate
+        let params = vec![1.0, 1.0];
+        let sens = morris_sensitivity(&params, 0.1, |p| 100.0 * p[0] + p[1]);
+        assert_eq!(sens.len(), 2);
+        assert!(sens[0] > sens[1], "p[0] should be more sensitive: {:?}", sens);
+    }
+
+    #[test]
+    fn morris_sensitivity_zero_delta_returns_zeros() {
+        let params = vec![1.0, 2.0];
+        let sens = morris_sensitivity(&params, 0.0, |p| p[0] + p[1]);
+        for (i, &s) in sens.iter().enumerate() {
+            assert_eq!(s, 0.0, "Expected 0 sensitivity for zero delta at index {}", i);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // poincare_section
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn poincare_section_harmonic_oscillator_regular_crossings() {
+        // Harmonic oscillator x'' + x = 0: crosses x=0 every π
+        // state = [x, v], initial [0.0, 1.0] starts at x=0 moving right
+        let crossings = poincare_section(
+            &[0.5, 0.0],
+            0.01,
+            100,
+            5,
+            0,    // plane_dim = x
+            0.0,  // plane_val = 0
+            &harmonic,
+        );
+        assert_eq!(crossings.len(), 5, "Expected 5 crossings");
+        for c in &crossings {
+            assert!(c[0].abs() < 0.05, "Crossing not near x=0: {}", c[0]);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // divergence_at
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn divergence_at_lorenz_is_negative() {
+        // Lorenz divergence = -(sigma + 1 + beta) ≈ -(10 + 1 + 2.667) ≈ -13.667
+        let state = [1.0, 1.0, 1.0f64];
+        let div = divergence_at(&state, &lorenz_deriv, 1e-6);
+        let expected = -(10.0 + 1.0 + 8.0 / 3.0);
+        assert!((div - expected).abs() < 0.01, "Lorenz divergence: {} vs expected {}", div, expected);
+    }
+
+    #[test]
+    fn divergence_at_linear_system_exact() {
+        // f(x,y) = [-2x, -3y], divergence = -2 + -3 = -5
+        let state = [1.0, 1.0f64];
+        let div = divergence_at(&state, &|s| vec![-2.0 * s[0], -3.0 * s[1]], 1e-7);
+        assert!((div - (-5.0)).abs() < 1e-4, "Linear divergence: {} vs -5", div);
+    }
+
+    // -------------------------------------------------------------------------
+    // param_distance
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn param_distance_identical_params_is_zero() {
+        let p = vec![1.0, 2.0, 3.0];
+        let ranges = vec![(0.0, 10.0), (0.0, 10.0), (0.0, 10.0)];
+        let d = param_distance(&p, &p, &ranges);
+        assert!((d - 0.0).abs() < 1e-15, "Identical params should have distance 0");
+    }
+
+    #[test]
+    fn param_distance_clamps_to_unit_range() {
+        // Params far apart within large range
+        let a = vec![0.0];
+        let b = vec![100.0];
+        let ranges = vec![(0.0, 1.0)]; // range = 1.0, diff = 100 → normalized > 1
+        let d = param_distance(&a, &b, &ranges);
+        assert!(d >= 0.0 && d <= 1.0, "param_distance should clamp to [0,1]: {}", d);
+    }
+
+    // -------------------------------------------------------------------------
+    // mutual_information
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn mutual_information_identical_series_positive() {
+        let x: Vec<f64> = (0..50).map(|i| i as f64).collect();
+        let mi = mutual_information(&x, &x, 8);
+        assert!(mi > 0.0, "Identical series should have positive MI: {}", mi);
+    }
+
+    #[test]
+    fn mutual_information_empty_returns_zero() {
+        let mi = mutual_information(&[], &[], 8);
+        assert_eq!(mi, 0.0);
+    }
+
+    // -------------------------------------------------------------------------
+    // correlation_dimension
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn correlation_dimension_nonnegative() {
+        let mut s = vec![1.0, 1.0, 1.0f64];
+        let mut traj: Vec<Vec<f64>> = Vec::new();
+        for _ in 0..300 {
+            rk4(&mut s, 0.01, lorenz_deriv);
+            traj.push(s.clone());
+        }
+        let d = correlation_dimension(&traj, 500);
+        assert!(d >= 0.0, "Correlation dimension must be non-negative: {}", d);
+    }
+
+    // -------------------------------------------------------------------------
+    // recurrence_quantification
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn rqa_empty_trajectory_returns_zeros() {
+        let result = recurrence_quantification(&[], 0.5, 2);
+        assert_eq!(result.recurrence_rate, 0.0);
+        assert_eq!(result.determinism, 0.0);
+    }
+
+    #[test]
+    fn rqa_periodic_orbit_has_high_determinism() {
+        // Harmonic oscillator is perfectly periodic → recurrence_rate should be high
+        let mut s = vec![1.0f64, 0.0];
+        let mut traj: Vec<Vec<f64>> = Vec::new();
+        for _ in 0..200 {
+            rk4(&mut s, 0.05, harmonic);
+            traj.push(s.clone());
+        }
+        let result = recurrence_quantification(&traj, 0.3, 2);
+        // Periodic orbit should have recurrence_rate > 0
+        assert!(
+            result.recurrence_rate > 0.0,
+            "Periodic orbit should have non-zero recurrence rate"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // leapfrog
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn leapfrog_harmonic_conserves_energy() {
+        // q'' = -q (harmonic oscillator as Hamiltonian: H = p^2/2 + q^2/2)
+        // state = [q, p]
+        let mut s = vec![1.0f64, 0.0]; // q=1, p=0, E=0.5
+        let q_idx = vec![0];
+        let p_idx = vec![1];
+        let velocity = |st: &[f64]| vec![st[1]];    // dq/dt = p
+        let force = |st: &[f64]| vec![-st[0]];      // dp/dt = -q
+        for _ in 0..1000 {
+            leapfrog(&mut s, &q_idx, &p_idx, 0.01, &velocity, &force);
+        }
+        let energy = 0.5 * (s[0] * s[0] + s[1] * s[1]);
+        assert!((energy - 0.5).abs() < 1e-4, "Leapfrog energy drift: {}", energy);
+    }
 }

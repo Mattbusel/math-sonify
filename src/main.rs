@@ -41,8 +41,8 @@ use crate::sonification::{
 };
 use crate::synth::OscShape;
 use crate::systems::{
-    ArnoldCat, CustomOde, DelayedMap, FractionalLorenz, KuramotoDriven, LogisticMap, Mathieu,
-    Oregonator, SprottC, StandardMap, StochasticLorenz, Thomas, *,
+    ArnoldCat, CustomOde, Dadras, DelayedMap, FractionalLorenz, KuramotoDriven, LogisticMap,
+    Mathieu, Oregonator, Rucklidge, SprottC, StandardMap, StochasticLorenz, Thomas, *,
 };
 use crate::ui::{draw_ui, AppState, SharedState};
 use midir;
@@ -2843,6 +2843,8 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
         )),
         "thomas" => Box::new(Thomas::new(config.thomas.b)),
         "sprott_c" => Box::new(SprottC::new()),
+        "dadras" => Box::new(Dadras::new()),
+        "rucklidge" => Box::new(Rucklidge::new()),
         _ => Box::new(Lorenz::new(
             config.lorenz.sigma,
             config.lorenz.rho,
