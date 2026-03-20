@@ -6,11 +6,11 @@ use math_sonify_plugin::{
     },
     systems::{
         validate_exprs, Aizawa, ArnoldCat, Bouali, BurkeShaw, Chen, Chua, CoupledMapLattice,
-        Dadras, DelayedMap, DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz,
+        Dadras, DelayedMap, DequanLi, DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz,
         GeodesicTorus, Halvorsen, HenonMap, HindmarshRose, Kuramoto, KuramotoDriven, LogisticMap,
         Lorenz, Lorenz84, Lorenz96, MackeyGlass, Mathieu, NewtonLeipnik, NoseHoover, Oregonator,
-        RabinovichFabrikant, Rikitake, Rossler, Rucklidge, SprottB, SprottC, SprottG, SprottH,
-        SprottL, StandardMap, StochasticLorenz, Thomas, ThreeBody, VanDerPol,
+        RabinovichFabrikant, Rikitake, Rossler, Rucklidge, Sakarya, SprottB, SprottC, SprottG,
+        SprottH, SprottL, StandardMap, StochasticLorenz, Thomas, ThreeBody, VanDerPol,
     },
 };
 
@@ -1446,5 +1446,56 @@ fn newton_leipnik_deterministic() {
     for _ in 0..500 { s1.step(0.01); s2.step(0.01); }
     for (a, b) in s1.state().iter().zip(s2.state().iter()) {
         assert!((a - b).abs() < 1e-12, "Newton-Leipnik not deterministic: {} vs {}", a, b);
+    }
+}
+
+// ── Dequan Li attractor integration tests ────────────────────────────────────
+
+#[test]
+fn dequan_li_stays_finite() {
+    // Uses small dt=0.0001 due to large derivatives
+    let mut sys = DequanLi::new();
+    for _ in 0..5_000 { sys.step(0.0001); }
+    assert!(all_finite(sys.state()), "DequanLi state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn dequan_li_deterministic() {
+    let mut s1 = DequanLi::new();
+    let mut s2 = DequanLi::new();
+    for _ in 0..200 { s1.step(0.0001); s2.step(0.0001); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-12, "DequanLi not deterministic: {} vs {}", a, b);
+    }
+}
+
+// ── Sakarya attractor integration tests ──────────────────────────────────────
+
+#[test]
+fn sakarya_stays_finite() {
+    let mut sys = Sakarya::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "Sakarya state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn sakarya_state_bounded() {
+    // Run for 20 time units (moderate transient); the attractor amplitude
+    // is modest within this window even though longer runs can grow large.
+    let mut sys = Sakarya::new();
+    for _ in 0..2_000 { sys.step(0.01); }
+    let s = sys.state();
+    assert!(s[0].abs() < 100.0, "Sakarya x out of range: {}", s[0]);
+    assert!(s[1].abs() < 100.0, "Sakarya y out of range: {}", s[1]);
+    assert!(s[2].abs() < 100.0, "Sakarya z out of range: {}", s[2]);
+}
+
+#[test]
+fn sakarya_deterministic() {
+    let mut s1 = Sakarya::new();
+    let mut s2 = Sakarya::new();
+    for _ in 0..500 { s1.step(0.01); s2.step(0.01); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-12, "Sakarya not deterministic: {} vs {}", a, b);
     }
 }

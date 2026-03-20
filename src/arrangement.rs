@@ -278,6 +278,18 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             a: lf64(a.newton_leipnik.a, b.newton_leipnik.a),
             b: lf64(a.newton_leipnik.b, b.newton_leipnik.b),
         },
+        dequan_li: crate::config::DequanLiConfig {
+            a: lf64(a.dequan_li.a, b.dequan_li.a),
+            c: lf64(a.dequan_li.c, b.dequan_li.c),
+            d: lf64(a.dequan_li.d, b.dequan_li.d),
+            k: lf64(a.dequan_li.k, b.dequan_li.k),
+            f: lf64(a.dequan_li.f, b.dequan_li.f),
+            e: lf64(a.dequan_li.e, b.dequan_li.e),
+        },
+        sakarya: crate::config::SakaryaConfig {
+            a: lf64(a.sakarya.a, b.sakarya.a),
+            b: lf64(a.sakarya.b, b.sakarya.b),
+        },
         viz: a.viz.clone(), // don't morph viz settings
         ..a.clone()
     }
@@ -704,4 +716,158 @@ pub fn generate_song(mood: &str, seed: u64) -> Vec<Scene> {
         scenes.push(Scene::empty(scenes.len()));
     }
     scenes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    fn make_scene(hold: f32, morph: f32, active: bool) -> Scene {
+        let mut s = Scene::empty(0);
+        s.hold_secs = hold;
+        s.morph_secs = morph;
+        s.active = active;
+        s
+    }
+
+    // ── lerp_config ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn lerp_config_t0_equals_a() {
+        let mut a = Config::default();
+        a.lorenz.sigma = 5.0;
+        let b = Config::default();
+        let out = lerp_config(&a, &b, 0.0);
+        assert!((out.lorenz.sigma - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lerp_config_t1_equals_b() {
+        let a = Config::default();
+        let mut b = Config::default();
+        b.lorenz.sigma = 20.0;
+        let out = lerp_config(&a, &b, 1.0);
+        assert!((out.lorenz.sigma - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lerp_config_midpoint_is_average() {
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.lorenz.sigma = 4.0;
+        b.lorenz.sigma = 8.0;
+        let out = lerp_config(&a, &b, 0.5);
+        assert!((out.lorenz.sigma - 6.0).abs() < 1e-9, "expected 6.0, got {}", out.lorenz.sigma);
+    }
+
+    #[test]
+    fn lerp_config_t_clamped_above_1() {
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.lorenz.rho = 10.0;
+        b.lorenz.rho = 30.0;
+        let out = lerp_config(&a, &b, 1.5);
+        assert!((out.lorenz.rho - 30.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lerp_config_t_clamped_below_0() {
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.lorenz.beta = 1.0;
+        b.lorenz.beta = 3.0;
+        let out = lerp_config(&a, &b, -0.5);
+        assert!((out.lorenz.beta - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lerp_config_result_passes_validate() {
+        let a = Config::default();
+        let b = Config::default();
+        let mut out = lerp_config(&a, &b, 0.5);
+        out.validate(); // should not panic
+    }
+
+    // ── total_duration ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn total_duration_single_active_scene() {
+        let scenes = vec![make_scene(10.0, 5.0, true)];
+        // First scene: hold counts, morph is ignored for the first active scene
+        assert!((total_duration(&scenes) - 10.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn total_duration_two_active_scenes() {
+        let scenes = vec![
+            make_scene(10.0, 0.0, true),
+            make_scene(8.0, 4.0, true),
+        ];
+        // Scene 1: 10s hold. Scene 2: 4s morph + 8s hold = 12s. Total = 22s.
+        assert!((total_duration(&scenes) - 22.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn total_duration_inactive_scenes_ignored() {
+        let scenes = vec![
+            make_scene(10.0, 0.0, true),
+            make_scene(5.0, 3.0, false),
+            make_scene(8.0, 4.0, true),
+        ];
+        assert!((total_duration(&scenes) - 22.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn total_duration_all_inactive_is_zero() {
+        let scenes = vec![
+            make_scene(10.0, 5.0, false),
+            make_scene(8.0, 4.0, false),
+        ];
+        assert!((total_duration(&scenes) - 0.0).abs() < 1e-5);
+    }
+
+    // ── scene_at ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn scene_at_during_first_scene_hold() {
+        let scenes = vec![
+            make_scene(10.0, 0.0, true),
+            make_scene(8.0, 4.0, true),
+        ];
+        let result = scene_at(&scenes, 5.0);
+        assert!(result.is_some());
+        let (idx, morphing, _t) = result.unwrap();
+        assert_eq!(idx, 0, "should be in first scene");
+        assert!(!morphing, "should not be morphing");
+    }
+
+    #[test]
+    fn scene_at_during_morph_phase() {
+        let scenes = vec![
+            make_scene(10.0, 0.0, true),
+            make_scene(8.0, 4.0, true),
+        ];
+        // After 10s (first hold), 2s into the 4s morph phase
+        let result = scene_at(&scenes, 12.0);
+        assert!(result.is_some());
+        let (idx, morphing, t) = result.unwrap();
+        assert_eq!(idx, 1, "should be targeting second scene");
+        assert!(morphing, "should be morphing");
+        assert!(t > 0.0 && t < 1.0, "morph t should be in (0,1), got {}", t);
+    }
+
+    #[test]
+    fn scene_at_beyond_end_returns_none() {
+        let scenes = vec![make_scene(5.0, 0.0, true)];
+        let result = scene_at(&scenes, 100.0);
+        assert!(result.is_none(), "should return None after arrangement ends");
+    }
+
+    #[test]
+    fn scene_at_no_active_scenes_returns_none() {
+        let scenes = vec![make_scene(10.0, 5.0, false)];
+        let result = scene_at(&scenes, 5.0);
+        assert!(result.is_none());
+    }
 }
