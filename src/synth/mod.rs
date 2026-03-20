@@ -51,6 +51,7 @@ pub use karplus::KarplusStrong;
 pub use limiter::Limiter;
 #[allow(unused_imports)]
 pub use resonator::ResonatorBank;
+#[allow(unused_imports)]
 pub use reverb::Freeverb;
 pub use waveguide::WaveguideString;
 pub use waveshaper::Waveshaper;

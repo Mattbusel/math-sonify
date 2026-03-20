@@ -70,6 +70,7 @@ impl Toast {
 }
 
 /// A single looper layer. Playback not yet wired to the audio thread.
+#[allow(dead_code)]
 pub struct LooperLayer {
     pub samples: Vec<f32>,
     pub active: bool,
@@ -1054,7 +1055,9 @@ pub(crate) const AMBER: Color32 = Color32::from_rgb(225, 178, 55);
 const GREEN_ACC: Color32 = Color32::from_rgb(45, 215, 128);
 #[allow(dead_code)]
 const DIM_BG: Color32 = Color32::from_rgb(16, 18, 34);
+#[allow(dead_code)]
 pub(crate) const VIOLET: Color32 = Color32::from_rgb(168, 98, 255);
+#[allow(dead_code)]
 const ROSE: Color32 = Color32::from_rgb(255, 88, 128);
 #[allow(dead_code)]
 const TEAL_ACC: Color32 = Color32::from_rgb(0, 200, 178);

@@ -82,14 +82,20 @@ impl Oscillator {
                 .wrapping_mul(0x9E37_79B9_7F4A_7C15)
                 .wrapping_add(0x517C_C1B7_2722_0A95),
         };
-        // Pre-warm the triangle integrator for one full period to avoid startup
-        // transient where tri_state=0 causes amplitude to overshoot ±1 before settling.
+        // Analytically initialize the triangle integrator to its steady-state trough
+        // so the waveform starts at full amplitude without a multi-period startup transient.
+        //
+        // At steady state the leaky integrator alternates between trough y0 (at phase=0,
+        // start of positive half-cycle) and peak -y0. Solving the fixed-point equation:
+        //   y_peak = (1-leak)^{T/2} * y0 + (4*dt/leak) * (1 - (1-leak)^{T/2})
+        //   y0 = -y_peak   (odd symmetry)
+        // gives: y0 = -(4*dt/leak) * (1 - p) / (1 + p),  p = (1-leak)^{T/2}
         if shape == OscShape::Triangle {
-            let warmup = (sample_rate / freq.max(1.0)) as usize;
-            for _ in 0..warmup {
-                osc.next_sample();
-            }
-            osc.phase = 0.0;
+            let leak = 1e-3_f32;
+            let dt = freq / sample_rate;
+            let half_samples = sample_rate / (2.0 * freq.max(1.0));
+            let p = (1.0 - leak).powf(half_samples);
+            osc.tri_state = -(4.0 * dt / leak) * (1.0 - p) / (1.0 + p);
         }
         osc
     }
