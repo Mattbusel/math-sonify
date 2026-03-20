@@ -19,6 +19,12 @@ impl GranularMapping {
     }
 }
 
+impl Default for GranularMapping {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Sonification for GranularMapping {
     fn map(&mut self, state: &[f64], speed: f64, config: &SonificationConfig) -> AudioParams {
         // Initialize or expand tracking
@@ -86,5 +92,51 @@ impl Sonification for GranularMapping {
 
         p.chaos_level = chaos_level;
         p
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SonificationConfig;
+
+    fn default_config() -> SonificationConfig {
+        SonificationConfig::default()
+    }
+
+    #[test]
+    fn test_granular_output_finite() {
+        let mut m = GranularMapping::new();
+        let p = m.map(&[1.0, 2.0, 3.0], 10.0, &default_config());
+        assert!(p.grain_base_freq.is_finite());
+        assert!(p.grain_spawn_rate.is_finite());
+        assert_eq!(p.mode, SonifMode::Granular);
+    }
+
+    #[test]
+    fn test_granular_empty_state() {
+        let mut m = GranularMapping::new();
+        let p = m.map(&[], 0.0, &default_config());
+        assert!(p.grain_base_freq.is_finite());
+    }
+
+    #[test]
+    fn test_granular_spawn_rate_clamp() {
+        let mut m = GranularMapping::new();
+        let p = m.map(&[1.0], 0.0, &default_config());
+        assert!(p.grain_spawn_rate >= 5.0 && p.grain_spawn_rate <= 200.0,
+            "spawn_rate {} out of [5,200]", p.grain_spawn_rate);
+    }
+
+    #[test]
+    fn test_granular_normalizer_adapts() {
+        let mut m = GranularMapping::new();
+        // Call many times — normalization window should expand to cover range
+        let freqs: Vec<f32> = (-10..=10).map(|i| {
+            let state = vec![i as f64, 0.0];
+            m.map(&state, 5.0, &default_config()).grain_base_freq
+        }).collect();
+        // All frequencies should be finite
+        assert!(freqs.iter().all(|f| f.is_finite()));
     }
 }

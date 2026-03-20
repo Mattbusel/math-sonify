@@ -104,3 +104,53 @@ impl Sonification for WaveguideMapping {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SonificationConfig;
+
+    fn default_config() -> SonificationConfig {
+        SonificationConfig::default()
+    }
+
+    #[test]
+    fn test_waveguide_mapping_output_finite() {
+        let mut m = WaveguideMapping::new();
+        let p = m.map(&[1.0, 2.0, 3.0], 10.0, &default_config());
+        assert!(p.waveguide_tension.is_finite());
+        assert!(p.waveguide_damping.is_finite());
+        assert!(p.gain.is_finite());
+        assert_eq!(p.mode, SonifMode::Waveguide);
+    }
+
+    #[test]
+    fn test_waveguide_damping_in_range() {
+        let mut m = WaveguideMapping::new();
+        let p = m.map(&[0.0, 1.0], 5.0, &default_config());
+        assert!(p.waveguide_damping >= 0.90 && p.waveguide_damping <= 0.999,
+            "damping {} out of [0.90, 0.999]", p.waveguide_damping);
+    }
+
+    #[test]
+    fn test_waveguide_excite_triggers_on_speed_spike() {
+        let mut m = WaveguideMapping::new();
+        // Low speed: no excitation
+        let p_low = m.map(&[1.0, 1.0], 0.0, &default_config());
+        assert!(!p_low.waveguide_excite, "should not excite at low speed");
+        // High speed: should excite
+        let p_high = m.map(&[1.0, 1.0], 200.0, &default_config());
+        assert!(p_high.waveguide_excite, "should excite at high speed");
+    }
+
+    #[test]
+    fn test_waveguide_tension_in_range() {
+        let mut m = WaveguideMapping::new();
+        // After normalization adapts, tension should stay in [0, 1]
+        for i in 0..20 {
+            let p = m.map(&[i as f64 * 0.5, 0.0], 5.0, &default_config());
+            assert!(p.waveguide_tension >= 0.0 && p.waveguide_tension <= 1.0,
+                "tension {} out of [0,1]", p.waveguide_tension);
+        }
+    }
+}

@@ -21,6 +21,12 @@ pub struct SpectralMapping {
     prev_state_hash: u64,
 }
 
+impl Default for SpectralMapping {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpectralMapping {
     pub fn new() -> Self {
         Self {
@@ -177,5 +183,56 @@ impl Sonification for SpectralMapping {
         };
         p.chaos_level = chaos_level;
         p
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SonificationConfig;
+
+    fn default_config() -> SonificationConfig {
+        SonificationConfig::default()
+    }
+
+    #[test]
+    fn test_spectral_output_finite() {
+        let mut m = SpectralMapping::new();
+        let p = m.map(&[1.0, 2.0, 3.0], 10.0, &default_config());
+        assert!(p.partials.iter().all(|v| v.is_finite()));
+        assert!(p.gain.is_finite());
+        assert_eq!(p.mode, SonifMode::Spectral);
+    }
+
+    #[test]
+    fn test_spectral_empty_state() {
+        let mut m = SpectralMapping::new();
+        let p = m.map(&[], 0.0, &default_config());
+        assert_eq!(p.mode, SonifMode::Spectral);
+        assert!(p.gain.is_finite());
+    }
+
+    #[test]
+    fn test_spectral_history_fills() {
+        let mut m = SpectralMapping::new();
+        // Feed 300 frames to fill the history buffer (>= 256 entries)
+        for i in 0..300 {
+            let state = vec![(i as f64 * 0.1).sin() * 10.0, (i as f64 * 0.07).cos() * 5.0];
+            let p = m.map(&state, 5.0, &default_config());
+            assert!(p.partials.iter().all(|v| v.is_finite()),
+                "partials non-finite at step {}", i);
+        }
+    }
+
+    #[test]
+    fn test_spectral_partials_in_range() {
+        let mut m = SpectralMapping::new();
+        for i in 0..100 {
+            let state = vec![(i as f64).sin() * 20.0];
+            let p = m.map(&state, 10.0, &default_config());
+            for (k, &v) in p.partials.iter().enumerate() {
+                assert!(v >= 0.0, "partial {} has negative value {}", k, v);
+            }
+        }
     }
 }

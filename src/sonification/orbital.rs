@@ -53,6 +53,12 @@ fn harmonic_amp(partial: usize, stretch: f32) -> f32 {
     string_amp * (1.0 - stretch) + bell_amp * stretch
 }
 
+impl Default for OrbitalResonance {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Sonification for OrbitalResonance {
     fn map(&mut self, state: &[f64], speed: f64, config: &SonificationConfig) -> AudioParams {
         let mut params = AudioParams {
@@ -62,6 +68,10 @@ impl Sonification for OrbitalResonance {
             filter_q: 1.2,
             ..Default::default()
         };
+
+        if state.len() < 2 {
+            return params;
+        }
 
         // --- Angular velocity → fundamental -----------------------------------
         let (x, y) = (state[0], state[1]);
@@ -138,5 +148,57 @@ impl Sonification for OrbitalResonance {
         params.gain = (0.15 + 0.08 * speed.tanh() as f32).min(0.35);
         params.chaos_level = stretch;
         params
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SonificationConfig;
+
+    fn default_config() -> SonificationConfig {
+        SonificationConfig::default()
+    }
+
+    #[test]
+    fn test_orbital_output_finite() {
+        let mut m = OrbitalResonance::new();
+        let p = m.map(&[1.0, 2.0, 3.0], 10.0, &default_config());
+        assert!(p.freqs.iter().all(|f| f.is_finite()), "freqs should be finite");
+        assert!(p.gain.is_finite());
+        assert_eq!(p.mode, SonifMode::Orbital);
+    }
+
+    #[test]
+    fn test_orbital_short_state_no_panic() {
+        let mut m = OrbitalResonance::new();
+        // With < 2 dims, should return default without panicking
+        let p = m.map(&[1.0], 5.0, &default_config());
+        assert_eq!(p.mode, SonifMode::Orbital);
+    }
+
+    #[test]
+    fn test_orbital_empty_state_no_panic() {
+        let mut m = OrbitalResonance::new();
+        let p = m.map(&[], 0.0, &default_config());
+        assert_eq!(p.mode, SonifMode::Orbital);
+    }
+
+    #[test]
+    fn test_orbital_chaos_level_in_range() {
+        let mut m = OrbitalResonance::new();
+        let p = m.map(&[5.0, 10.0, -3.0], 100.0, &default_config());
+        assert!(p.chaos_level >= 0.0 && p.chaos_level <= 1.0,
+            "chaos_level {} out of [0,1]", p.chaos_level);
+    }
+
+    #[test]
+    fn test_orbital_multiple_steps_finite() {
+        let mut m = OrbitalResonance::new();
+        for i in 0..100 {
+            let state = vec![(i as f64).cos() * 5.0, (i as f64).sin() * 5.0, i as f64 * 0.1];
+            let p = m.map(&state, 10.0, &default_config());
+            assert!(p.freqs[0].is_finite(), "freq[0] non-finite at step {}", i);
+        }
     }
 }

@@ -15,6 +15,12 @@ impl FmMapping {
     }
 }
 
+impl Default for FmMapping {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Sonification for FmMapping {
     fn map(&mut self, state: &[f64], speed: f64, config: &SonificationConfig) -> AudioParams {
         let mut params = AudioParams::default();
@@ -89,5 +95,48 @@ impl Sonification for FmMapping {
         }
 
         params
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SonificationConfig;
+
+    fn default_config() -> SonificationConfig {
+        SonificationConfig::default()
+    }
+
+    #[test]
+    fn test_fm_mapping_output_finite() {
+        let mut m = FmMapping::new();
+        let p = m.map(&[1.0, 2.0, 3.0], 10.0, &default_config());
+        assert!(p.fm_carrier_freq.is_finite());
+        assert!(p.fm_mod_index.is_finite());
+        assert_eq!(p.mode, SonifMode::FM);
+    }
+
+    #[test]
+    fn test_fm_mapping_empty_state() {
+        let mut m = FmMapping::new();
+        let p = m.map(&[], 0.0, &default_config());
+        assert!(p.fm_carrier_freq.is_finite());
+    }
+
+    #[test]
+    fn test_fm_mod_ratio_is_integer() {
+        // With harmonic ratio quantization, fm_mod_ratio should be an integer 1..8
+        let mut m = FmMapping::new();
+        let p = m.map(&[0.0, 5.0, 1.0], 20.0, &default_config());
+        let ratio = p.fm_mod_ratio;
+        assert!(ratio >= 1.0 && ratio <= 8.0, "mod ratio {} out of range", ratio);
+        assert!((ratio.round() - ratio).abs() < 0.01, "mod ratio should be integer: {}", ratio);
+    }
+
+    #[test]
+    fn test_fm_mod_index_positive() {
+        let mut m = FmMapping::new();
+        let p = m.map(&[1.0, 2.0, 3.0], 50.0, &default_config());
+        assert!(p.fm_mod_index > 0.0, "mod_index should be positive");
     }
 }

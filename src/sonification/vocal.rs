@@ -22,6 +22,12 @@ pub struct VocalMapping {
     breathiness: f32,
 }
 
+impl Default for VocalMapping {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VocalMapping {
     pub fn new() -> Self {
         Self {
@@ -132,5 +138,53 @@ impl Sonification for VocalMapping {
         params.amps[3] = self.breathiness; // slot 3 encodes breathiness
 
         params
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SonificationConfig;
+
+    fn default_config() -> SonificationConfig {
+        SonificationConfig::default()
+    }
+
+    #[test]
+    fn test_vocal_output_finite() {
+        let mut m = VocalMapping::new();
+        let p = m.map(&[1.0, 2.0, 3.0], 10.0, &default_config());
+        assert!(p.freqs.iter().all(|f| f.is_finite()));
+        assert!(p.gain.is_finite());
+        assert_eq!(p.mode, SonifMode::Vocal);
+    }
+
+    #[test]
+    fn test_vocal_empty_state() {
+        let mut m = VocalMapping::new();
+        let p = m.map(&[], 0.0, &default_config());
+        assert_eq!(p.mode, SonifMode::Vocal);
+        assert!(p.freqs[0].is_finite());
+    }
+
+    #[test]
+    fn test_vocal_formants_positive() {
+        let mut m = VocalMapping::new();
+        let p = m.map(&[0.5, 0.5, 1.0], 5.0, &default_config());
+        // F1, F2, F3 are stored in freqs[1..3] — should all be positive
+        assert!(p.freqs[1] > 0.0, "F1 should be positive: {}", p.freqs[1]);
+        assert!(p.freqs[2] > 0.0, "F2 should be positive: {}", p.freqs[2]);
+        assert!(p.freqs[3] > 0.0, "F3 should be positive: {}", p.freqs[3]);
+    }
+
+    #[test]
+    fn test_vocal_vowel_pos_stays_in_range() {
+        let mut m = VocalMapping::new();
+        // Drive with extreme states to see vowel_pos stays stable
+        for i in 0..200 {
+            let v = (i as f64 * 0.3).sin() * 100.0;
+            let p = m.map(&[v, v * 0.5, v * 0.3], 30.0, &default_config());
+            assert!(p.freqs.iter().all(|f| f.is_finite()), "non-finite at step {}", i);
+        }
     }
 }
