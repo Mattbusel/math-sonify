@@ -1169,6 +1169,41 @@ fn oregonator_stays_finite() {
 }
 
 #[test]
+fn oregonator_state_stays_positive() {
+    // The Oregonator models chemical concentrations: all variables must be > 0.
+    // The step function clamps to [1e-12, 1e6], so this verifies the clamp works.
+    let mut sys = Oregonator::new(0.5);
+    for step in 0..10_000 {
+        sys.step(0.0001);
+        for (i, v) in sys.state().iter().enumerate() {
+            assert!(
+                *v > 0.0,
+                "Oregonator concentration {i} became non-positive at step {step}: {v}"
+            );
+        }
+    }
+}
+
+#[test]
+fn hindmarsh_rose_exhibits_oscillations() {
+    // At I=3.0 the HindmarshRose model should exhibit regular spiking/bursting.
+    // x (membrane potential) oscillates: we verify it crosses both below -0.5 and above 1.0.
+    let mut sys = HindmarshRose::new(3.0, 0.001);
+    // Burn in transient
+    for _ in 0..5_000 { sys.step(0.01); }
+    let mut saw_low = false;
+    let mut saw_high = false;
+    for _ in 0..10_000 {
+        sys.step(0.01);
+        let x = sys.state()[0];
+        if x < -0.5 { saw_low = true; }
+        if x > 1.0  { saw_high = true; }
+    }
+    assert!(saw_low,  "HindmarshRose x never went below -0.5 (not oscillating)");
+    assert!(saw_high, "HindmarshRose x never went above 1.0 (not spiking)");
+}
+
+#[test]
 fn geodesic_torus_stays_finite() {
     let mut sys = GeodesicTorus::new(2.0, 0.5);
     for _ in 0..20_000 { sys.step(0.01); }
