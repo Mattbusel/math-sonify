@@ -9,8 +9,8 @@ use math_sonify_plugin::{
         DelayedMap, DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz, GeodesicTorus,
         Halvorsen, HenonMap, HindmarshRose, Kuramoto, KuramotoDriven, LogisticMap, Lorenz,
         Lorenz84, Lorenz96, MackeyGlass, Mathieu, NoseHoover, Oregonator, RabinovichFabrikant,
-        Rossler, Rucklidge, SprottB, SprottC, StandardMap, StochasticLorenz, Thomas, ThreeBody,
-        VanDerPol,
+        Rikitake, Rossler, Rucklidge, SprottB, SprottC, SprottG, SprottH, SprottL, StandardMap,
+        StochasticLorenz, Thomas, ThreeBody, VanDerPol,
     },
 };
 
@@ -1326,4 +1326,58 @@ fn validate_exprs_rejects_unknown_identifier() {
     // typo-detection path in validate_exprs should flag them as an error.
     let result = validate_exprs("sigma * (y - x)", "-x*rho + 28*x - y", "x*y - 2.667*z", "");
     assert!(result.is_err(), "Unknown identifiers 'sigma'/'rho' should be rejected");
+}
+
+// ── Sprott-G, Sprott-H, Sprott-L, Rikitake integration tests ─────────────────
+
+#[test]
+fn sprott_g_stays_finite() {
+    let mut sys = SprottG::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "SprottG state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn sprott_h_stays_finite() {
+    let mut sys = SprottH::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "SprottH state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn sprott_l_stays_finite() {
+    let mut sys = SprottL::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "SprottL state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn rikitake_stays_finite() {
+    let mut sys = Rikitake::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "Rikitake state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn rikitake_state_bounded() {
+    // With μ=1, a=5 the Rikitake dynamo has bounded reversals.
+    let mut sys = Rikitake::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    let s = sys.state();
+    assert!(s[0].abs() < 20.0, "Rikitake x out of range: {}", s[0]);
+    assert!(s[1].abs() < 20.0, "Rikitake y out of range: {}", s[1]);
+    assert!(s[2].abs() < 50.0, "Rikitake z out of range: {}", s[2]);
+}
+
+// ── DoublePendulum energy_error integration test ──────────────────────────────
+
+#[test]
+fn double_pendulum_energy_error_trait_small_angles() {
+    // Verify that the energy_error() trait method reports a small drift for
+    // near-linear (small-angle) trajectories integrated with small dt.
+    let mut sys = DoublePendulum::new(1.0, 1.0, 1.0, 1.0);
+    sys.set_state(&[0.05, 0.07, 0.0, 0.0]);
+    for _ in 0..5_000 { sys.step(0.001); }
+    let drift = sys.energy_error().expect("DoublePendulum must implement energy_error");
+    assert!(drift < 0.01, "Energy drift too large: {:.2e}", drift);
 }

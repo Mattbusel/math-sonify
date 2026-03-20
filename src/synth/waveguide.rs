@@ -204,4 +204,75 @@ mod tests {
             "set_freq should change length"
         );
     }
+
+    #[test]
+    fn test_waveguide_decays_over_time() {
+        // After excitation with no further input, the string should decay.
+        // damping is per-sample: 0.995 gives T60 ≈ 1 s; measure early immediately
+        // after excitation so energy hasn't already hit zero.
+        let mut s = WaveguideString::new(SR);
+        s.set_freq(220.0);
+        // Use default damping (0.995); do NOT set a very low value like 0.95 because
+        // that decimates the signal to zero in ~100 samples and both windows read 0.
+        s.excite = true;
+        // Measure RMS in the first 1000-sample window right after excitation.
+        let window = 1000usize;
+        let mut rms_early = 0.0f32;
+        for _ in 0..window {
+            let v = s.next_sample();
+            rms_early += v * v;
+        }
+        // Skip 0.5 s (string will have decayed substantially by then).
+        for _ in 0..(SR as usize / 2) {
+            s.next_sample();
+        }
+        let mut rms_late = 0.0f32;
+        for _ in 0..window {
+            let v = s.next_sample();
+            rms_late += v * v;
+        }
+        assert!(
+            rms_late < rms_early,
+            "String should decay: early={}, late={}",
+            rms_early,
+            rms_late
+        );
+    }
+
+    #[test]
+    fn test_waveguide_higher_freq_shorter_period() {
+        // Tuning to a higher frequency should give a shorter delay-line length.
+        let mut s = WaveguideString::new(SR);
+        s.set_freq(220.0);
+        let len_low = s.length;
+        s.set_freq(880.0);
+        let len_high = s.length;
+        assert!(
+            len_high < len_low,
+            "Higher frequency should give shorter delay line: 220={}, 880={}",
+            len_low,
+            len_high
+        );
+    }
+
+    #[test]
+    fn test_waveguide_tension_shifts_pitch() {
+        // Tension below 0.5 should lower the effective frequency (longer length).
+        let mut s_mid = WaveguideString::new(SR);
+        s_mid.tension = 0.5;
+        s_mid.set_freq(440.0);
+        let len_mid = s_mid.length;
+
+        let mut s_low = WaveguideString::new(SR);
+        s_low.tension = 0.25; // lower tension → lower pitch → longer delay line
+        s_low.set_freq(440.0);
+        let len_low = s_low.length;
+
+        assert!(
+            len_low > len_mid,
+            "Lower tension should increase delay-line length: mid={}, low={}",
+            len_mid,
+            len_low
+        );
+    }
 }

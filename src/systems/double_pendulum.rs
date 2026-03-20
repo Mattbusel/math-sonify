@@ -11,6 +11,8 @@ pub struct DoublePendulum {
     pub l2: f64,
     g: f64,
     speed: f64,
+    initial_energy: f64,
+    pub energy_drift: f64,
 }
 
 impl DoublePendulum {
@@ -22,21 +24,42 @@ impl DoublePendulum {
     ///
     /// The initial state is θ₁ = θ₂ = π/2 (horizontal), momenta zero.
     pub fn new(m1: f64, m2: f64, l1: f64, l2: f64) -> Self {
+        // Start slightly off vertical for interesting dynamics
+        let state = vec![
+            std::f64::consts::PI / 2.0,
+            std::f64::consts::PI / 2.0 + 0.1,
+            0.0,
+            0.0,
+        ];
+        let g = 9.81;
+        let initial_energy = Self::hamiltonian(&state, m1, m2, l1, l2, g);
         Self {
-            // Start slightly off vertical for interesting dynamics
-            state: vec![
-                std::f64::consts::PI / 2.0,
-                std::f64::consts::PI / 2.0 + 0.1,
-                0.0,
-                0.0,
-            ],
+            state,
             m1,
             m2,
             l1,
             l2,
-            g: 9.81,
+            g,
             speed: 0.0,
+            initial_energy,
+            energy_drift: 0.0,
         }
+    }
+
+    /// Canonical Hamiltonian: H = T(θ,p) + V(θ).
+    ///
+    /// Kinetic energy T is the quadratic form in momenta given by the mass
+    /// matrix of the double pendulum; potential energy V is gravitational.
+    fn hamiltonian(state: &[f64], m1: f64, m2: f64, l1: f64, l2: f64, g: f64) -> f64 {
+        if state.len() < 4 { return 0.0; }
+        let (th1, th2, p1, p2) = (state[0], state[1], state[2], state[3]);
+        let delta = th2 - th1;
+        let denom = (m1 + m2 - m2 * delta.cos().powi(2)).max(1e-10);
+        let t = (m2 * l2 * p1.powi(2) + (m1 + m2) * l1 * p2.powi(2)
+            - 2.0 * m2 * l1 * l2 * p1 * p2 * delta.cos())
+            / (2.0 * m2 * l1.powi(2) * l2.powi(2) * denom);
+        let v = -(m1 + m2) * g * l1 * th1.cos() - m2 * g * l2 * th2.cos();
+        t + v
     }
 
     fn d_theta(&self) -> (f64, f64) {
@@ -132,6 +155,16 @@ impl DynamicalSystem for DoublePendulum {
             .sum::<f64>()
             .sqrt();
         self.speed = ds / dt;
+
+        // Update energy conservation error (relative deviation from initial H)
+        let h_now = Self::hamiltonian(&self.state, m1, m2, l1, l2, g);
+        if self.initial_energy.abs() > 1e-10 {
+            self.energy_drift = ((h_now - self.initial_energy) / self.initial_energy).abs();
+        }
+    }
+
+    fn energy_error(&self) -> Option<f64> {
+        Some(self.energy_drift)
     }
 
     fn set_state(&mut self, s: &[f64]) {
@@ -141,6 +174,11 @@ impl DynamicalSystem for DoublePendulum {
                 self.state[i] = s[i];
             }
         }
+        // Recompute initial energy after state reset so energy_drift is meaningful
+        self.initial_energy = Self::hamiltonian(
+            &self.state, self.m1, self.m2, self.l1, self.l2, self.g,
+        );
+        self.energy_drift = 0.0;
     }
 }
 
@@ -204,5 +242,33 @@ mod tests {
         assert!((s[1] - 0.2).abs() < 1e-15);
         assert!((s[2] - 0.3).abs() < 1e-15);
         assert!((s[3] - 0.4).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_double_pendulum_energy_drift_starts_zero() {
+        let sys = DoublePendulum::new(1.0, 1.0, 1.0, 1.0);
+        let ee = sys.energy_error();
+        assert!(ee.is_some(), "energy_error() should return Some");
+        assert_eq!(ee.unwrap(), 0.0, "energy_drift should be 0 at construction");
+    }
+
+    #[test]
+    fn test_double_pendulum_energy_conserved_small_angles() {
+        // Small angles: nearly linear, RK4 should conserve energy well.
+        let mut sys = DoublePendulum::new(1.0, 1.0, 1.0, 1.0);
+        sys.set_state(&[0.05, 0.07, 0.0, 0.0]);
+        for _ in 0..5_000 {
+            sys.step(0.001);
+        }
+        let drift = sys.energy_error().unwrap();
+        assert!(drift < 0.01, "Energy drift too large for small angles: {:.2e}", drift);
+    }
+
+    #[test]
+    fn test_double_pendulum_energy_resets_after_set_state() {
+        let mut sys = DoublePendulum::new(1.0, 1.0, 1.0, 1.0);
+        for _ in 0..500 { sys.step(0.01); }
+        sys.set_state(&[0.2, 0.3, 0.0, 0.0]);
+        assert_eq!(sys.energy_drift, 0.0, "energy_drift should reset after set_state");
     }
 }
