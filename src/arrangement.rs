@@ -270,6 +270,14 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             rho: lf64(a.fractional_lorenz.rho, b.fractional_lorenz.rho),
             beta: lf64(a.fractional_lorenz.beta, b.fractional_lorenz.beta),
         },
+        bouali: crate::config::BoualiConfig {
+            a: lf64(a.bouali.a, b.bouali.a),
+            s: lf64(a.bouali.s, b.bouali.s),
+        },
+        newton_leipnik: crate::config::NewtonLeipnikConfig {
+            a: lf64(a.newton_leipnik.a, b.newton_leipnik.a),
+            b: lf64(a.newton_leipnik.b, b.newton_leipnik.b),
+        },
         viz: a.viz.clone(), // don't morph viz settings
         ..a.clone()
     }

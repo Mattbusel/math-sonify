@@ -5,12 +5,12 @@ use math_sonify_plugin::{
         chord_intervals_for, quantize_to_scale, DirectMapping, Scale, SonifMode, Sonification,
     },
     systems::{
-        validate_exprs, Aizawa, ArnoldCat, BurkeShaw, Chen, Chua, CoupledMapLattice, Dadras,
-        DelayedMap, DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz, GeodesicTorus,
-        Halvorsen, HenonMap, HindmarshRose, Kuramoto, KuramotoDriven, LogisticMap, Lorenz,
-        Lorenz84, Lorenz96, MackeyGlass, Mathieu, NoseHoover, Oregonator, RabinovichFabrikant,
-        Rikitake, Rossler, Rucklidge, SprottB, SprottC, SprottG, SprottH, SprottL, StandardMap,
-        StochasticLorenz, Thomas, ThreeBody, VanDerPol,
+        validate_exprs, Aizawa, ArnoldCat, Bouali, BurkeShaw, Chen, Chua, CoupledMapLattice,
+        Dadras, DelayedMap, DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz,
+        GeodesicTorus, Halvorsen, HenonMap, HindmarshRose, Kuramoto, KuramotoDriven, LogisticMap,
+        Lorenz, Lorenz84, Lorenz96, MackeyGlass, Mathieu, NewtonLeipnik, NoseHoover, Oregonator,
+        RabinovichFabrikant, Rikitake, Rossler, Rucklidge, SprottB, SprottC, SprottG, SprottH,
+        SprottL, StandardMap, StochasticLorenz, Thomas, ThreeBody, VanDerPol,
     },
 };
 
@@ -1328,6 +1328,14 @@ fn validate_exprs_rejects_unknown_identifier() {
     assert!(result.is_err(), "Unknown identifiers 'sigma'/'rho' should be rejected");
 }
 
+#[test]
+fn validate_exprs_rejects_division_by_zero() {
+    // eval_expr_4d_raw (used inside validate_exprs) does NOT coerce inf/NaN
+    // to 0, so 1/(x-x) = 1/0 should produce a non-finite result and Err.
+    let result = validate_exprs("1/(x-x)", "y", "z", "");
+    assert!(result.is_err(), "Division by zero should be rejected by validate_exprs");
+}
+
 // ── Sprott-G, Sprott-H, Sprott-L, Rikitake integration tests ─────────────────
 
 #[test]
@@ -1380,4 +1388,63 @@ fn double_pendulum_energy_error_trait_small_angles() {
     for _ in 0..5_000 { sys.step(0.001); }
     let drift = sys.energy_error().expect("DoublePendulum must implement energy_error");
     assert!(drift < 0.01, "Energy drift too large: {:.2e}", drift);
+}
+
+// ── Bouali attractor integration tests ────────────────────────────────────────
+
+#[test]
+fn bouali_stays_finite() {
+    let mut sys = Bouali::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "Bouali state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn bouali_state_bounded() {
+    // With default parameters the Bouali attractor stays within moderate bounds.
+    let mut sys = Bouali::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    let s = sys.state();
+    assert!(s[0].abs() < 30.0, "Bouali x out of range: {}", s[0]);
+    assert!(s[1].abs() < 30.0, "Bouali y out of range: {}", s[1]);
+    assert!(s[2].abs() < 30.0, "Bouali z out of range: {}", s[2]);
+}
+
+#[test]
+fn bouali_deterministic() {
+    let mut s1 = Bouali::new();
+    let mut s2 = Bouali::new();
+    for _ in 0..500 { s1.step(0.01); s2.step(0.01); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-12, "Bouali not deterministic: {} vs {}", a, b);
+    }
+}
+
+// ── Newton-Leipnik attractor integration tests ────────────────────────────────
+
+#[test]
+fn newton_leipnik_stays_finite() {
+    let mut sys = NewtonLeipnik::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "Newton-Leipnik state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn newton_leipnik_state_bounded() {
+    let mut sys = NewtonLeipnik::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    let s = sys.state();
+    assert!(s[0].abs() < 5.0, "Newton-Leipnik x out of range: {}", s[0]);
+    assert!(s[1].abs() < 5.0, "Newton-Leipnik y out of range: {}", s[1]);
+    assert!(s[2].abs() < 5.0, "Newton-Leipnik z out of range: {}", s[2]);
+}
+
+#[test]
+fn newton_leipnik_deterministic() {
+    let mut s1 = NewtonLeipnik::new();
+    let mut s2 = NewtonLeipnik::new();
+    for _ in 0..500 { s1.step(0.01); s2.step(0.01); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-12, "Newton-Leipnik not deterministic: {} vs {}", a, b);
+    }
 }

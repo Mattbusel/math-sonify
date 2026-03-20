@@ -47,6 +47,8 @@ pub struct Config {
     pub rabinovich_fabrikant: RabinovichFabrikantConfig,
     pub rikitake: RikitakeConfig,
     pub fractional_lorenz: FractionalLorenzConfig,
+    pub bouali: BoualiConfig,
+    pub newton_leipnik: NewtonLeipnikConfig,
 }
 
 impl Default for Config {
@@ -88,6 +90,8 @@ impl Default for Config {
             rabinovich_fabrikant: RabinovichFabrikantConfig::default(),
             rikitake: RikitakeConfig::default(),
             fractional_lorenz: FractionalLorenzConfig::default(),
+            bouali: BoualiConfig::default(),
+            newton_leipnik: NewtonLeipnikConfig::default(),
         }
     }
 }
@@ -671,6 +675,34 @@ impl Default for FractionalLorenzConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct BoualiConfig {
+    /// z-coupling coefficient (a). Default 0.3.
+    pub a: f64,
+    /// z-feedback coefficient (s). Default 1.0.
+    pub s: f64,
+}
+impl Default for BoualiConfig {
+    fn default() -> Self {
+        Self { a: 0.3, s: 1.0 }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct NewtonLeipnikConfig {
+    /// Damping of x (a). Default 0.4.
+    pub a: f64,
+    /// z growth rate (b). Default 0.175.
+    pub b: f64,
+}
+impl Default for NewtonLeipnikConfig {
+    fn default() -> Self {
+        Self { a: 0.4, b: 0.175 }
+    }
+}
+
 impl Config {
     /// Clamp all parameters to physically sensible bounds.
     /// Call this after deserializing from user-supplied config files.
@@ -941,6 +973,12 @@ impl Config {
         Self::clamp_log_f64(&mut self.fractional_lorenz.sigma, 0.1, 100.0, "fractional_lorenz.sigma");
         Self::clamp_log_f64(&mut self.fractional_lorenz.rho, 0.1, 200.0, "fractional_lorenz.rho");
         Self::clamp_log_f64(&mut self.fractional_lorenz.beta, 0.01, 20.0, "fractional_lorenz.beta");
+        // Bouali
+        Self::clamp_log_f64(&mut self.bouali.a, 0.0, 2.0, "bouali.a");
+        Self::clamp_log_f64(&mut self.bouali.s, 0.1, 5.0, "bouali.s");
+        // Newton-Leipnik
+        Self::clamp_log_f64(&mut self.newton_leipnik.a, 0.1, 2.0, "newton_leipnik.a");
+        Self::clamp_log_f64(&mut self.newton_leipnik.b, 0.01, 1.0, "newton_leipnik.b");
     }
 
     /// Clamp a `f64` field to `[min, max]`, emitting a tracing warning if clamped.

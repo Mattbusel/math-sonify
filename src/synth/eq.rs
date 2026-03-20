@@ -271,4 +271,69 @@ mod tests {
             rms_boost
         );
     }
+
+    #[test]
+    fn test_eq_mid_peak_boost_increases_mid_rms() {
+        let mut eq_flat = ThreeBandEq::new(SR);
+        let rms_flat = sine_rms(&mut eq_flat, 1000.0, 4000);
+
+        let mut eq_boost = ThreeBandEq::new(SR);
+        eq_boost.mid_gain_db = 6.0;
+        eq_boost.update();
+        let rms_boost = sine_rms(&mut eq_boost, 1000.0, 4000);
+
+        assert!(
+            rms_boost > rms_flat,
+            "Mid peak boost should increase 1 kHz RMS: flat={}, boost={}",
+            rms_flat,
+            rms_boost
+        );
+    }
+
+    #[test]
+    fn test_eq_mid_peak_cut_reduces_mid_rms() {
+        let mut eq_flat = ThreeBandEq::new(SR);
+        let rms_flat = sine_rms(&mut eq_flat, 1000.0, 4000);
+
+        let mut eq_cut = ThreeBandEq::new(SR);
+        eq_cut.mid_gain_db = -6.0;
+        eq_cut.update();
+        let rms_cut = sine_rms(&mut eq_cut, 1000.0, 4000);
+
+        assert!(
+            rms_cut < rms_flat,
+            "Mid peak cut should reduce 1 kHz RMS: flat={}, cut={}",
+            rms_flat,
+            rms_cut
+        );
+    }
+
+    #[test]
+    fn test_eq_mid_freq_change_shifts_peak() {
+        // Boost at 2 kHz; 2 kHz sine should be louder than 500 Hz sine
+        let mut eq = ThreeBandEq::new(SR);
+        eq.mid_freq = 2000.0;
+        eq.mid_gain_db = 9.0;
+        eq.update();
+        let rms_at_peak = sine_rms(&mut eq, 2000.0, 4000);
+        let rms_off_peak = sine_rms(&mut eq, 500.0, 4000);
+        assert!(
+            rms_at_peak > rms_off_peak,
+            "Mid peak at 2 kHz should be louder at 2 kHz than 500 Hz: peak={}, off={}",
+            rms_at_peak,
+            rms_off_peak
+        );
+    }
+
+    #[test]
+    fn test_eq_stereo_channels_independent() {
+        // Feed different signals into L and R; they should be processed independently
+        let mut eq = ThreeBandEq::new(SR);
+        eq.low_gain_db = 6.0;
+        eq.update();
+        let (l_out, r_out) = eq.process(1.0, 0.0);
+        assert!(l_out.abs() > 0.0, "L channel should pass signal");
+        // R input is 0, so R output should be near 0 after processing 0 through any filter
+        assert!(r_out.abs() < 1e-6, "R channel with zero input should produce near-zero output");
+    }
 }

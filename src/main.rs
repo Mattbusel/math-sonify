@@ -41,9 +41,10 @@ use crate::sonification::{
 };
 use crate::synth::OscShape;
 use crate::systems::{
-    ArnoldCat, BurkeShaw, Chen, CustomOde, Dadras, DelayedMap, FractionalLorenz, KuramotoDriven,
-    LogisticMap, Lorenz84, Mathieu, Oregonator, RabinovichFabrikant, Rikitake, Rucklidge, SprottC,
-    SprottG, SprottH, SprottL, StandardMap, StochasticLorenz, Thomas, *,
+    ArnoldCat, Bouali, BurkeShaw, Chen, CustomOde, Dadras, DelayedMap, FractionalLorenz,
+    KuramotoDriven, LogisticMap, Lorenz84, Mathieu, NewtonLeipnik, Oregonator,
+    RabinovichFabrikant, Rikitake, Rucklidge, SprottC, SprottG, SprottH, SprottL, StandardMap,
+    StochasticLorenz, Thomas, *,
 };
 use crate::ui::{draw_ui, AppState, SharedState};
 use midir;
@@ -2893,6 +2894,18 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
             let mut s = Rikitake::new();
             s.mu = config.rikitake.mu;
             s.a = config.rikitake.a;
+            Box::new(s)
+        }
+        "bouali" => {
+            let mut s = Bouali::new();
+            s.a = config.bouali.a;
+            s.s = config.bouali.s;
+            Box::new(s)
+        }
+        "newton_leipnik" => {
+            let mut s = NewtonLeipnik::new();
+            s.a = config.newton_leipnik.a;
+            s.b = config.newton_leipnik.b;
             Box::new(s)
         }
         _ => Box::new(Lorenz::new(

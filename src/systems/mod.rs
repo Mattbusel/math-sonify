@@ -216,8 +216,20 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Sprott L",
         description: "Parameter-free scroll attractor with x² nonlinearity and large z-coupling",
     },
+    SystemEntry {
+        name: "bouali",
+        display_name: "Bouali",
+        description: "Double-scroll spiral attractor with x² feedback and z-coupling",
+    },
+    SystemEntry {
+        name: "newton_leipnik",
+        display_name: "Newton-Leipnik",
+        description: "Double-scroll chaos from two coupled rigid-body oscillators",
+    },
 ];
 
+pub mod bouali;
+pub mod newton_leipnik;
 pub mod lorenz84;
 pub mod rabinovich_fabrikant;
 pub mod sprott_g;
@@ -259,6 +271,8 @@ pub mod sprott_b;
 pub mod three_body;
 pub mod van_der_pol;
 
+pub use bouali::Bouali;
+pub use newton_leipnik::NewtonLeipnik;
 pub use burke_shaw::BurkeShaw;
 pub use chen::Chen;
 pub use dadras::Dadras;
