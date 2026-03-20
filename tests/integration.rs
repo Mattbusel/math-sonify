@@ -7,11 +7,11 @@ use math_sonify_plugin::{
     systems::{
         validate_exprs, Aizawa, ArnoldCat, Bouali, BurkeShaw, Chen, Chua, CoupledMapLattice,
         Dadras, DelayedMap, DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz,
-        GenesioTesi, GeodesicTorus, Halvorsen, HenonMap, HindmarshRose, Kuramoto, KuramotoDriven,
-        Liu, LogisticMap, Lorenz, Lorenz84, Lorenz96, MackeyGlass, Mathieu, NewtonLeipnik, NoseHoover,
-        Oregonator, RabinovichFabrikant, Rikitake, Rossler, Rucklidge, ShimizuMorioka, SprottB,
-        SprottC, SprottD, SprottE, SprottF, SprottG, SprottH, SprottL, StandardMap, StochasticLorenz,
-        Thomas, ThreeBody, VanDerPol,
+        Finance, GenesioTesi, GeodesicTorus, Halvorsen, HenonMap, HindmarshRose, Kuramoto,
+        KuramotoDriven, Liu, LogisticMap, Lorenz, Lorenz84, Lorenz96, MackeyGlass, Mathieu,
+        NewtonLeipnik, NoseHoover, Oregonator, RabinovichFabrikant, Rikitake, Rossler, Rucklidge,
+        ShimizuMorioka, SprottB, SprottC, SprottD, SprottE, SprottF, SprottG, SprottH, SprottL,
+        StandardMap, StochasticLorenz, Thomas, ThreeBody, VanDerPol, Windmi,
     },
 };
 
@@ -1782,6 +1782,60 @@ fn liu_deterministic() {
     for _ in 0..500 { s1.step(0.001); s2.step(0.001); }
     for (a, b) in s1.state().iter().zip(s2.state().iter()) {
         assert!((a - b).abs() < 1e-12, "Liu not deterministic: {} vs {}", a, b);
+    }
+}
+
+// ── Windmi integration tests ──────────────────────────────────────────────────
+
+#[test]
+fn windmi_stays_finite() {
+    let mut sys = Windmi::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "Windmi state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn windmi_state_bounded() {
+    let mut sys = Windmi::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    let s = sys.state();
+    assert!(all_finite(s), "Windmi non-finite: {:?}", s);
+}
+
+#[test]
+fn windmi_deterministic() {
+    let mut s1 = Windmi::new();
+    let mut s2 = Windmi::new();
+    for _ in 0..500 { s1.step(0.01); s2.step(0.01); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-12, "Windmi not deterministic: {} vs {}", a, b);
+    }
+}
+
+// ── Finance attractor integration tests ───────────────────────────────────────
+
+#[test]
+fn finance_stays_finite() {
+    let mut sys = Finance::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    assert!(all_finite(sys.state()), "Finance state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn finance_state_bounded() {
+    let mut sys = Finance::new();
+    for _ in 0..10_000 { sys.step(0.01); }
+    let s = sys.state();
+    assert!(all_finite(s), "Finance non-finite: {:?}", s);
+}
+
+#[test]
+fn finance_deterministic() {
+    let mut s1 = Finance::new();
+    let mut s2 = Finance::new();
+    for _ in 0..500 { s1.step(0.01); s2.step(0.01); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-12, "Finance not deterministic: {} vs {}", a, b);
     }
 }
 

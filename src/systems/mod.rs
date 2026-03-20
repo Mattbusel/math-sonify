@@ -266,6 +266,11 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Finance",
         description: "Macroeconomic chaos: interest rate, investment demand, and price index",
     },
+    SystemEntry {
+        name: "hyperchaos",
+        display_name: "Hyperchaos",
+        description: "Chen-Li 4D hyperchaotic system — two positive Lyapunov exponents, w injects extra instability",
+    },
 ];
 
 pub mod bouali;
@@ -275,6 +280,7 @@ pub mod genesio_tesi;
 pub mod liu;
 pub mod windmi;
 pub mod finance;
+pub mod hyperchaos;
 pub mod sprott_d;
 pub mod sprott_e;
 pub mod sprott_f;
@@ -326,6 +332,7 @@ pub use genesio_tesi::GenesioTesi;
 pub use liu::Liu;
 pub use windmi::Windmi;
 pub use finance::Finance;
+pub use hyperchaos::Hyperchaos;
 pub use sprott_d::SprottD;
 pub use sprott_e::SprottE;
 pub use sprott_f::SprottF;

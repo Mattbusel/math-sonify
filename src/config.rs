@@ -52,6 +52,9 @@ pub struct Config {
     pub shimizu_morioka: ShimizuMoriokaConfig,
     pub genesio_tesi: GenesioTesiConfig,
     pub liu: LiuConfig,
+    pub windmi: WindmiConfig,
+    pub finance: FinanceConfig,
+    pub hyperchaos: HyperchaosConfig,
 }
 
 impl Default for Config {
@@ -98,6 +101,9 @@ impl Default for Config {
             shimizu_morioka: ShimizuMoriokaConfig::default(),
             genesio_tesi: GenesioTesiConfig::default(),
             liu: LiuConfig::default(),
+            windmi: WindmiConfig::default(),
+            finance: FinanceConfig::default(),
+            hyperchaos: HyperchaosConfig::default(),
         }
     }
 }
@@ -755,6 +761,49 @@ impl Default for LiuConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct WindmiConfig {
+    pub a: f64,
+    pub b: f64,
+}
+impl Default for WindmiConfig {
+    fn default() -> Self {
+        Self { a: 0.9, b: 2.5 }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct FinanceConfig {
+    pub a: f64,
+    pub b: f64,
+    pub c: f64,
+}
+impl Default for FinanceConfig {
+    fn default() -> Self {
+        Self { a: 3.0, b: 0.1, c: 1.0 }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct HyperchaosConfig {
+    /// Coupling strength. Default 35.0.
+    pub a: f64,
+    /// z damping. Default 3.0.
+    pub b: f64,
+    /// y growth. Default 28.0.
+    pub c: f64,
+    /// w feedback. Default -7.0 (negative gives hyperchaos).
+    pub d: f64,
+}
+impl Default for HyperchaosConfig {
+    fn default() -> Self {
+        Self { a: 35.0, b: 3.0, c: 28.0, d: -7.0 }
+    }
+}
+
 impl Config {
     /// Clamp all parameters to physically sensible bounds.
     /// Call this after deserializing from user-supplied config files.
@@ -1045,6 +1094,18 @@ impl Config {
         Self::clamp_log_f64(&mut self.liu.e, 0.1, 5.0, "liu.e");
         Self::clamp_log_f64(&mut self.liu.k, 0.5, 10.0, "liu.k");
         Self::clamp_log_f64(&mut self.liu.m, 0.5, 10.0, "liu.m");
+        // WINDMI
+        Self::clamp_log_f64(&mut self.windmi.a, 0.1, 3.0, "windmi.a");
+        Self::clamp_log_f64(&mut self.windmi.b, 0.5, 5.0, "windmi.b");
+        // Finance
+        Self::clamp_log_f64(&mut self.finance.a, 0.5, 8.0, "finance.a");
+        Self::clamp_log_f64(&mut self.finance.b, 0.01, 1.0, "finance.b");
+        Self::clamp_log_f64(&mut self.finance.c, 0.1, 5.0, "finance.c");
+        // Hyperchaos
+        Self::clamp_log_f64(&mut self.hyperchaos.a, 10.0, 60.0, "hyperchaos.a");
+        Self::clamp_log_f64(&mut self.hyperchaos.b, 1.0, 8.0, "hyperchaos.b");
+        Self::clamp_log_f64(&mut self.hyperchaos.c, 10.0, 50.0, "hyperchaos.c");
+        self.hyperchaos.d = self.hyperchaos.d.clamp(-15.0, -0.5); // must stay negative
     }
 
     /// Clamp a `f64` field to `[min, max]`, emitting a tracing warning if clamped.
