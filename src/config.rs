@@ -1117,6 +1117,70 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_clamps_lorenz_sigma_below_min() {
+        let mut c = Config::default();
+        c.lorenz.sigma = -5.0;
+        c.validate();
+        assert!(c.lorenz.sigma >= 0.1, "sigma should be clamped to min: {}", c.lorenz.sigma);
+    }
+
+    #[test]
+    fn test_validate_clamps_lorenz_sigma_above_max() {
+        let mut c = Config::default();
+        c.lorenz.sigma = 999.0;
+        c.validate();
+        assert!(c.lorenz.sigma <= 100.0, "sigma should be clamped to max: {}", c.lorenz.sigma);
+    }
+
+    #[test]
+    fn test_validate_clamps_audio_reverb_wet() {
+        let mut c = Config::default();
+        c.audio.reverb_wet = 5.0;
+        c.validate();
+        assert!(c.audio.reverb_wet <= 1.0, "reverb_wet should be clamped to 1.0: {}", c.audio.reverb_wet);
+    }
+
+    #[test]
+    fn test_validate_clamps_master_volume() {
+        let mut c = Config::default();
+        c.audio.master_volume = -1.0;
+        c.validate();
+        assert!(c.audio.master_volume >= 0.0, "master_volume should not be negative: {}", c.audio.master_volume);
+    }
+
+    #[test]
+    fn test_validate_invalid_sample_rate_resets_to_44100() {
+        let mut c = Config::default();
+        c.audio.sample_rate = 22050;
+        c.validate();
+        assert_eq!(c.audio.sample_rate, 44100, "invalid sample_rate should reset to 44100");
+    }
+
+    #[test]
+    fn test_validate_accepts_48000_sample_rate() {
+        let mut c = Config::default();
+        c.audio.sample_rate = 48000;
+        c.validate();
+        assert_eq!(c.audio.sample_rate, 48000, "48000 Hz should be accepted unchanged");
+    }
+
+    #[test]
+    fn test_validate_clamps_delay_feedback() {
+        let mut c = Config::default();
+        c.audio.delay_feedback = 2.0; // runaway feedback
+        c.validate();
+        assert!(c.audio.delay_feedback <= 0.99, "delay_feedback should be clamped to < 1: {}", c.audio.delay_feedback);
+    }
+
+    #[test]
+    fn test_validate_clamps_rossler_c_above_max() {
+        let mut c = Config::default();
+        c.rossler.c = 999.0;
+        c.validate();
+        assert!(c.rossler.c <= 20.0, "rossler.c should be clamped to max 20: {}", c.rossler.c);
+    }
+
+    #[test]
     fn test_config_round_trip() {
         let original = Config::default();
         let serialized = toml::to_string(&original).expect("serialization failed");
