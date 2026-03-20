@@ -8,7 +8,7 @@ use math_sonify_plugin::{
         validate_exprs, Aizawa, ArnoldCat, Bouali, BurkeShaw, Chen, Chua, CoupledMapLattice,
         Dadras, DelayedMap, DoublePendulum, Duffing, DynamicalSystem, FractionalLorenz,
         GenesioTesi, GeodesicTorus, Halvorsen, HenonMap, HindmarshRose, Kuramoto, KuramotoDriven,
-        LogisticMap, Lorenz, Lorenz84, Lorenz96, MackeyGlass, Mathieu, NewtonLeipnik, NoseHoover,
+        Liu, LogisticMap, Lorenz, Lorenz84, Lorenz96, MackeyGlass, Mathieu, NewtonLeipnik, NoseHoover,
         Oregonator, RabinovichFabrikant, Rikitake, Rossler, Rucklidge, ShimizuMorioka, SprottB,
         SprottC, SprottD, SprottE, SprottF, SprottG, SprottH, SprottL, StandardMap, StochasticLorenz,
         Thomas, ThreeBody, VanDerPol,
@@ -1753,5 +1753,56 @@ fn genesio_tesi_deterministic() {
     for _ in 0..500 { s1.step(0.005); s2.step(0.005); }
     for (a, b) in s1.state().iter().zip(s2.state().iter()) {
         assert!((a - b).abs() < 1e-12, "Genesio-Tesi not deterministic: {} vs {}", a, b);
+    }
+}
+
+// ── Liu attractor integration tests ──────────────────────────────────────────
+
+#[test]
+fn liu_stays_finite() {
+    let mut sys = Liu::new();
+    for _ in 0..20_000 { sys.step(0.001); }
+    assert!(all_finite(sys.state()), "Liu state non-finite: {:?}", sys.state());
+}
+
+#[test]
+fn liu_state_bounded() {
+    let mut sys = Liu::new();
+    for _ in 0..20_000 { sys.step(0.001); }
+    let s = sys.state();
+    assert!(s[0].abs() < 10.0, "Liu x out of range: {}", s[0]);
+    assert!(s[1].abs() < 15.0, "Liu y out of range: {}", s[1]);
+    assert!(s[2].abs() < 50.0, "Liu z out of range: {}", s[2]);
+}
+
+#[test]
+fn liu_deterministic() {
+    let mut s1 = Liu::new();
+    let mut s2 = Liu::new();
+    for _ in 0..500 { s1.step(0.001); s2.step(0.001); }
+    for (a, b) in s1.state().iter().zip(s2.state().iter()) {
+        assert!((a - b).abs() < 1e-12, "Liu not deterministic: {} vs {}", a, b);
+    }
+}
+
+// ── All-presets load test ─────────────────────────────────────────────────────
+
+#[test]
+fn all_presets_load_without_panic() {
+    use math_sonify_plugin::patches::{load_preset, PRESETS};
+    for preset in PRESETS {
+        let mut config = load_preset(preset.name);
+        config.validate(); // must not panic
+        assert!(
+            config.audio.master_volume >= 0.0 && config.audio.master_volume <= 1.0,
+            "Preset '{}' master_volume out of range: {}",
+            preset.name,
+            config.audio.master_volume
+        );
+        assert!(
+            !config.system.name.is_empty(),
+            "Preset '{}' has empty system name",
+            preset.name
+        );
     }
 }

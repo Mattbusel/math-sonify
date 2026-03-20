@@ -2786,4 +2786,21 @@ mod ode_property_tests {
         assert!((r.genesio_tesi.b - 3.0).abs() < 1e-9, "genesio_tesi.b not interpolated: {}", r.genesio_tesi.b);
         assert!((r.genesio_tesi.c - 7.0).abs() < 1e-9, "genesio_tesi.c not interpolated: {}", r.genesio_tesi.c);
     }
+
+    #[test]
+    fn lerp_config_interpolates_liu() {
+        use crate::arrangement::lerp_config;
+        let mut a = Config::default();
+        let mut b = Config::default();
+        a.liu.a = 0.5;
+        b.liu.a = 1.5;
+        a.liu.k = 2.0;
+        b.liu.k = 6.0;
+        a.liu.m = 2.0;
+        b.liu.m = 6.0;
+        let r = lerp_config(&a, &b, 0.5);
+        assert!((r.liu.a - 1.0).abs() < 1e-9, "liu.a not interpolated: {}", r.liu.a);
+        assert!((r.liu.k - 4.0).abs() < 1e-9, "liu.k not interpolated: {}", r.liu.k);
+        assert!((r.liu.m - 4.0).abs() < 1e-9, "liu.m not interpolated: {}", r.liu.m);
+    }
 }

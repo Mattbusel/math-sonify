@@ -13,7 +13,7 @@ use std::sync::Arc;
 mod arrangement;
 pub mod config;
 pub mod error;
-mod patches;
+pub mod patches;
 pub mod sonification;
 pub mod synth;
 pub mod systems;
