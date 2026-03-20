@@ -70,3 +70,66 @@ impl OscSender {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pad4_already_aligned() {
+        let mut v = vec![1u8, 2, 3, 4];
+        pad4(&mut v);
+        assert_eq!(v.len(), 4, "already-aligned vec should not be padded");
+    }
+
+    #[test]
+    fn test_pad4_unaligned() {
+        let mut v = vec![1u8, 2, 3];
+        pad4(&mut v);
+        assert_eq!(v.len(), 4, "3-byte vec should be padded to 4");
+        assert_eq!(v[3], 0, "padding byte should be zero");
+    }
+
+    #[test]
+    fn test_encode_osc_string_null_terminated_and_padded() {
+        // "/ab" + null = 4 bytes → no extra padding needed
+        let s = encode_osc_string("/ab");
+        assert_eq!(s.len() % 4, 0, "encoded string must be a multiple of 4 bytes");
+        assert_eq!(s[3], 0, "byte after string should be null");
+    }
+
+    #[test]
+    fn test_encode_osc_string_empty() {
+        let s = encode_osc_string("");
+        assert_eq!(s.len() % 4, 0, "empty string encoding must be 4-byte aligned");
+        assert_eq!(s[0], 0, "first byte of empty string should be null terminator");
+    }
+
+    #[test]
+    fn test_encode_osc_no_args_packet_length() {
+        // Address "/x" = 4 bytes (2 chars + null + 1 pad), type tag "," = 4 bytes
+        let packet = encode_osc("/x", &[]);
+        assert_eq!(packet.len() % 4, 0, "packet must be 4-byte aligned");
+        // Should contain address and type tag only
+        assert!(packet.len() >= 8, "packet must include address and type tag");
+    }
+
+    #[test]
+    fn test_encode_osc_single_float_correct_bytes() {
+        // Encode 1.0f32 as big-endian: 0x3F800000
+        let packet = encode_osc("/f", &[1.0_f32]);
+        let expected = 1.0f32.to_be_bytes();
+        // Last 4 bytes of the packet should be the float
+        let float_bytes = &packet[packet.len() - 4..];
+        assert_eq!(float_bytes, &expected, "float should be encoded big-endian");
+    }
+
+    #[test]
+    fn test_encode_osc_packet_length_grows_with_args() {
+        let p0 = encode_osc("/s", &[]);
+        let p3 = encode_osc("/s", &[1.0, 2.0, 3.0]);
+        // Each extra float adds 4 bytes; type tag also grows but stays 4-byte aligned
+        assert!(p3.len() > p0.len(), "packet with 3 floats should be longer than packet with 0");
+        assert_eq!(p3.len() % 4, 0, "packet must remain 4-byte aligned");
+    }
+}
