@@ -159,4 +159,92 @@ mod tests {
         assert!(l.is_finite(), "NaN input should produce finite output");
         assert!(r.is_finite(), "NaN input should produce finite output");
     }
+
+    #[test]
+    fn test_limiter_output_below_threshold_after_settling() {
+        // After enough samples, output should not exceed the threshold level
+        let threshold_db = -0.5_f32;
+        let threshold_linear = 10.0f32.powf(threshold_db / 20.0);
+        let mut lim = Limiter::new(threshold_db, 5.0, SR);
+        let loud = 3.0_f32;
+        // Warm up for enough time for gain to settle (~1000 samples / 23 ms release)
+        for _ in 0..20000 {
+            lim.process(loud, loud);
+        }
+        for _ in 0..100 {
+            let (l, r) = lim.process(loud, loud);
+            assert!(
+                l.abs() <= threshold_linear * 1.05,
+                "Output should be near threshold after settling: {} > {}",
+                l.abs(), threshold_linear
+            );
+            assert!(r.abs() <= threshold_linear * 1.05,
+                "R output too loud: {}", r.abs());
+        }
+    }
+
+    #[test]
+    fn test_limiter_lower_threshold_more_reduction() {
+        // A stricter (lower) threshold should produce a smaller output amplitude
+        let loud = 2.0_f32;
+        let mut lim_strict = Limiter::new(-6.0, 5.0, SR);
+        let mut lim_loose = Limiter::new(-0.1, 5.0, SR);
+        // Warm up both
+        for _ in 0..15000 {
+            lim_strict.process(loud, loud);
+            lim_loose.process(loud, loud);
+        }
+        let (l_strict, _) = lim_strict.process(loud, loud);
+        let (l_loose, _) = lim_loose.process(loud, loud);
+        assert!(
+            l_strict.abs() < l_loose.abs(),
+            "Stricter threshold should reduce output more: strict={}, loose={}",
+            l_strict.abs(), l_loose.abs()
+        );
+    }
+
+    #[test]
+    fn test_limiter_prior_loud_reduces_subsequent_quiet() {
+        // After a loud burst, a quiet signal should be attenuated compared to a fresh limiter
+        let quiet = 0.5_f32;
+
+        // Fresh limiter — quiet signal passes with little attenuation (after lookahead latency)
+        let mut lim_fresh = Limiter::new(-0.5, 5.0, SR);
+        let lh_samples = (5.0 * 0.001 * SR) as usize + 2;
+        // Run past lookahead latency then measure
+        for _ in 0..lh_samples {
+            lim_fresh.process(quiet, quiet);
+        }
+        let mut fresh_out = 0.0_f32;
+        for _ in 0..100 {
+            let (l, _) = lim_fresh.process(quiet, quiet);
+            fresh_out += l.abs();
+        }
+        fresh_out /= 100.0;
+
+        // Limiter engaged by a loud burst — drain the lookahead buffer first,
+        // then measure.  The 5 ms lookahead holds ~221 samples of loud audio;
+        // reading those samples before the measurement window prevents the test
+        // from observing the lookahead drain (which outputs limited loud audio,
+        // not the quiet input that was just written into the buffer).
+        let mut lim_engaged = Limiter::new(-0.5, 5.0, SR);
+        for _ in 0..5000 {
+            lim_engaged.process(5.0, 5.0);
+        }
+        // Drain lookahead (lh_len = 5 ms × 44100 + 1 = 222 samples; 300 is safe)
+        for _ in 0..300 {
+            lim_engaged.process(quiet, quiet);
+        }
+        let mut engaged_out = 0.0_f32;
+        for _ in 0..100 {
+            let (l, _) = lim_engaged.process(quiet, quiet);
+            engaged_out += l.abs();
+        }
+        engaged_out /= 100.0;
+
+        assert!(
+            engaged_out < fresh_out,
+            "Engaged limiter should attenuate more: fresh={}, engaged={}", fresh_out, engaged_out
+        );
+    }
 }

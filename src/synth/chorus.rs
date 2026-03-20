@@ -151,4 +151,58 @@ mod tests {
         assert!(max_l > 0.01, "Left channel has no output: max={}", max_l);
         assert!(max_r > 0.01, "Right channel has no output: max={}", max_r);
     }
+
+    #[test]
+    fn test_chorus_higher_mix_produces_different_output() {
+        // With mix=0.8 vs mix=0.2, the wet-signal portion should differ
+        let mut ch_low = Chorus::new(SR);
+        ch_low.mix = 0.2;
+        let mut ch_high = Chorus::new(SR);
+        ch_high.mix = 0.8;
+        let mut diff_sum = 0.0_f32;
+        for i in 0..2000 {
+            let x = (i as f32 * 0.05).sin();
+            let (l_low, _) = ch_low.process(x, x);
+            let (l_high, _) = ch_high.process(x, x);
+            diff_sum += (l_low - l_high).abs();
+        }
+        assert!(diff_sum > 0.1, "Different mix should produce different output: diff={}", diff_sum);
+    }
+
+    #[test]
+    fn test_chorus_stereo_outputs_differ() {
+        // Due to asymmetric voice weighting, L and R should differ for mono input
+        let mut ch = Chorus::new(SR);
+        ch.mix = 1.0;
+        // Warm up to let LFO phases diverge
+        let mut diff_sum = 0.0_f32;
+        for i in 0..2000 {
+            let x = (i as f32 * 0.05).sin();
+            let (l, r) = ch.process(x, x);
+            diff_sum += (l - r).abs();
+        }
+        assert!(diff_sum > 0.01, "Chorus L and R should differ: diff={}", diff_sum);
+    }
+
+    #[test]
+    fn test_chorus_depth_affects_output() {
+        // depth=0 and depth=5 should produce different outputs over time
+        let mut ch_nodepth = Chorus::new(SR);
+        ch_nodepth.mix = 1.0;
+        ch_nodepth.depth = 0.0;
+
+        let mut ch_depth = Chorus::new(SR);
+        ch_depth.mix = 1.0;
+        ch_depth.depth = 5.0;
+
+        let mut diff_sum = 0.0_f32;
+        for i in 0..2000 {
+            let x = (i as f32 * 0.05).sin();
+            let (ln, _) = ch_nodepth.process(x, x);
+            let (ld, _) = ch_depth.process(x, x);
+            diff_sum += (ln - ld).abs();
+        }
+        // Different depths should produce different outputs (LFO swings to different delay positions)
+        assert!(diff_sum > 0.01, "depth=0 and depth=5 should produce different outputs: diff={}", diff_sum);
+    }
 }

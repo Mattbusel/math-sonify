@@ -188,4 +188,64 @@ mod tests {
         let runs: usize = outputs.windows(2).filter(|w| (w[0] - w[1]).abs() < 1e-6).count();
         assert!(runs > 50, "High rate_crush should produce many held samples, runs={}", runs);
     }
+
+    #[test]
+    fn test_bitcrusher_1bit_gives_two_levels() {
+        // At 1-bit depth, output should be only +1 or -1
+        let mut bc = Bitcrusher::new();
+        bc.bit_depth = 1.0;
+        bc.rate_crush = 0.0;
+        let mut unique: std::collections::HashSet<i32> = std::collections::HashSet::new();
+        for i in 0..100 {
+            let x = (i as f32 / 10.0) - 5.0; // range -5 to +5
+            let y = bc.process(x);
+            unique.insert((y * 1000.0).round() as i32);
+        }
+        assert_eq!(unique.len(), 2, "1-bit should produce exactly 2 levels: {:?}", unique);
+    }
+
+    #[test]
+    fn test_bitcrusher_dither_false_is_repeatable() {
+        // Without dither, the same input should give the same output on repeated calls
+        let mut bc1 = Bitcrusher::with_seed(42);
+        let mut bc2 = Bitcrusher::with_seed(42);
+        bc1.bit_depth = 4.0;
+        bc2.bit_depth = 4.0;
+        bc1.dither = false;
+        bc2.dither = false;
+        for i in 0..100 {
+            let x = (i as f32 * 0.07).sin();
+            let y1 = bc1.process(x);
+            let y2 = bc2.process(x);
+            assert_eq!(y1, y2, "No-dither outputs should be identical at {}", i);
+        }
+    }
+
+    #[test]
+    fn test_bitcrusher_lower_bitdepth_more_distortion() {
+        // Lower bit depth should produce more quantization error vs input
+        let mut bc_low = Bitcrusher::new();
+        bc_low.bit_depth = 2.0;
+        bc_low.dither = false;
+        bc_low.rate_crush = 0.0;
+
+        let mut bc_high = Bitcrusher::new();
+        bc_high.bit_depth = 8.0;
+        bc_high.dither = false;
+        bc_high.rate_crush = 0.0;
+
+        let mut err_low = 0.0_f32;
+        let mut err_high = 0.0_f32;
+        for i in 0..200 {
+            let x = (i as f32 * 0.05).sin() * 0.8;
+            let y_low = bc_low.process(x);
+            let y_high = bc_high.process(x);
+            err_low += (y_low - x).powi(2);
+            err_high += (y_high - x).powi(2);
+        }
+        assert!(
+            err_low > err_high,
+            "2-bit should have more error than 8-bit: low={}, high={}", err_low, err_high
+        );
+    }
 }

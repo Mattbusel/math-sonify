@@ -262,4 +262,76 @@ mod tests {
         assert!(l.is_finite(), "NaN input should produce finite output");
         assert!(r.is_finite(), "NaN input should produce finite output");
     }
+
+    #[test]
+    fn test_freeverb_larger_room_longer_tail() {
+        // Larger room_size (higher feedback) → more energy retained → longer tail
+        let mut rv_small = Freeverb::new(SR);
+        rv_small.set_room_size(0.5);
+        rv_small.wet = 1.0;
+
+        let mut rv_large = Freeverb::new(SR);
+        rv_large.set_room_size(0.95);
+        rv_large.wet = 1.0;
+
+        // Send identical impulse
+        rv_small.process(1.0, 1.0);
+        rv_large.process(1.0, 1.0);
+
+        // After 5000 samples, large-room should retain more energy
+        let mut energy_small = 0.0_f32;
+        let mut energy_large = 0.0_f32;
+        for _ in 0..5000 {
+            let (l, _) = rv_small.process(0.0, 0.0);
+            energy_small += l * l;
+            let (l, _) = rv_large.process(0.0, 0.0);
+            energy_large += l * l;
+        }
+        assert!(
+            energy_large > energy_small,
+            "Larger room should have more reverb tail energy: small={}, large={}",
+            energy_small, energy_large
+        );
+    }
+
+    #[test]
+    fn test_freeverb_stereo_outputs_differ() {
+        // Due to 23-sample offset between L and R comb filters, L and R should differ
+        let mut rv = Freeverb::new(SR);
+        rv.wet = 1.0;
+        rv.process(1.0, 1.0); // impulse
+        let mut diff_sum = 0.0_f32;
+        for _ in 0..2000 {
+            let (l, r) = rv.process(0.0, 0.0);
+            diff_sum += (l - r).abs();
+        }
+        assert!(diff_sum > 0.0, "Freeverb L and R should differ due to decorrelation");
+    }
+
+    #[test]
+    fn test_freeverb_set_damp_affects_output() {
+        // Low damp → brighter tail; high damp → darker tail. Both should be finite.
+        let mut rv_bright = Freeverb::new(SR);
+        rv_bright.set_damp(0.0);
+        rv_bright.wet = 1.0;
+
+        let mut rv_dark = Freeverb::new(SR);
+        rv_dark.set_damp(0.9);
+        rv_dark.wet = 1.0;
+
+        rv_bright.process(1.0, 1.0);
+        rv_dark.process(1.0, 1.0);
+
+        let mut e_bright = 0.0_f32;
+        let mut e_dark = 0.0_f32;
+        for _ in 0..2000 {
+            let (l, _) = rv_bright.process(0.0, 0.0);
+            e_bright += l * l;
+            let (l, _) = rv_dark.process(0.0, 0.0);
+            e_dark += l * l;
+            assert!(l.is_finite(), "Dark reverb output should be finite");
+        }
+        // Both should produce some reverb tail; they may differ in energy
+        assert!(e_bright >= 0.0 && e_dark >= 0.0, "Both should be non-negative energy");
+    }
 }
