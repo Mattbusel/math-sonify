@@ -1101,6 +1101,8 @@ fn scale_description(scale: &str) -> &'static str {
         "dorian" => "D Dorian — minor with raised 6th; modal jazz and Celtic folk favourite",
         "mixolydian" => "G Mixolydian — major with flat 7th; bluesy, open, rock-inflected brightness",
         "hungarian_minor" => "Hungarian minor — augmented 4th and leading 7th; dramatic, Eastern European colour",
+        "locrian" => "B Locrian — darkest mode; diminished tonic gives an unresolved, suspended tension",
+        "octatonic" => "Diminished scale — perfectly symmetric 8-note set; used in jazz and 20th-century composition",
         _ => "",
     }
 }
@@ -2063,7 +2065,7 @@ pub fn draw_ui(
         // Bifurcation controls
         if viz_tab == 6 {
             ui.horizontal(|ui| {
-                let param_opts = ["rho", "sigma", "coupling", "c", "r", "k", "b", "lambda", "a_rossler"];
+                let param_opts = ["rho", "sigma", "coupling", "c", "r", "k", "b", "lambda", "a_rossler", "shimizu_a", "genesio_c", "liu_b"];
                 let (current_bp, current_bp2, computing, mode_2d) = {
                     let st = state.lock();
                     (
@@ -3064,6 +3066,8 @@ fn draw_advanced_panel(
             ("dorian", "Dorian"),
             ("mixolydian", "Mixolydian"),
             ("hungarian_minor", "Hungarian Minor"),
+            ("locrian", "Locrian"),
+            ("octatonic", "Octatonic (Diminished)"),
         ];
         let current_scale = st.config.sonification.scale.clone();
         let current_scale_label = scales
@@ -5771,6 +5775,9 @@ fn param_range(param: &str) -> (f64, f64) {
         "b" => (0.05, 0.35),     // thomas: critical b≈0.208 separates chaos from limit cycle
         "lambda" => (3.0, 10.0), // rucklidge: forcing amplitude
         "a_rossler" => (0.0, 0.5), // rossler a: affects spiral tightness
+        "shimizu_a" => (0.3, 1.5), // shimizu-morioka a: damping → chaos boundary
+        "genesio_c" => (3.0, 10.0), // genesio-tesi c: restoring force → period-doubling
+        "liu_b" => (1.0, 4.0),     // liu b: y growth → chaos onset
         _ => (0.0, 1.0),
     }
 }
@@ -6389,6 +6396,21 @@ fn build_bifurc_system(
             Box::new(s)
         }
         (_, "a_rossler") => Box::new(Rossler::new(pval, rossler.b, rossler.c)),
+        (_, "shimizu_a") => {
+            let mut s = ShimizuMorioka::new();
+            s.a = pval;
+            Box::new(s)
+        }
+        (_, "genesio_c") => {
+            let mut s = GenesioTesi::new();
+            s.c = pval;
+            Box::new(s)
+        }
+        (_, "liu_b") => {
+            let mut s = Liu::new();
+            s.b = pval;
+            Box::new(s)
+        }
         _ => Box::new(Lorenz::new(lorenz.sigma, pval.clamp(20.0, 50.0), lorenz.beta)),
     }
 }
