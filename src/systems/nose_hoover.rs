@@ -68,3 +68,67 @@ impl DynamicalSystem for NoseHoover {
         self.speed = ds / dt;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+
+    #[test]
+    fn test_nose_hoover_initial_state() {
+        let sys = NoseHoover::new();
+        let s = sys.state();
+        assert_eq!(s.len(), 3);
+        assert!((s[0] - 0.0).abs() < 1e-15);
+        assert!((s[1] - 5.0).abs() < 1e-15);
+        assert!((s[2] - 0.0).abs() < 1e-15);
+        assert_eq!(sys.name(), "nose_hoover");
+        assert_eq!(sys.dimension(), 3);
+    }
+
+    #[test]
+    fn test_nose_hoover_step_changes_state() {
+        let mut sys = NoseHoover::new();
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.01);
+        let after = sys.state();
+        assert!(
+            before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15),
+            "State did not change after step"
+        );
+    }
+
+    #[test]
+    fn test_nose_hoover_deterministic() {
+        let mut sys1 = NoseHoover::new();
+        let mut sys2 = NoseHoover::new();
+        for _ in 0..500 {
+            sys1.step(0.01);
+            sys2.step(0.01);
+        }
+        for (a, b) in sys1.state().iter().zip(sys2.state().iter()) {
+            assert!((a - b).abs() < 1e-15, "Non-deterministic: {} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_nose_hoover_dt_zero_no_change() {
+        let mut sys = NoseHoover::new();
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.0);
+        let after = sys.state();
+        for (a, b) in before.iter().zip(after.iter()) {
+            assert!((a - b).abs() < 1e-15, "State changed with dt=0: {} -> {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_nose_hoover_set_state() {
+        let mut sys = NoseHoover::new();
+        sys.set_state(&[1.0, 2.0, 3.0]);
+        let s = sys.state();
+        assert!((s[0] - 1.0).abs() < 1e-15);
+        assert!((s[1] - 2.0).abs() < 1e-15);
+        assert!((s[2] - 3.0).abs() < 1e-15);
+    }
+}

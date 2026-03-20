@@ -77,3 +77,71 @@ impl DynamicalSystem for StandardMap {
         self.state[2] = self.k;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::DynamicalSystem;
+    use std::f64::consts::TAU;
+
+    #[test]
+    fn test_standard_map_initial_state() {
+        let sys = StandardMap::new(1.5);
+        let s = sys.state();
+        assert_eq!(s.len(), 3);
+        assert!((s[0] - 0.5).abs() < 1e-15);
+        assert!((s[1] - 0.5).abs() < 1e-15);
+        assert!((s[2] - 1.5).abs() < 1e-15);
+        assert_eq!(sys.name(), "standard_map");
+        assert_eq!(sys.dimension(), 3);
+    }
+
+    #[test]
+    fn test_standard_map_step_changes_state() {
+        let mut sys = StandardMap::new(1.5);
+        let before: Vec<f64> = sys.state().to_vec();
+        sys.step(0.01);
+        let after = sys.state();
+        assert!(
+            before.iter().zip(after.iter()).any(|(a, b)| (a - b).abs() > 1e-15),
+            "State did not change after step"
+        );
+    }
+
+    #[test]
+    fn test_standard_map_stays_in_torus() {
+        let mut sys = StandardMap::new(1.5);
+        for _ in 0..1000 {
+            sys.step(0.01);
+            let theta = sys.state()[0];
+            let p = sys.state()[1];
+            assert!(theta >= 0.0 && theta < TAU, "theta out of [0, 2π): {}", theta);
+            assert!(p >= 0.0 && p < TAU, "p out of [0, 2π): {}", p);
+        }
+    }
+
+    #[test]
+    fn test_standard_map_deterministic() {
+        let mut sys1 = StandardMap::new(1.5);
+        let mut sys2 = StandardMap::new(1.5);
+        for _ in 0..200 {
+            sys1.step(0.01);
+            sys2.step(0.01);
+        }
+        for (a, b) in sys1.state().iter().zip(sys2.state().iter()) {
+            assert!((a - b).abs() < 1e-15, "Non-deterministic: {} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_standard_map_k_zero_integrable() {
+        // With k=0 the map becomes p_{n+1} = p, θ_{n+1} = θ + p (mod 2π).
+        let mut sys = StandardMap::new(0.0);
+        let p0 = sys.state()[1];
+        let theta0 = sys.state()[0];
+        sys.step(0.0);
+        let theta1 = sys.state()[0];
+        let expected = (theta0 + p0).rem_euclid(TAU);
+        assert!((theta1 - expected).abs() < 1e-12, "k=0 should give theta += p");
+    }
+}
