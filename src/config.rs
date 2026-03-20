@@ -1120,6 +1120,8 @@ impl From<&str> for Scale {
             "dorian" => Self::Dorian,
             "mixolydian" => Self::Mixolydian,
             "hungarian_minor" => Self::HungarianMinor,
+            "locrian" => Self::Locrian,
+            "octatonic" => Self::Octatonic,
             _ => Self::Pentatonic,
         }
     }

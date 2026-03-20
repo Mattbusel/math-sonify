@@ -27,6 +27,8 @@ pub const PRESETS: &[Preset] = &[
     Preset { name: "Neural Burst", description: "Hindmarsh-Rose neuron spikes drive granular percussion" },
     Preset { name: "Chemical Wave", description: "Belousov-Zhabotinsky oscillator in spectral mode" },
     Preset { name: "Sprott Minimal", description: "Algebraically simplest chaos, clean AM sonification" },
+    Preset { name: "Substorm Pulse", description: "WINDMI ionospheric current model, blues scale, waveguide mode" },
+    Preset { name: "Market Collapse", description: "Finance chaotic attractor, spectral mode, Locrian scale" },
 ];
 
 /// Load the [`Config`] for a named preset.
@@ -173,6 +175,28 @@ pub fn load_preset(name: &str) -> Config {
                 voice_levels: [1.0, 0.7, 0.5, 0.3], portamento_ms: 200.0,
             },
             audio: AudioConfig { reverb_wet: 0.45, delay_ms: 280.0, delay_feedback: 0.3, master_volume: 0.7, ..Default::default() },
+            ..Default::default()
+        },
+        "Substorm Pulse" => Config {
+            system: SystemConfig { name: "windmi".into(), dt: 0.01, speed: 1.5 },
+            sonification: SonificationConfig {
+                mode: "waveguide".into(), scale: "blues".into(),
+                base_frequency: 120.0, octave_range: 3.0,
+                chord_mode: "power".into(), transpose_semitones: -5.0,
+                voice_levels: [1.0, 0.6, 0.3, 0.1], portamento_ms: 60.0,
+            },
+            audio: AudioConfig { reverb_wet: 0.55, delay_ms: 200.0, delay_feedback: 0.45, master_volume: 0.75, ..Default::default() },
+            ..Default::default()
+        },
+        "Market Collapse" => Config {
+            system: SystemConfig { name: "finance".into(), dt: 0.005, speed: 2.0 },
+            sonification: SonificationConfig {
+                mode: "spectral".into(), scale: "locrian".into(),
+                base_frequency: 138.6, octave_range: 3.5,
+                chord_mode: "dim7".into(), transpose_semitones: 0.0,
+                voice_levels: [1.0, 0.8, 0.5, 0.2], portamento_ms: 40.0,
+            },
+            audio: AudioConfig { reverb_wet: 0.3, delay_ms: 170.0, delay_feedback: 0.5, master_volume: 0.7, ..Default::default() },
             ..Default::default()
         },
         _ => Config::default(),

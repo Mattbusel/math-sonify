@@ -280,6 +280,8 @@ pub enum Scale {
     Dorian,         // D Dorian: 0, 2, 3, 5, 7, 9, 10 — minor with raised 6th
     Mixolydian,     // G Mixolydian: 0, 2, 4, 5, 7, 9, 10 — major with flat 7th
     HungarianMinor, // Hungarian minor: 0, 2, 3, 6, 7, 8, 11 — augmented 4th and major 7th
+    Locrian,        // B Locrian: 0, 1, 3, 5, 6, 8, 10 — darkest mode, diminished tonic
+    Octatonic,      // Diminished: 0, 2, 3, 5, 6, 8, 9, 11 — fully symmetric 8-note scale
 }
 
 /// Semitone intervals for non-computed scales, relative to root.
@@ -299,6 +301,8 @@ fn scale_intervals(scale: Scale) -> &'static [f32] {
         Scale::Dorian => &[0.0, 2.0, 3.0, 5.0, 7.0, 9.0, 10.0],
         Scale::Mixolydian => &[0.0, 2.0, 4.0, 5.0, 7.0, 9.0, 10.0],
         Scale::HungarianMinor => &[0.0, 2.0, 3.0, 6.0, 7.0, 8.0, 11.0],
+        Scale::Locrian => &[0.0, 1.0, 3.0, 5.0, 6.0, 8.0, 10.0],
+        Scale::Octatonic => &[0.0, 2.0, 3.0, 5.0, 6.0, 8.0, 9.0, 11.0],
         // EDO and HarmonicSeries scales have computed intervals -- handled in scale_intervals_owned
         Scale::Edo19 | Scale::Edo31 | Scale::Edo24 | Scale::HarmonicSeries => &[0.0],
     }
