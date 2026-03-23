@@ -62,6 +62,8 @@ pub mod envelope_generator;
 pub mod granular_synth;
 pub mod score_renderer;
 pub mod synthesis_engine;
+pub mod music_theory;
+pub mod audio_pipeline;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};
