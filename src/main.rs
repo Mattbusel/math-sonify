@@ -5,11 +5,18 @@
 
 mod arrangement;
 mod audio;
+mod bifurcation;
 mod config;
 pub mod error;
+pub mod evolution;
+mod midi_export;
 mod osc;
+mod osc_sync;
 mod patches;
+mod preset_interpolation;
+mod recorder;
 mod sonification;
+mod spectrum;
 mod synth;
 mod systems;
 #[cfg(test)]
@@ -31,8 +38,8 @@ use parking_lot::Mutex;
 
 use crate::arrangement::{lerp_config, scene_at, total_duration};
 use crate::audio::{
-    AudioEngine, ClipBuffer, LoopExportPending, SharedSnippetPlayback, SidechainLevel,
-    SnippetPlayback, StereoWidth, VuMeter, WavRecorder, XrunCounter,
+    AudioCallbackActive, AudioEngine, ClipBuffer, LoopExportPending, SharedSnippetPlayback,
+    SidechainLevel, SnippetPlayback, StereoWidth, VuMeter, WavRecorder, XrunCounter,
 };
 use crate::config::{load_config, Config};
 use crate::sonification::{
@@ -44,7 +51,7 @@ use crate::systems::{
     ArnoldCat, Bouali, BurkeShaw, Chen, CustomOde, Dadras, DelayedMap, FractionalLorenz,
     Finance, GenesioTesi, Hyperchaos, KuramotoDriven, Liu, LogisticMap, Lorenz84, Mathieu, NewtonLeipnik, Oregonator,
     RabinovichFabrikant, Rikitake, Rucklidge, ShimizuMorioka, SprottC, SprottD, SprottE,
-    SprottF, SprottG, SprottH, SprottK, SprottL, StandardMap, StochasticLorenz, Thomas, Windmi, *,
+    SprottF, SprottG, SprottH, SprottK, SprottL, StandardMap, StochasticLorenz, Thomas, TinkerbellMap, Windmi, *,
 };
 use crate::ui::{draw_ui, AppState, SharedState};
 use midir;
@@ -144,7 +151,7 @@ fn main() -> anyhow::Result<()> {
     let xrun_counter: XrunCounter = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
     // Audio engine
-    let (_audio, actual_sr) = AudioEngine::start(
+    let (audio_engine, actual_sr) = AudioEngine::start(
         rx,
         config.audio.sample_rate,
         config.audio.reverb_wet,
@@ -182,11 +189,17 @@ fn main() -> anyhow::Result<()> {
         let _ = w.watch(Path::new("config.toml"), RecursiveMode::NonRecursive);
     }
 
+    // Extract audio callback safety flag before engine is moved
+    let audio_callback_active: AudioCallbackActive = audio_engine.callback_active.clone();
+    // Keep engine alive (holds the cpal stream)
+    let _audio = audio_engine;
+
     // Simulation thread
     let shared_sim = shared.clone();
     let viz_sim = viz_history.clone();
+    let callback_active_sim = audio_callback_active.clone();
     thread::spawn(move || {
-        sim_thread(shared_sim, viz_sim, tx, rx_notify);
+        sim_thread(shared_sim, viz_sim, tx, rx_notify, callback_active_sim);
     });
 
     // MIDI output thread
@@ -314,6 +327,9 @@ fn sim_thread(
     viz: Arc<Mutex<Vec<(f32, f32, f32, f32, bool)>>>,
     tx: crossbeam_channel::Sender<[Option<AudioParams>; 3]>,
     rx_notify: std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
+    /// Audio callback safety flag — checked before applying hot-reload to avoid
+    /// racing with the audio callback during VST3/CLAP hot-reload.
+    callback_active: AudioCallbackActive,
 ) {
     let initial_config = shared.lock().config.clone();
     let mut system = build_system(&initial_config);
@@ -1195,11 +1211,15 @@ fn sim_thread(
                         let prev_idx = active_indices[ord - 1];
                         // Adjust interpolation factor based on the scene's transition type.
                         // Snap and Fade both jump params instantly (t=1.0); Morph blends normally.
-                        let effective_t = match scenes[idx].transition_type {
+                        let raw_t = match scenes[idx].transition_type {
                             crate::arrangement::TransitionType::Morph => t,
                             crate::arrangement::TransitionType::Snap
                             | crate::arrangement::TransitionType::Fade => 1.0,
                         };
+                        // Apply morph curve easing — smooth/exponential protect
+                        // bifurcation-sensitive params (e.g. Lorenz rho near 24.74)
+                        // from discontinuous jumps through critical boundaries.
+                        let effective_t = scenes[idx].morph_curve.apply(raw_t);
                         lerp_config(&scenes[prev_idx].config, &scenes[idx].config, effective_t)
                     } else {
                         scenes[idx].config.clone()
@@ -2111,6 +2131,35 @@ fn sim_thread(
             st.trail_color = trail_color;
             st.current_state = effective_state.clone();
             st.current_deriv = system.current_deriv();
+
+            // ── Feature: MIDI export frame recording ─────────────────────────
+            if st.midi_export_recording {
+                let dur = st.midi_export_duration_secs;
+                let max_frames = (dur * 120.0) as usize;
+                if st.midi_export_frames.len() < max_frames {
+                    // Derive pitch and velocity from attractor state
+                    let x_norm = effective_state.first().copied().unwrap_or(0.0) / 30.0;
+                    let y_mag = if effective_state.len() >= 2 {
+                        (effective_state[1] / 30.0).abs()
+                    } else {
+                        0.5
+                    };
+                    let scale_name = st.config.sonification.scale.clone();
+                    let base_freq = st.config.sonification.base_frequency;
+                    let octave_range = st.config.sonification.octave_range;
+                    let semitone_range = (octave_range * 12.0) as u8;
+                    // MIDI note for base_frequency
+                    let base_midi = (69.0 + 12.0 * (base_freq / 440.0).log2()).round().clamp(0.0, 127.0) as u8;
+                    let scale_offs = crate::midi_export::scale_offsets(&scale_name);
+                    let (pitch, vel) = crate::midi_export::coords_to_midi(
+                        x_norm, y_mag.clamp(0.0, 1.0), base_midi, semitone_range, &scale_offs,
+                    );
+                    st.midi_export_frames.push((pitch, vel));
+                } else {
+                    // Recording complete — auto-stop flag; UI will handle export
+                    st.midi_export_recording = false;
+                }
+            }
             if config.system.name == "kuramoto" {
                 st.kuramoto_phases = system.state().to_vec();
                 st.order_param = {
@@ -2956,6 +3005,14 @@ fn build_system(config: &Config) -> Box<dyn DynamicalSystem> {
             Box::new(s)
         }
         "sprott_k" => Box::new(SprottK::new()),
+        "tinkerbell" => {
+            let mut s = TinkerbellMap::new();
+            s.a = config.tinkerbell.a;
+            s.b = config.tinkerbell.b;
+            s.c = config.tinkerbell.c;
+            s.d = config.tinkerbell.d;
+            Box::new(s)
+        }
         _ => Box::new(Lorenz::new(
             config.lorenz.sigma,
             config.lorenz.rho,

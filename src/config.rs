@@ -55,6 +55,7 @@ pub struct Config {
     pub windmi: WindmiConfig,
     pub finance: FinanceConfig,
     pub hyperchaos: HyperchaosConfig,
+    pub tinkerbell: TinkerbellConfig,
 }
 
 impl Default for Config {
@@ -104,6 +105,7 @@ impl Default for Config {
             windmi: WindmiConfig::default(),
             finance: FinanceConfig::default(),
             hyperchaos: HyperchaosConfig::default(),
+            tinkerbell: TinkerbellConfig::default(),
         }
     }
 }
@@ -801,6 +803,25 @@ pub struct HyperchaosConfig {
 impl Default for HyperchaosConfig {
     fn default() -> Self {
         Self { a: 35.0, b: 3.0, c: 28.0, d: -7.0 }
+    }
+}
+
+/// Tinkerbell map parameters.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TinkerbellConfig {
+    /// Quadratic feedback coefficient. Default 0.9.
+    pub a: f64,
+    /// Cross-coupling coefficient. Default -0.6013.
+    pub b: f64,
+    /// x-coupling in y-equation. Default 2.0.
+    pub c: f64,
+    /// y-linear term. Default 0.5.
+    pub d: f64,
+}
+impl Default for TinkerbellConfig {
+    fn default() -> Self {
+        Self { a: 0.9, b: -0.6013, c: 2.0, d: 0.5 }
     }
 }
 

@@ -1053,9 +1053,23 @@ impl SynthState {
 /// Owns the cpal output stream (and optional input stream for sidechain).
 /// The stream remains active for the lifetime of this struct; dropping it
 /// stops audio.
+/// Shared atomic flag indicating the audio callback is currently executing.
+///
+/// Set to `true` at the start of each audio callback invocation and back to
+/// `false` when the callback returns.  The sim thread reads this flag before
+/// applying structural hot-reload changes (e.g. system rebuild) to ensure it
+/// does not race with the audio thread — preventing stale pointer or state
+/// inconsistencies during VST3/CLAP hot-reload.
+///
+/// Uses `SeqCst` ordering for simplicity; the flag is checked infrequently
+/// (only on config hot-reload, ~1 Hz) so ordering cost is negligible.
+pub type AudioCallbackActive = Arc<std::sync::atomic::AtomicBool>;
+
 pub struct AudioEngine {
     _stream: Stream,
     _input_stream: Option<Stream>,
+    /// Shared flag: true while the audio callback is executing.
+    pub callback_active: AudioCallbackActive,
 }
 
 impl AudioEngine {
@@ -1134,13 +1148,21 @@ impl AudioEngine {
             }
         };
 
+        // Audio callback safety flag (Feature 6): set while callback is executing.
+        // The sim thread checks this before applying hot-reload structural changes
+        // (e.g. system rebuild) to avoid racing with the audio callback.
+        let callback_active: AudioCallbackActive =
+            Arc::new(std::sync::atomic::AtomicBool::new(false));
+
         let stream = match fmt {
             SampleFormat::F32 => {
                 let ss = synth.clone();
                 let sw = stereo_width.clone();
+                let ca = callback_active.clone();
                 device.build_output_stream(
                     &stream_config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        ca.store(true, std::sync::atomic::Ordering::SeqCst);
                         let latest = drain(&params_rx);
                         let mut state = ss.lock();
                         if let Some(w) = sw.try_lock() {
@@ -1152,6 +1174,7 @@ impl AudioEngine {
                             }
                         }
                         state.render(data);
+                        ca.store(false, std::sync::atomic::Ordering::SeqCst);
                     },
                     make_err_fn(xrun_counter.clone()),
                     None,
@@ -1161,9 +1184,11 @@ impl AudioEngine {
                 // For I16/U16: convert via f32 buffer, same drain logic
                 let ss = synth.clone();
                 let sw = stereo_width.clone();
+                let ca = callback_active.clone();
                 device.build_output_stream(
                     &stream_config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        ca.store(true, std::sync::atomic::Ordering::SeqCst);
                         let latest = drain(&params_rx);
                         let mut state = ss.lock();
                         if let Some(w) = sw.try_lock() {
@@ -1175,6 +1200,7 @@ impl AudioEngine {
                             }
                         }
                         state.render(data);
+                        ca.store(false, std::sync::atomic::Ordering::SeqCst);
                     },
                     make_err_fn(xrun_counter.clone()),
                     None,
@@ -1191,6 +1217,7 @@ impl AudioEngine {
             Self {
                 _stream: stream,
                 _input_stream: input_stream,
+                callback_active,
             },
             actual_sr,
         ))

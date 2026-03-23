@@ -276,6 +276,11 @@ pub const SYSTEM_REGISTRY: &[SystemEntry] = &[
         display_name: "Sprott K",
         description: "xy product drives x-equation chaos while 0.3z growth balances dissipation",
     },
+    SystemEntry {
+        name: "tinkerbell",
+        display_name: "Tinkerbell Map",
+        description: "2D discrete-time butterfly attractor: x²-y² quadratic with cross-coupling",
+    },
 ];
 
 pub mod bouali;
@@ -330,6 +335,7 @@ pub mod rossler;
 pub mod sprott_b;
 pub mod three_body;
 pub mod van_der_pol;
+pub mod tinkerbell;
 
 pub use bouali::Bouali;
 pub use newton_leipnik::NewtonLeipnik;
@@ -383,6 +389,7 @@ pub use rossler::Rossler;
 pub use sprott_b::SprottB;
 pub use three_body::ThreeBody;
 pub use van_der_pol::VanDerPol;
+pub use tinkerbell::TinkerbellMap;
 
 /// A continuous-time dynamical system that can be stepped forward.
 pub trait DynamicalSystem: Send {

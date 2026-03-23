@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::arrangement::{demo_arrangement, generate_song, scene_at, total_duration, Scene};
+use crate::arrangement::{demo_arrangement, generate_song, scene_at, total_duration, MorphCurve, Scene};
 use crate::audio::{
     capture_snippet, save_clip, save_clip_wav_32bit, save_portrait_png, save_portrait_svg,
     ClipBuffer, LoopExportPending, SharedSnippetPlayback, SidechainLevel, SnippetPlayback,
@@ -338,6 +338,15 @@ pub struct AppState {
     pub midi_rec_enabled: bool,
     pub midi_rec_events: Vec<(u32, u8, u8, u8)>, // (tick_ms, status, data1, data2)
     pub midi_rec_start: std::time::Instant,
+    // ── Feature: Attractor MIDI export ──────────────────────────────────────
+    /// Whether the attractor-to-MIDI recorder is running.
+    pub midi_export_recording: bool,
+    /// Accumulated (pitch, velocity) frames for MIDI export.
+    pub midi_export_frames: Vec<(u8, u8)>,
+    /// Duration in seconds to record for MIDI export.
+    pub midi_export_duration_secs: f32,
+    /// Status message shown in the Studio tab after export.
+    pub midi_export_status: String,
     // Replay
     pub replay_recording: bool,
     pub replay_events: Vec<ReplayEvent>,
@@ -662,6 +671,10 @@ impl AppState {
             midi_rec_enabled: false,
             midi_rec_events: Vec::new(),
             midi_rec_start: std::time::Instant::now(),
+            midi_export_recording: false,
+            midi_export_frames: Vec::new(),
+            midi_export_duration_secs: 30.0,
+            midi_export_status: String::new(),
             replay_recording: false,
             replay_events: Vec::new(),
             replay_start_time: std::time::Instant::now(),
@@ -1812,6 +1825,7 @@ pub fn draw_ui(
                         ("⬡",  "Basin",    "Basin of attraction — which initial conditions lead where"),
                         ("⊙",  "Poincaré", "Poincaré section — a slice through the attractor revealing hidden structure"),
                         ("⧈",  "Recurr",   "Recurrence plot — when does the trajectory revisit the same region?"),
+                        ("📊", "Spectrum", "Spectral analyser — real-time FFT frequency spectrum of the audio output"),
                     ];
                     let mut viz_tab = state.lock().viz_tab;
                     for (i, (icon, name, tooltip)) in tabs.iter().enumerate() {
@@ -2602,6 +2616,7 @@ pub fn draw_ui(
             8 => draw_basin_tab(ui, state),
             9 => draw_poincare_tab(ui, state),
             10 => draw_recurrence_tab(ui, state),
+            11 => draw_spectrum_tab(ui, waveform, state),
             _ => {}
         }
     });
@@ -6315,6 +6330,20 @@ fn draw_arrange_tab(ui: &mut Ui, state: &SharedState, recording: &WavRecorder) {
                     {
                         state.lock().scenes[i].morph_secs = morph_v;
                     }
+                    // Morph curve selector (linear / smooth / exponential)
+                    if i > 0 {
+                        let current_curve = state.lock().scenes[i].morph_curve.as_str().to_string();
+                        let curves = [("~", "linear", "Linear interpolation"), ("S", "smooth", "Sigmoid (smooth-step) — safe for bifurcation-sensitive params"), ("E", "exponential", "Exponential easing")];
+                        for (icon, key, tip) in curves {
+                            let active_curve = current_curve == key;
+                            let fill = if active_curve { Color32::from_rgb(0, 100, 160) } else { Color32::from_rgb(20, 22, 40) };
+                            let lbl = RichText::new(icon).size(9.0).color(if active_curve { Color32::WHITE } else { Color32::from_rgb(120, 130, 160) });
+                            if ui.add(Button::new(lbl).fill(fill).min_size(Vec2::new(16.0, 18.0))).on_hover_text(tip).clicked() {
+                                state.lock().scenes[i].morph_curve = MorphCurve::from_str(key);
+                            }
+                        }
+                    }
+
                     // ▶ preview: jump arrangement to just before this scene's morph
                     if i > 0 {
                         let preview_btn = ui
@@ -6557,6 +6586,72 @@ fn draw_studio_tab(ui: &mut Ui, state: &SharedState) {
                 }
 
                 ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // ── MIDI Export ───────────────────────────────────────────
+                ui.label(RichText::new("MIDI Export").color(Color32::WHITE).size(12.0).strong());
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Duration:").color(GRAY_HINT).size(11.0));
+                    let mut dur = state.lock().midi_export_duration_secs;
+                    if ui.add(DragValue::new(&mut dur).clamp_range(5.0..=120.0_f32).suffix("s").speed(1.0)).changed() {
+                        state.lock().midi_export_duration_secs = dur;
+                    }
+                });
+                let (midi_export_rec, midi_export_frames_len, midi_export_dur, midi_export_status) = {
+                    let st = state.lock();
+                    (st.midi_export_recording, st.midi_export_frames.len(), st.midi_export_duration_secs, st.midi_export_status.clone())
+                };
+                let control_rate = 120.0_f32;
+                let max_frames = (midi_export_dur * control_rate) as usize;
+                if midi_export_rec {
+                    let progress = midi_export_frames_len as f32 / max_frames as f32;
+                    ui.add(egui::ProgressBar::new(progress).text(format!("{:.0}%", progress * 100.0)));
+                    if ui.add(Button::new(RichText::new("Stop & Export MIDI").size(11.0).color(Color32::WHITE))
+                        .fill(Color32::from_rgb(180, 80, 0)).min_size(Vec2::new(lib_w - 16.0, 28.0))).clicked()
+                        || midi_export_frames_len >= max_frames
+                    {
+                        let mut st = state.lock();
+                        st.midi_export_recording = false;
+                        let frames_data = std::mem::take(&mut st.midi_export_frames);
+                        let scale_name = st.config.sonification.scale.clone();
+                        let base_freq = st.config.sonification.base_frequency as f32;
+                        drop(st);
+                        // Convert (pitch,vel) frames to MidiFrames and export
+                        use crate::midi_export::{export_midi, MidiFrame, scale_offsets};
+                        let midi_frames: Vec<MidiFrame> = frames_data.iter().map(|&(p, v)| MidiFrame { pitch: p, velocity: v, ticks: 1 }).collect();
+                        let scale_offs = scale_offsets(&scale_name);
+                        let _ = scale_offs;
+                        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                        let out_path = format!("midi_export_{}.mid", secs);
+                        match export_midi(&midi_frames, &out_path, 60, 500_000, midly::num::u4::new(0)) {
+                            Ok(()) => {
+                                state.lock().midi_export_status = format!("Exported: {}", out_path);
+                                state.lock().toast_queue.push(Toast::info(format!("MIDI saved: {}", out_path)));
+                            }
+                            Err(e) => {
+                                state.lock().midi_export_status = format!("Error: {}", e);
+                                state.lock().toast_queue.push(Toast::error(format!("MIDI export failed: {}", e)));
+                            }
+                        }
+                        let _ = base_freq;
+                    }
+                } else if ui.add(Button::new(RichText::new("⏺  Export MIDI").color(Color32::WHITE).size(12.0))
+                    .fill(Color32::from_rgb(30, 80, 150)).min_size(Vec2::new(lib_w - 16.0, 32.0)))
+                    .on_hover_text("Record the attractor's pitch sequence and export as a MIDI file.")
+                    .clicked()
+                {
+                    let mut st = state.lock();
+                    st.midi_export_recording = true;
+                    st.midi_export_frames.clear();
+                    st.midi_export_status = "Recording...".to_string();
+                }
+                if !midi_export_status.is_empty() && !midi_export_rec {
+                    let col = if midi_export_status.starts_with("Exported") { Color32::from_rgb(80, 220, 120) } else { Color32::from_rgb(180, 80, 80) };
+                    ui.label(RichText::new(&midi_export_status).size(10.0).color(col));
+                }
+                ui.add_space(4.0);
                 ui.separator();
                 ui.add_space(4.0);
 
@@ -9530,4 +9625,206 @@ fn draw_phase_clock(painter: &Painter, rect: Rect, state: &[f64], deriv: &[f64])
     }
 
     painter.circle_filled(center, 3.0, Color32::from_rgb(200, 200, 200));
+}
+
+// ---------------------------------------------------------------------------
+// Spectrum analyser tab (Feature: FFT spectral overlay)
+// ---------------------------------------------------------------------------
+
+/// Draw the real-time FFT spectral analyser panel.
+///
+/// Reads the waveform buffer, runs a windowed FFT on the most recent
+/// 2048 samples, and displays a bar-graph spectrum with logarithmic
+/// frequency axis from 20 Hz to 20 kHz.  Bars are coloured by
+/// frequency: bass = red, mids = green, highs = blue.
+fn draw_spectrum_tab(
+    ui: &mut Ui,
+    waveform: &Arc<Mutex<Vec<f32>>>,
+    state: &SharedState,
+) {
+    use crate::spectrum::{bins_to_bars, compute_spectrum, mag_to_db, SPECTRUM_BINS};
+
+    let sample_rate = state.lock().sample_rate as f32;
+    let samples: Vec<f32> = if let Some(wf) = waveform.try_lock() {
+        wf.clone()
+    } else {
+        Vec::new()
+    };
+
+    let avail = ui.available_size();
+
+    if samples.len() < 64 {
+        let (_, painter) = ui.allocate_painter(avail, Sense::hover());
+        let r = egui::Rect::from_min_size(ui.cursor().min, avail);
+        painter.rect_filled(r, 0.0, Color32::from_rgb(8, 8, 18));
+        painter.text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            "Audio starting...",
+            FontId::proportional(14.0),
+            Color32::from_rgb(60, 80, 120),
+        );
+        return;
+    }
+
+    // Compute spectrum
+    let spectrum = compute_spectrum(&samples);
+    const N_BARS: usize = 64;
+    let bars = bins_to_bars(&spectrum, N_BARS, sample_rate, 20.0, 20_000.0);
+
+    let panel_h = (avail.y - 70.0).max(100.0);
+    let (resp, _) = ui.allocate_painter(Vec2::new(avail.x, panel_h), Sense::hover());
+    let panel_rect = resp.rect;
+    let painter = ui.painter_at(panel_rect);
+
+    // Background
+    painter.rect_filled(panel_rect, 6.0, Color32::from_rgb(8, 8, 18));
+
+    let bar_w = panel_rect.width() / N_BARS as f32;
+    let bar_h_max = panel_h - 20.0;
+
+    const DB_MIN: f32 = -60.0;
+    const DB_MAX: f32 = 0.0;
+
+    for (i, &mag) in bars.iter().enumerate() {
+        let db = mag_to_db(mag).clamp(DB_MIN, DB_MAX);
+        let norm = ((db - DB_MIN) / (DB_MAX - DB_MIN)).clamp(0.0, 1.0);
+        let bar_h = (norm * bar_h_max).max(1.0);
+
+        let x = panel_rect.left() + i as f32 * bar_w;
+        let bar_rect = egui::Rect::from_min_max(
+            Pos2::new(x + 1.0, panel_rect.bottom() - 20.0 - bar_h),
+            Pos2::new(x + bar_w - 1.0, panel_rect.bottom() - 20.0),
+        );
+
+        // Colour gradient: bass=red, mids=green, highs=blue
+        let t = i as f32 / N_BARS as f32;
+        let (r_c, g_c, b_c): (u8, u8, u8) = if t < 0.25 {
+            let k = t / 0.25;
+            (220, (80.0 * k) as u8, 20)
+        } else if t < 0.5 {
+            let k = (t - 0.25) / 0.25;
+            ((220.0 * (1.0 - k)) as u8, (80 + (120.0 * k) as u32).min(200) as u8, 20)
+        } else if t < 0.75 {
+            let k = (t - 0.5) / 0.25;
+            (0, 200, (200.0 * k) as u8)
+        } else {
+            let k = (t - 0.75) / 0.25;
+            (0, (200.0 * (1.0 - k)) as u8, 200)
+        };
+
+        let bright = Color32::from_rgba_premultiplied(
+            (r_c as f32 * 1.4).min(255.0) as u8,
+            (g_c as f32 * 1.4).min(255.0) as u8,
+            (b_c as f32 * 1.4).min(255.0) as u8,
+            230,
+        );
+        let dim = Color32::from_rgba_premultiplied(r_c / 4, g_c / 4, b_c / 4, 160);
+
+        if bar_rect.height() > 3.0 {
+            let split_y = bar_rect.min.y + bar_rect.height() * 0.3;
+            painter.rect_filled(
+                egui::Rect::from_min_max(bar_rect.min, Pos2::new(bar_rect.max.x, split_y)),
+                1.0,
+                bright,
+            );
+            painter.rect_filled(
+                egui::Rect::from_min_max(Pos2::new(bar_rect.min.x, split_y), bar_rect.max),
+                1.0,
+                dim,
+            );
+        } else {
+            painter.rect_filled(bar_rect, 1.0, bright);
+        }
+    }
+
+    // Frequency axis labels
+    let label_freqs: &[(f32, &str)] = &[(20.0, "20Hz"), (100.0, "100"), (500.0, "500"), (1000.0, "1k"), (5000.0, "5k"), (10000.0, "10k"), (20000.0, "20k")];
+    let log_min = 20.0_f32.log10();
+    let log_max = 20_000.0_f32.log10();
+    for (freq, label) in label_freqs {
+        let t_x = (freq.log10() - log_min) / (log_max - log_min);
+        let x = panel_rect.left() + t_x * panel_rect.width();
+        painter.text(
+            Pos2::new(x, panel_rect.bottom() - 10.0),
+            Align2::CENTER_CENTER,
+            *label,
+            FontId::proportional(8.5),
+            Color32::from_rgb(90, 110, 160),
+        );
+        painter.line_segment(
+            [Pos2::new(x, panel_rect.top()), Pos2::new(x, panel_rect.bottom() - 20.0)],
+            Stroke::new(0.4, Color32::from_rgba_premultiplied(50, 60, 90, 60)),
+        );
+    }
+
+    // dB grid lines and labels
+    for &db_label in &[-60, -40, -20, -10, 0i32] {
+        let norm = (db_label as f32 - DB_MIN) / (DB_MAX - DB_MIN);
+        let y = panel_rect.bottom() - 20.0 - norm * bar_h_max;
+        painter.text(
+            Pos2::new(panel_rect.right() - 2.0, y),
+            Align2::RIGHT_CENTER,
+            format!("{}dB", db_label),
+            FontId::proportional(8.0),
+            Color32::from_rgb(70, 90, 130),
+        );
+        painter.line_segment(
+            [Pos2::new(panel_rect.left(), y), Pos2::new(panel_rect.right(), y)],
+            Stroke::new(0.4, Color32::from_rgba_premultiplied(40, 50, 80, 50)),
+        );
+    }
+
+    // Title
+    painter.text(
+        Pos2::new(panel_rect.left() + 8.0, panel_rect.top() + 12.0),
+        Align2::LEFT_CENTER,
+        "FFT Spectrum (Hann window, 64 log-spaced bars, 20Hz–20kHz)",
+        FontId::proportional(10.5),
+        Color32::from_rgb(100, 150, 220),
+    );
+
+    // Border
+    painter.rect_stroke(panel_rect, 6.0, Stroke::new(1.0, Color32::from_rgb(30, 40, 70)));
+
+    // Stats row below
+    ui.add_space(4.0);
+    let rms: f32 = {
+        let n = samples.len().min(2048);
+        let offset = samples.len().saturating_sub(n);
+        let sum: f32 = samples[offset..].iter().map(|s| s * s).sum();
+        (sum / n.max(1) as f32).sqrt()
+    };
+    let rms_db = if rms > 1e-6 { 20.0 * rms.log10() } else { -80.0 };
+
+    // Dominant frequency
+    let peak_bin = spectrum
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let bin_hz = sample_rate / (2.0 * (SPECTRUM_BINS as f32 - 1.0));
+    let dominant_hz = peak_bin as f32 * bin_hz;
+
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("RMS: {:.1} dBFS", rms_db))
+                .size(11.0)
+                .color(Color32::from_rgb(140, 200, 255)),
+        );
+        ui.separator();
+        ui.label(
+            RichText::new(format!("Dominant: {:.0} Hz", dominant_hz.max(0.0)))
+                .size(11.0)
+                .color(Color32::from_rgb(200, 240, 140)),
+        );
+        ui.separator();
+        ui.label(
+            RichText::new("Logarithmic frequency axis | Live FFT every frame")
+                .size(10.0)
+                .color(Color32::from_rgb(80, 100, 140))
+                .italics(),
+        );
+    });
 }

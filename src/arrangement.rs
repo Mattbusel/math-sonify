@@ -16,6 +16,66 @@ pub enum TransitionType {
     Fade,
 }
 
+/// Easing curve applied to the morph interpolation parameter `t`.
+///
+/// Bifurcation-sensitive parameters (like Lorenz rho near 24.74) benefit
+/// enormously from eased transitions — linear interpolation can cause the
+/// system to slam through a bifurcation boundary in a single tick, producing
+/// clicks and discontinuous behaviour. Smooth and exponential easing slow
+/// the rate of change near the boundaries so the attractor has time to adapt.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum MorphCurve {
+    /// Linear interpolation: t stays as-is. Good for stable parameters.
+    #[default]
+    Linear,
+    /// Sigmoid (smooth-step) easing: fast in the middle, slow at both ends.
+    /// Best for bifurcation-sensitive parameters — never jumps through a boundary.
+    Smooth,
+    /// Exponential ease-in/ease-out: asymmetric, accelerates through the middle.
+    /// Good for spectral transitions where you want a quick switch with gentle entry.
+    Exponential,
+}
+
+impl MorphCurve {
+    /// Apply the easing curve to a linear `t ∈ [0, 1]`.
+    pub fn apply(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        match self {
+            MorphCurve::Linear => t,
+            // Cubic smooth-step: 3t² - 2t³  (C¹ at both ends: first-derivative = 0 at t=0 and t=1)
+            MorphCurve::Smooth => t * t * (3.0 - 2.0 * t),
+            // Quintic smooth-step: 6t⁵ - 15t⁴ + 10t³  (C² — even smoother)
+            // Gives a more symmetric S-curve that stays slower at boundaries longer.
+            MorphCurve::Exponential => {
+                // Exponential sigmoid: maps t through 1/(1+e^(-k*(t-0.5))) normalised to [0,1].
+                // k=10 gives a steep centre transition while spending ~30% of the time near 0/1.
+                let k = 10.0_f32;
+                let sig = |x: f32| 1.0_f32 / (1.0 + (-k * (x - 0.5)).exp());
+                let lo = sig(0.0_f32);
+                let hi = sig(1.0_f32);
+                (sig(t) - lo) / (hi - lo)
+            }
+        }
+    }
+
+    /// Parse from a string as stored in config / UI.
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "smooth" => MorphCurve::Smooth,
+            "exponential" => MorphCurve::Exponential,
+            _ => MorphCurve::Linear,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MorphCurve::Linear => "linear",
+            MorphCurve::Smooth => "smooth",
+            MorphCurve::Exponential => "exponential",
+        }
+    }
+}
+
 impl Default for TransitionType {
     fn default() -> Self {
         Self::Morph
@@ -47,6 +107,10 @@ pub struct Scene {
     pub transition_prob: f32,
     /// How this scene transitions in from the previous one.
     pub transition_type: TransitionType,
+    /// Easing curve applied to the morph parameter interpolation.
+    /// "linear" (default) | "smooth" (sigmoid) | "exponential".
+    /// Use "smooth" for bifurcation-sensitive parameters (e.g. Lorenz rho near 24.74).
+    pub morph_curve: MorphCurve,
 }
 
 impl Scene {
@@ -59,6 +123,7 @@ impl Scene {
             active: false,
             transition_prob: 1.0,
             transition_type: TransitionType::default(),
+            morph_curve: MorphCurve::default(),
         }
     }
 }
@@ -310,6 +375,12 @@ pub fn lerp_config(a: &Config, b: &Config, t: f32) -> Config {
             c: lf64(a.hyperchaos.c, b.hyperchaos.c),
             d: lf64(a.hyperchaos.d, b.hyperchaos.d),
         },
+        tinkerbell: crate::config::TinkerbellConfig {
+            a: lf64(a.tinkerbell.a, b.tinkerbell.a),
+            b: lf64(a.tinkerbell.b, b.tinkerbell.b),
+            c: lf64(a.tinkerbell.c, b.tinkerbell.c),
+            d: lf64(a.tinkerbell.d, b.tinkerbell.d),
+        },
         viz: a.viz.clone(), // don't morph viz settings
         ..a.clone()
     }
@@ -396,6 +467,7 @@ fn make_scene(
         active: true,
         transition_prob: 1.0,
         transition_type: TransitionType::default(),
+        morph_curve: MorphCurve::default(),
     }
 }
 
