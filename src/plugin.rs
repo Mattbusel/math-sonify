@@ -25,6 +25,9 @@ pub mod vanderpol;
 pub mod synthesis;
 pub mod midi;
 pub mod randomizer;
+pub mod duffing;
+pub mod zoo;
+pub mod effects;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};
