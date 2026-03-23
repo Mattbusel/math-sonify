@@ -6,7 +6,9 @@
 mod arrangement;
 mod audio;
 mod bifurcation;
+mod collab;
 mod collaboration;
+mod composition;
 mod config;
 pub mod error;
 pub mod evolution;
@@ -14,12 +16,15 @@ mod midi_export;
 mod osc;
 mod osc_sync;
 mod patches;
+mod phase_portrait;
 mod preset_gallery;
 mod preset_interpolation;
 mod recorder;
+mod scene_format;
 mod sonification;
 mod spectrum;
 mod synth;
+mod synthesis;
 mod systems;
 #[cfg(test)]
 mod tests;
