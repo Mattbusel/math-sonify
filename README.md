@@ -900,6 +900,41 @@ The **maximal Lyapunov exponent** λ₁ quantifies the average rate of exponenti
 
 math-sonify estimates λ₁ using a standard rescaling algorithm: a shadow trajectory is integrated alongside the main one, the separation is measured every N steps, its logarithm is accumulated, and the separation is rescaled. This runs at `LYAP_INTERVAL_TICKS` (every 2 seconds of sim time).
 
+### Hindmarsh-Rose Neuron
+
+`src/hindmarsh_rose.rs` provides a clean typed API for the Hindmarsh-Rose
+bursting neuron model (`HindmarshRoseConfig`, `HindmarshRoseState`,
+`HindmarshRoseNeuron`). The neuron implements the classic three-variable system:
+
+```text
+dx/dt = y - a·x³ + b·x² - z + I_ext
+dy/dt = c - d·x² - y
+dz/dt = r · (s·(x - x_rest) - z)
+```
+
+Classic chaotic-bursting parameters: `a=1, b=3, c=1, d=5, r=0.001, s=4,
+x_rest=-1.6, i_ext=1.5`.
+
+#### Headless CLI
+
+```bash
+# Render hindmarsh-rose to WAV
+math-sonify --headless --attractor hindmarsh-rose --duration 5 --output hr.wav
+
+# Run spectral analysis on the trajectory
+math-sonify --headless --attractor hindmarsh-rose --spectrum
+```
+
+### Spectral Analysis
+
+`src/spectrum_analyzer.rs` provides `SpectralAnalyzer` which computes the DFT
+of an arbitrary sample sequence and returns dominant frequencies.
+
+- Cooley-Tukey radix-2 FFT for power-of-2 lengths; O(N²) DFT fallback.
+- Hann windowing to reduce spectral leakage.
+- `DftResult { frequencies, magnitudes, dominant_freq, spectral_centroid }`.
+- `SpectralAnalyzer::dominant_frequencies(result, top_k)` — sorted by magnitude.
+
 ### FFT spectral analysis
 
 The FFT module (`spectrum.rs`) computes a 1024-point Hann-windowed FFT of the synthesised audio output and displays:

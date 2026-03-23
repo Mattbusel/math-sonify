@@ -29,6 +29,8 @@ mod recorder;
 mod scene_format;
 mod sonification;
 mod spectrum;
+mod hindmarsh_rose;
+mod spectrum_analyzer;
 mod synth;
 mod synthesis;
 mod systems;
@@ -3329,6 +3331,8 @@ fn run_headless(args: &[String]) -> anyhow::Result<()> {
         .unwrap_or(10.0);
     let output_path = arg_after(args, "--output").unwrap_or("headless_render.wav");
     let patch_name = arg_after(args, "--patch");
+    let attractor_name = arg_after(args, "--attractor");
+    let run_spectrum = args.contains(&"--spectrum".to_string());
 
     println!("Math Sonify headless render");
     println!("  Duration : {} s", duration_secs);
@@ -3346,6 +3350,43 @@ fn run_headless(args: &[String]) -> anyhow::Result<()> {
             // Try as a preset name
             config = crate::patches::load_preset(name);
         }
+    }
+
+    // --attractor: override the system name before building
+    if let Some(name) = attractor_name {
+        let mapped = match name {
+            "hindmarsh-rose" | "hindmarsh_rose" => "hindmarsh_rose",
+            other => other,
+        };
+        config.system.name = mapped.to_string();
+        println!("  Attractor: {}", config.system.name);
+    }
+
+    // --spectrum: run spectral analysis on the trajectory and print dominant frequencies
+    if run_spectrum {
+        let mut system = build_system(&config);
+        let sample_rate = 100.0_f64; // control-rate Hz for trajectory sampling
+        let n_steps = 2048usize; // power-of-two for FFT
+        let dt = config.system.dt;
+
+        // Collect x[0] trajectory
+        let mut trajectory = Vec::with_capacity(n_steps);
+        for _ in 0..n_steps {
+            system.step(dt);
+            trajectory.push(system.state()[0]);
+        }
+
+        let result = crate::spectrum_analyzer::SpectralAnalyzer::analyze(&trajectory, sample_rate);
+        println!("[spectrum] system: {}", system.name());
+        println!("[spectrum] samples: {}", n_steps);
+        println!("[spectrum] dominant_freq: {:.4} Hz", result.dominant_freq);
+        println!("[spectrum] spectral_centroid: {:.4} Hz", result.spectral_centroid);
+        let top = crate::spectrum_analyzer::SpectralAnalyzer::dominant_frequencies(&result, 5);
+        println!("[spectrum] top-5 frequencies:");
+        for (freq, mag) in &top {
+            println!("  {:.4} Hz  (magnitude {:.6})", freq, mag);
+        }
+        return Ok(());
     }
 
     let sample_rate = if config.audio.sample_rate > 0 {
