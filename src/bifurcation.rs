@@ -210,8 +210,6 @@ fn write_bifurcation_svg(
     attractor_points: &[Vec<[f64; 3]>],
     param_name: &str,
 ) -> anyhow::Result<()> {
-    use std::io::Write as _;
-
     let width = 800_f64;
     let height = 500_f64;
     let margin_l = 60.0_f64;
@@ -242,39 +240,38 @@ fn write_bifurcation_svg(
 
     let mut file = std::fs::File::create(path)?;
 
-    // Note: hex color codes use # which doesn't conflict with format braces.
-    // Named captures like {width} ARE expanded — use positional {} instead.
-    writeln!(
-        file,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}">"#,
+    // Build SVG content using a String buffer to avoid writeln! format conflicts
+    // with SVG attribute syntax (hex colors, quotes).
+    let mut svg = String::with_capacity(4096);
+    svg.push_str(&format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\">\n",
         width, height
-    )?;
-    writeln!(
-        file,
-        r#"<rect width="{}" height="{}" fill="#0d1117"/>"#,
+    ));
+    svg.push_str(&format!(
+        "<rect width=\"{}\" height=\"{}\" fill=\"#0d1117\"/>\n",
         width, height
-    )?;
-    writeln!(
-        file,
-        "<text x=\"{}\" y=\"20\" fill=\"#8b949e\" font-size=\"13\" font-family=\"monospace\">math-sonify bifurcation \u{2014} z vs {}</text>",
+    ));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"20\" fill=\"#8b949e\" font-size=\"13\" \
+         font-family=\"monospace\">math-sonify bifurcation -- z vs {}</text>\n",
         margin_l, param_name
-    )?;
+    ));
 
     // Axis labels.
-    writeln!(
-        file,
-        "<text x=\"{}\" y=\"{}\" fill=\"#8b949e\" font-size=\"11\" font-family=\"monospace\">{:.2}</text>",
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" fill=\"#8b949e\" font-size=\"11\" \
+         font-family=\"monospace\">{:.2}</text>\n",
         margin_l - 5.0,
         margin_t + plot_h,
         z_min
-    )?;
-    writeln!(
-        file,
-        "<text x=\"{}\" y=\"{}\" fill=\"#8b949e\" font-size=\"11\" font-family=\"monospace\">{:.2}</text>",
+    ));
+    svg.push_str(&format!(
+        "<text x=\"{}\" y=\"{}\" fill=\"#8b949e\" font-size=\"11\" \
+         font-family=\"monospace\">{:.2}</text>\n",
         margin_l - 5.0,
         margin_t,
         z_max
-    )?;
+    ));
 
     // Plot points.
     for (pi, pts) in attractor_points.iter().enumerate() {
@@ -283,34 +280,33 @@ fn write_bifurcation_svg(
         for p in pts {
             let z = p[2];
             let py = margin_t + plot_h - (z - z_min) / (z_max - z_min) * plot_h;
-            writeln!(
-                file,
-                "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"0.8\" fill=\"#58a6ff\" opacity=\"0.5\"/>",
+            svg.push_str(&format!(
+                "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"0.8\" fill=\"#58a6ff\" opacity=\"0.5\"/>\n",
                 px,
                 py.clamp(margin_t, margin_t + plot_h)
-            )?;
+            ));
         }
     }
 
     // Axis lines.
-    writeln!(
-        file,
-        "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#30363d\" stroke-width=\"1\"/>",
+    svg.push_str(&format!(
+        "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#30363d\" stroke-width=\"1\"/>\n",
         margin_l,
         margin_t + plot_h,
         margin_l + plot_w,
         margin_t + plot_h
-    )?;
-    writeln!(
-        file,
-        "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#30363d\" stroke-width=\"1\"/>",
+    ));
+    svg.push_str(&format!(
+        "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#30363d\" stroke-width=\"1\"/>\n",
         margin_l,
         margin_t,
         margin_l,
         margin_t + plot_h
-    )?;
+    ));
+    svg.push_str("</svg>\n");
 
-    writeln!(file, "</svg>")?;
+    use std::io::Write as IoWrite;
+    file.write_all(svg.as_bytes())?;
     Ok(())
 }
 
