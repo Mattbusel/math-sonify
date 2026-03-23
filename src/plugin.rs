@@ -34,6 +34,8 @@ pub mod euclidean;
 pub mod tuning;
 pub mod markov_music;
 pub mod signal_processing;
+pub mod harmony_system;
+pub mod rhythm_quantizer;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};

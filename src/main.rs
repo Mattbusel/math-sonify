@@ -52,6 +52,8 @@ mod ui_tips;
 mod ui_waveform;
 mod pitch_detection;
 mod convolution;
+pub mod harmony_system;
+pub mod rhythm_quantizer;
 
 use std::path::Path;
 use std::sync::Arc;
