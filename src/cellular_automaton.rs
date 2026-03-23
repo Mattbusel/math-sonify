@@ -374,3 +374,223 @@ mod tests {
         assert_eq!(ca.generation, 2);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MIDI-oriented cellular automaton musical mapper
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// A MIDI note emitted by the CA musical mapper.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiNote {
+    /// MIDI pitch (0–127).
+    pub pitch: u8,
+    /// MIDI velocity (0–127).
+    pub velocity: u8,
+    /// Note duration in milliseconds.
+    pub duration_ms: u32,
+}
+
+/// Elementary CA rule in the Wolfram sense, driving MIDI note generation.
+#[derive(Debug, Clone)]
+pub struct CaRule {
+    pub rule_number: u8,
+    pub width: usize,
+}
+
+impl CaRule {
+    /// Wolfram Rule 30 — chaotic, noise-like patterns.
+    pub fn rule_30() -> Self {
+        Self { rule_number: 30, width: 32 }
+    }
+
+    /// Wolfram Rule 90 — Sierpinski-triangle XOR pattern.
+    pub fn rule_90() -> Self {
+        Self { rule_number: 90, width: 32 }
+    }
+
+    /// Wolfram Rule 110 — complex, Class-4 behaviour.
+    pub fn rule_110() -> Self {
+        Self { rule_number: 110, width: 32 }
+    }
+
+    /// Decode rule number into a lookup table indexed by the 3-bit neighbourhood.
+    ///
+    /// Bit `i` of `rule_number` maps to the output for neighbourhood pattern `i`
+    /// (where the pattern is encoded as `left<<2 | center<<1 | right`).
+    pub fn rule_table(rule_number: u8) -> [bool; 8] {
+        let mut table = [false; 8];
+        for i in 0u8..8 {
+            table[i as usize] = (rule_number >> i) & 1 == 1;
+        }
+        table
+    }
+
+    /// Advance `current` by one generation using the Wolfram rule with
+    /// periodic (wraparound) boundary conditions.
+    pub fn next_generation(&self, current: &[bool]) -> Vec<bool> {
+        let table = Self::rule_table(self.rule_number);
+        let n = current.len();
+        (0..n)
+            .map(|i| {
+                let left   = current[(i + n - 1) % n] as usize;
+                let center = current[i]             as usize;
+                let right  = current[(i + 1) % n]  as usize;
+                let idx = (left << 2) | (center << 1) | right;
+                table[idx]
+            })
+            .collect()
+    }
+}
+
+/// MIDI-note-oriented cellular automaton driver.
+pub struct CaMusicalMapper {
+    pub rule: CaRule,
+    /// Current cell row (one bool per cell).
+    pub state: Vec<bool>,
+    /// MIDI pitches mapped to cell indices via `cell_idx % pitch_map.len()`.
+    pub pitch_map: Vec<u8>,
+    /// Base velocity; actual velocity is adjusted by active-cell density.
+    pub velocity_base: u8,
+}
+
+impl CaMusicalMapper {
+    /// Construct from a rule number, width, and LCG seed for initial state.
+    pub fn new(rule_number: u8, width: usize, seed: u64) -> Self {
+        // LCG initialisation.
+        let state: Vec<bool> = {
+            let mut lcg = seed;
+            (0..width)
+                .map(|_| {
+                    lcg = lcg.wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    (lcg >> 33) & 1 == 1
+                })
+                .collect()
+        };
+
+        // Major-scale MIDI pitches starting at middle C (C4 = 60).
+        let pitch_map: Vec<u8> = vec![60, 62, 64, 65, 67, 69, 71, 72];
+
+        Self {
+            rule: CaRule { rule_number, width },
+            state,
+            pitch_map,
+            velocity_base: 64,
+        }
+    }
+
+    /// Density of active (true) cells in the current state.
+    pub fn density(&self) -> f64 {
+        if self.state.is_empty() {
+            return 0.0;
+        }
+        self.state.iter().filter(|&&c| c).count() as f64 / self.state.len() as f64
+    }
+
+    /// Advance one CA generation and return MIDI notes for active cells.
+    pub fn step_and_emit(&mut self) -> Vec<MidiNote> {
+        self.state = self.rule.next_generation(&self.state);
+        let density = self.density();
+        let velocity = (self.velocity_base as f64 + density * 40.0).min(127.0) as u8;
+
+        self.state
+            .iter()
+            .enumerate()
+            .filter(|(_, &active)| active)
+            .map(|(i, _)| {
+                let pitch = self.pitch_map[i % self.pitch_map.len()];
+                MidiNote {
+                    pitch,
+                    velocity,
+                    duration_ms: 125,
+                }
+            })
+            .collect()
+    }
+
+    /// Run `steps` generations; collect all emitted note sets.
+    pub fn run(&mut self, steps: usize) -> Vec<Vec<MidiNote>> {
+        (0..steps).map(|_| self.step_and_emit()).collect()
+    }
+}
+
+/// Assign timestamps to notes based on tempo.
+///
+/// Returns `(timestamp_seconds, note)` pairs, assuming each step corresponds
+/// to one beat at the given `tempo_bpm`.
+pub fn to_melody(
+    notes: &[Vec<MidiNote>],
+    tempo_bpm: f64,
+) -> Vec<(f64, MidiNote)> {
+    let beat_duration = 60.0 / tempo_bpm.max(1.0);
+    notes
+        .iter()
+        .enumerate()
+        .flat_map(|(step, step_notes)| {
+            let ts = step as f64 * beat_duration;
+            step_notes.iter().map(move |n| (ts, n.clone()))
+        })
+        .collect()
+}
+
+// ── Tests for the MIDI CA layer ────────────────────────────────────────────────
+
+#[cfg(test)]
+mod midi_ca_tests {
+    use super::*;
+
+    #[test]
+    fn rule_table_zero_all_false() {
+        let table = CaRule::rule_table(0);
+        assert!(table.iter().all(|&b| !b), "rule 0 should produce all false");
+    }
+
+    #[test]
+    fn rule_table_255_all_true() {
+        let table = CaRule::rule_table(255);
+        assert!(table.iter().all(|&b| b), "rule 255 should produce all true");
+    }
+
+    #[test]
+    fn rule_90_xor_pattern() {
+        // Rule 90 computes: new[i] = left XOR right.
+        let rule = CaRule::rule_90();
+        // Single live cell in the centre.
+        let width = 7;
+        let mut state = vec![false; width];
+        state[3] = true;
+        let next = rule.next_generation(&state);
+        // Cells at index 2 and 4 should be live (neighbours of 3).
+        assert!(next[2], "rule-90: cell 2 should be live");
+        assert!(next[4], "rule-90: cell 4 should be live");
+        assert!(!next[3], "rule-90: centre cell should be dead");
+    }
+
+    #[test]
+    fn density_in_range() {
+        let mut mapper = CaMusicalMapper::new(30, 16, 42);
+        for _ in 0..10 {
+            mapper.step_and_emit();
+            let d = mapper.density();
+            assert!(d >= 0.0 && d <= 1.0, "density out of range: {d}");
+        }
+    }
+
+    #[test]
+    fn run_returns_correct_step_count() {
+        let mut mapper = CaMusicalMapper::new(110, 8, 7);
+        let generations = mapper.run(5);
+        assert_eq!(generations.len(), 5);
+    }
+
+    #[test]
+    fn to_melody_timestamps_ascending() {
+        let mut mapper = CaMusicalMapper::new(30, 8, 1);
+        let notes = mapper.run(4);
+        let melody = to_melody(&notes, 120.0);
+        // Timestamps should be non-decreasing.
+        for w in melody.windows(2) {
+            assert!(w[0].0 <= w[1].0);
+        }
+    }
+}

@@ -38,6 +38,7 @@ mod stochastic_resonance;
 mod networks;
 mod spectral_composition;
 mod cellular_automaton;
+pub mod polyrhythm;
 mod quantum_oscillator;
 pub mod blend;
 pub mod scale_mapper;
