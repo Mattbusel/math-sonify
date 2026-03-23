@@ -48,6 +48,8 @@ pub mod microtonal;
 pub mod algorithmic_composer;
 pub mod scale_mapper_v2;
 pub mod live_input;
+pub mod melody_generator;
+pub mod dynamic_processor;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};
