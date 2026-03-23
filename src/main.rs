@@ -62,6 +62,8 @@ pub mod algorithmic_composer;
 pub mod tuning_system;
 pub mod chord_analyzer;
 pub mod beat_tracker;
+pub mod polyrhythm_engine;
+pub mod harmonic_series;
 
 use std::path::Path;
 use std::sync::Arc;
