@@ -86,11 +86,30 @@ impl Default for PortraitConfig {
 // ── Vertex ────────────────────────────────────────────────────────────────────
 
 /// A single vertex in the 3D trail.
+///
+/// `repr(C)` layout: 3 floats position + 4 floats color = 28 bytes.
+/// This is `Pod`-compatible (no padding, all-bits-valid fields) and can be
+/// cast to `&[u8]` for GPU upload using `.as_ptr() as *const u8`.
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone)]
 pub struct TrailVertex3D {
     pub position: [f32; 3],
     pub color: [f32; 4],
+}
+
+impl TrailVertex3D {
+    /// Return the vertex as a byte slice for GPU buffer upload.
+    pub fn as_bytes(&self) -> &[u8] {
+        // Safety: TrailVertex3D is repr(C) with all-bits-valid f32 fields.
+        // The resulting slice has lifetime tied to self.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::slice::from_raw_parts(
+                (self as *const Self) as *const u8,
+                std::mem::size_of::<Self>(),
+            )
+        }
+    }
 }
 
 // ── Ring buffer ───────────────────────────────────────────────────────────────

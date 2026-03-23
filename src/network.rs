@@ -20,7 +20,7 @@
 
 #![allow(dead_code)]
 
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::TAU;
 
 // ---------------------------------------------------------------------------
 // Network topology

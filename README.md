@@ -173,6 +173,183 @@ DAW (VST3 / CLAP plugin) or Desktop (standalone cpal output)
 
 ---
 
+## Generative Composition Engine (`src/composer.rs`)
+
+The composition engine (`ComposerEngine`) turns the running attractor into a structured musical piece in real time, without any pre-written score.
+
+### Musical forms
+
+| Form | Description |
+|------|-------------|
+| ABA | Statement (A), contrast (B), varied return (A'). Section boundaries follow basin changes. |
+| Theme & Variations | Theme derived from the initial attractor basin; each variation alters a different synthesis parameter. |
+| Rondo | Refrain (A) alternates with episodes driven by bifurcation events. |
+| Through-Composed | Linear succession of sections with no repeats; topology-driven. |
+| Stochastic | Section boundaries placed by a pseudo-random walk seeded from the attractor's own bit-mixing. |
+
+### Components
+
+| Component | Role |
+|-----------|------|
+| `MotifGenerator` | Slides a window over recent pitches; finds the most-repeated sub-sequence as the current motif. |
+| `HarmonicProgression` | Maps phase-space regions to chord progressions: Classical (I–IV–V–I), Jazz Turnaround (ii7–V7–Imaj7–VI7), Modal (scale-derived triads), Jazz Extended (9th/11th/13th tensions added proportional to chaos level). |
+| `RhythmicQuantizer` | Snaps the continuous ODE output to a rhythmic grid. Supports 4/4, 3/4, 5/4, 6/8, and 7/8 time signatures with configurable sub-division. |
+| `CompositionExporter` | Builds a 3-track MIDI SMF (melody, harmony, bass) and writes it to disk via the existing MIDI infrastructure. |
+
+### MIDI export example
+
+```rust
+use math_sonify::composer::{ComposerEngine, MusicalForm, ProgressionStyle, TimeSig};
+
+let mut engine = ComposerEngine::new(
+    MusicalForm::Aba,
+    ProgressionStyle::JazzTurnaround,
+    TimeSig::FOUR_FOUR,
+    120.0,   // BPM
+    120.0,   // control rate Hz
+    8,       // section length in bars
+);
+
+// Tick the engine each sim step:
+let frame = engine.tick(&state, melody_pitch, velocity, chaos_level, lyapunov);
+// frame.chord, frame.motif, frame.section_idx, frame.bar_position, …
+
+// Export when done:
+engine.export_midi("composition.mid", 120.0).ok();
+```
+
+---
+
+## Fractal Dimension Analyzer (`src/fractal.rs`)
+
+The fractal analyzer characterises the geometric and dynamical structure of the attractor in real time. All metrics are displayed in the **Math View** tab.
+
+### Algorithms
+
+| Algorithm | Struct | What it computes |
+|-----------|--------|-----------------|
+| Box-counting | `BoxCounting` | D₀ (Minkowski–Bouligand dimension). 2-D projection; slope of log N(ε) vs log(1/ε). Lorenz ≈ 2.05, Hénon ≈ 1.26. |
+| Correlation dimension | `CorrelationDimension` | D₂ (Grassberger–Procaccia). Counts point pairs within distance r; slope of log C(r) vs log r. |
+| Full Lyapunov spectrum | `LyapunovSpectrum` | All N exponents via QR/Gram–Schmidt on the tangent bundle. Kaplan–Yorke dimension D_KY = j + Σλᵢ/|λⱼ|. |
+
+### `AttractorCharacterization` struct
+
+```rust
+pub struct AttractorCharacterization {
+    pub fractal_dim: f64,                    // Box-counting D₀
+    pub correlation_dim: f64,                // Grassberger-Procaccia D₂
+    pub lyapunov_spectrum: Vec<f64>,         // Full spectrum λ₁ ≥ λ₂ ≥ ... ≥ λₙ
+    pub kaplan_yorke_dim: f64,               // D_KY from the spectrum
+    pub kolmogorov_entropy: f64,             // hKS = Σ positive λᵢ
+    pub phase_space_volume_contraction: f64, // Σ all λᵢ (< 0 for dissipative)
+    pub attractor_type: AttractorType,       // FixedPoint / LimitCycle / StrangeAttractor / Hyperchaos
+    pub sample_size: usize,
+    pub last_updated_ticks: u64,
+}
+```
+
+`AttractorType` is derived automatically from the spectrum sign pattern:
+
+| Type | Criterion |
+|------|-----------|
+| Fixed Point | All λᵢ < 0 |
+| Limit Cycle | Exactly one zero exponent, rest negative |
+| Quasi-Periodic (T²) | Two zero exponents |
+| Strange Attractor | Exactly one positive exponent |
+| Hyperchaos | Two or more positive exponents |
+
+### Usage
+
+```rust
+use math_sonify::fractal::FractalAnalyzer;
+
+let mut analyzer = FractalAnalyzer::new(3); // 3-D system
+
+// Called periodically in the sim thread:
+let ch = analyzer.analyze(&trajectory, &lorenz_deriv, dt, current_tick);
+println!("{}", analyzer.lyapunov_spectrum().summary());
+// λ = [+0.9053, -0.0001, -14.572]  D_KY=2.062  hKS=0.9053  div=-13.667
+```
+
+---
+
+## Network of Coupled Oscillators (`src/network.rs`)
+
+`OscillatorNetwork` places up to **16 coupled oscillators** on an arbitrary graph topology, with each oscillator mapped to a separate audio voice.
+
+### Network topologies
+
+| Topology | Description |
+|----------|-------------|
+| `Ring` | Each node connected to its two nearest neighbours (circular). |
+| `StarGraph` | Central hub connected to all leaves; leaves only connect to the hub. |
+| `SmallWorld(p)` | Watts–Strogatz: start from a ring and rewire each edge with probability p. |
+| `RandomErdos(p)` | Each pair connected independently with probability p. |
+| `FullyConnected` | All-to-all coupling; mean-field limit of the Kuramoto model. |
+
+### Oscillator models
+
+**Kuramoto network** — phase oscillators on an arbitrary graph:
+
+```
+dθᵢ/dt = ωᵢ + Σⱼ Kᵢⱼ sin(θⱼ − θᵢ)
+```
+
+Each oscillator's phase maps directly to an audio frequency. The order parameter r ∈ [0, 1] measures synchronisation.
+
+**Stuart–Landau network** — complex-amplitude oscillators (normal form of the Hopf bifurcation):
+
+```
+dAᵢ/dt = (μᵢ + iωᵢ − |Aᵢ|²)·Aᵢ + Σⱼ Kᵢⱼ·Aⱼ
+```
+
+With diffusive coupling and heterogeneous μ, the network exhibits:
+- **Amplitude death** (μ < 0 and coupling pushes all voices to zero).
+- **Oscillation revival** (coupling restores oscillations suppressed by individual μ < 0).
+
+### Audio voice mapping
+
+Each tick, `OscillatorNetwork::state()` returns a `NetworkState`:
+
+```rust
+pub struct NetworkState {
+    pub n: usize,
+    pub frequencies: Vec<f64>,   // per-voice audio frequency (Hz)
+    pub amplitudes: Vec<f64>,    // per-voice amplitude [0, 1]
+    pub phases: Vec<f64>,        // oscillator phase (radians)
+    pub order_parameter: f64,    // Kuramoto r or mean amplitude
+    pub amplitude_death: bool,   // true if network collapsed to zero
+    pub active_voices: usize,    // number of non-silent voices
+}
+```
+
+`NetworkState::sorted_voices()` returns `(frequency, amplitude)` pairs sorted by amplitude, ready for polyphonic voice assignment.
+
+### Example
+
+```rust
+use math_sonify::network::{OscillatorNetwork, NetworkTopology};
+
+// 8 Kuramoto oscillators in a small-world graph.
+let mut net = OscillatorNetwork::kuramoto(
+    8,
+    &NetworkTopology::SmallWorld { rewire_prob: 0.15 },
+    2.0,   // coupling K
+    0.4,   // natural frequency spread
+    220.0, // base audio frequency (Hz)
+    440.0, // frequency range (Hz)
+    42,    // seed
+);
+
+// Sim loop (120 Hz):
+net.step(1.0 / 120.0);
+let st = net.state();
+// Route st.frequencies[i] and st.amplitudes[i] to audio voice i.
+println!("r = {:.3}  voices = {}", st.order_parameter, st.active_voices);
+```
+
+---
+
 ## Musical scales (20)
 
 | Scale | Intervals (semitones) |
