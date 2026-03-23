@@ -50,6 +50,8 @@ mod ui;
 mod ui_timeline;
 mod ui_tips;
 mod ui_waveform;
+mod pitch_detection;
+mod convolution;
 
 use std::path::Path;
 use std::sync::Arc;
