@@ -46,6 +46,8 @@ pub mod sonification_pipeline;
 pub mod musical_analysis;
 pub mod microtonal;
 pub mod algorithmic_composer;
+pub mod scale_mapper_v2;
+pub mod live_input;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};
