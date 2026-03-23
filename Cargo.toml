@@ -35,6 +35,10 @@ crate-type = ["cdylib", "rlib"]
 # Audio I/O
 cpal = "0.15"
 
+# GPU / rendering (phase portrait 3D renderer)
+bytemuck = { version = "1", features = ["derive"] }
+wgpu = { version = "22", optional = true }
+
 # GUI
 eframe = { version = "0.27", features = ["default"] }
 egui = "0.27"
@@ -73,6 +77,8 @@ nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug", rev = "28b149
 [features]
 # Enable OSC collaborative sync (adds the `rosc` dependency).
 osc = ["rosc"]
+# Enable wgpu-accelerated 3D phase portrait renderer.
+portrait = ["wgpu"]
 
 [profile.release]
 opt-level = 3

@@ -11,6 +11,7 @@ use nih_plug::prelude::*;
 use std::sync::Arc;
 
 mod arrangement;
+pub mod audio_driven;
 pub mod config;
 pub mod error;
 pub mod patches;
