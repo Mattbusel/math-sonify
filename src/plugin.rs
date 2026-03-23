@@ -23,6 +23,8 @@ pub mod synth;
 pub mod systems;
 pub mod vanderpol;
 pub mod synthesis;
+pub mod midi;
+pub mod randomizer;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};
