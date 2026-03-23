@@ -44,6 +44,8 @@ pub mod sequencer;
 pub mod chord_progression;
 pub mod sonification_pipeline;
 pub mod musical_analysis;
+pub mod microtonal;
+pub mod algorithmic_composer;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};
