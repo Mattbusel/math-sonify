@@ -47,6 +47,8 @@ pub mod sonification_pipeline;
 pub mod musical_analysis;
 pub mod microtonal;
 pub mod algorithmic_composer;
+pub mod motif_composer;
+pub mod tuning_system;
 pub mod scale_mapper_v2;
 pub mod live_input;
 pub mod melody_generator;
