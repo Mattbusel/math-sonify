@@ -38,6 +38,7 @@ pub mod harmony_system;
 pub mod rhythm_quantizer;
 pub mod generative_counterpoint;
 pub mod spectral_morph;
+pub mod arpeggiator;
 pub mod stochastic_composer;
 pub mod binaural_beats;
 pub mod sequencer;
