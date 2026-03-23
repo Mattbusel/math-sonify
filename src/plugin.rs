@@ -59,6 +59,7 @@ pub mod chord_voicing;
 pub mod rhythm_engine;
 pub mod midi_sequencer;
 pub mod envelope_generator;
+pub mod granular_synth;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};

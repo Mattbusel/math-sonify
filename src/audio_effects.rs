@@ -287,6 +287,348 @@ impl EffectChain {
     }
 }
 
+// ── New effect building blocks (Round 27) ─────────────────────────────────────
+
+/// A simple circular delay buffer.
+pub struct DelayLine {
+    pub buffer: Vec<f64>,
+    pub write_pos: usize,
+    pub max_size: usize,
+}
+
+impl DelayLine {
+    pub fn new(max_delay_samples: usize) -> Self {
+        let max_size = max_delay_samples.max(1);
+        DelayLine {
+            buffer: vec![0.0; max_size],
+            write_pos: 0,
+            max_size,
+        }
+    }
+
+    /// Write `input` at the current write position and read back `delay_samples` ago.
+    pub fn push_and_read(&mut self, input: f64, delay_samples: usize) -> f64 {
+        let delay_samples = delay_samples.min(self.max_size - 1);
+        self.buffer[self.write_pos] = input;
+        let read_pos = (self.write_pos + self.max_size - delay_samples) % self.max_size;
+        let out = self.buffer[read_pos];
+        self.write_pos = (self.write_pos + 1) % self.max_size;
+        out
+    }
+
+    /// Read a sample `delay_samples` behind the current write head without advancing.
+    pub fn read_at(&self, delay_samples: usize) -> f64 {
+        let delay_samples = delay_samples.min(self.max_size - 1);
+        let read_pos = (self.write_pos + self.max_size - delay_samples - 1) % self.max_size;
+        self.buffer[read_pos]
+    }
+}
+
+/// Flanger effect (very short modulated delay with feedback).
+pub struct FlangerEffect {
+    pub delay_ms: f64,
+    pub depth_ms: f64,
+    pub rate_hz: f64,
+    pub feedback: f64,
+    pub mix: f64,
+    delay_line: DelayLine,
+    phase: f64,
+    last_out: f64,
+}
+
+impl FlangerEffect {
+    pub fn new(delay_ms: f64, depth_ms: f64, rate_hz: f64, feedback: f64, mix: f64) -> Self {
+        FlangerEffect {
+            delay_ms,
+            depth_ms,
+            rate_hz,
+            feedback,
+            mix,
+            delay_line: DelayLine::new(4096),
+            phase: 0.0,
+            last_out: 0.0,
+        }
+    }
+
+    pub fn process(&mut self, input: &[f64], sample_rate: f64) -> Vec<f64> {
+        let base_delay = (self.delay_ms * 0.001 * sample_rate) as usize;
+        let depth_samp = (self.depth_ms * 0.001 * sample_rate) as f64;
+        let lfo_inc = self.rate_hz / sample_rate;
+
+        input.iter().map(|&x| {
+            let lfo = (self.phase * 2.0 * std::f64::consts::PI).sin();
+            let delay = (base_delay as f64 + depth_samp * lfo) as usize;
+            let delayed = self.delay_line.push_and_read(x + self.last_out * self.feedback, delay.max(1));
+            self.last_out = delayed;
+            self.phase = (self.phase + lfo_inc).rem_euclid(1.0);
+            x * (1.0 - self.mix) + delayed * self.mix
+        }).collect()
+    }
+}
+
+/// Echo effect: single-tap delay with feedback.
+pub struct EchoEffect {
+    pub delay_ms: f64,
+    pub feedback: f64,
+    pub mix: f64,
+    delay_line: DelayLine,
+}
+
+impl EchoEffect {
+    pub fn new(delay_ms: f64, feedback: f64, mix: f64) -> Self {
+        EchoEffect {
+            delay_ms,
+            feedback,
+            mix,
+            delay_line: DelayLine::new(192000),
+        }
+    }
+
+    pub fn process(&mut self, input: &[f64], sample_rate: f64) -> Vec<f64> {
+        let delay_samples = (self.delay_ms * 0.001 * sample_rate) as usize;
+        let delay_samples = delay_samples.max(1);
+        let fb = self.feedback.clamp(0.0, 0.99);
+
+        input.iter().map(|&x| {
+            let delayed = self.delay_line.push_and_read(x, delay_samples);
+            // Feed echo back into delay line
+            let write_idx = (self.delay_line.write_pos + self.delay_line.max_size - 1) % self.delay_line.max_size;
+            self.delay_line.buffer[write_idx] += delayed * fb;
+            x * (1.0 - self.mix) + delayed * self.mix
+        }).collect()
+    }
+}
+
+/// New-API chorus effect with multi-voice support and `&mut self`.
+pub struct MultiChorusEffect {
+    pub delay_ms: f64,
+    pub depth_ms: f64,
+    pub rate_hz: f64,
+    pub mix: f64,
+    pub num_voices: u32,
+}
+
+impl MultiChorusEffect {
+    pub fn new(delay_ms: f64, depth_ms: f64, rate_hz: f64, mix: f64, num_voices: u32) -> Self {
+        MultiChorusEffect { delay_ms, depth_ms, rate_hz, mix, num_voices }
+    }
+
+    pub fn lfo(time_s: f64, rate_hz: f64, phase: f64) -> f64 {
+        (2.0 * std::f64::consts::PI * (rate_hz * time_s + phase)).sin()
+    }
+
+    pub fn process(&mut self, input: &[f64], sample_rate: f64, time_offset: f64) -> Vec<f64> {
+        let base_delay = (self.delay_ms * 0.001 * sample_rate) as usize;
+        let depth_samp = self.depth_ms * 0.001 * sample_rate;
+        let n_voices = self.num_voices.max(1);
+        let buf_len = (base_delay + depth_samp as usize + 4).max(8);
+        let mut voices: Vec<Vec<f64>> = Vec::new();
+
+        for v in 0..n_voices {
+            let phase = v as f64 / n_voices as f64;
+            let mut buf = vec![0.0f64; buf_len];
+            let mut write = 0usize;
+            let voice_out: Vec<f64> = input.iter().enumerate().map(|(i, &x)| {
+                buf[write % buf_len] = x;
+                let t = time_offset + i as f64 / sample_rate;
+                let lfo = Self::lfo(t, self.rate_hz, phase);
+                let delay = base_delay as f64 + depth_samp * lfo;
+                let di = delay.floor() as usize;
+                let frac = delay - delay.floor();
+                let i0 = (write + buf_len - di) % buf_len;
+                let i1 = (write + buf_len - di - 1) % buf_len;
+                let out = buf[i0] * (1.0 - frac) + buf[i1] * frac;
+                write += 1;
+                out
+            }).collect();
+            voices.push(voice_out);
+        }
+
+        // Mix voices
+        input.iter().enumerate().map(|(i, &x)| {
+            let wet: f64 = voices.iter().map(|v| v[i]).sum::<f64>() / n_voices as f64;
+            x * (1.0 - self.mix) + wet * self.mix
+        }).collect()
+    }
+}
+
+/// New Schroeder reverb with explicit `&mut self` process method.
+pub struct NewReverbEffect {
+    pub room_size: f64,
+    pub damping: f64,
+    pub wet: f64,
+    pub dry: f64,
+    comb_bufs: [Vec<f64>; 4],
+    comb_pos: [usize; 4],
+    comb_last: [f64; 4],
+    ap_bufs: [Vec<f64>; 2],
+    ap_pos: [usize; 2],
+}
+
+impl NewReverbEffect {
+    /// Comb filter delay lengths at 44100 Hz (scaled by sample_rate / 44100 at runtime).
+    const COMB_DELAYS_44K: [usize; 4] = [1116, 1188, 1277, 1356];
+    const AP_DELAYS_44K: [usize; 2] = [225, 556];
+
+    pub fn new(room_size: f64, damping: f64, wet: f64, dry: f64) -> Self {
+        let make_buf = |d: usize| vec![0.0f64; d.max(1)];
+        NewReverbEffect {
+            room_size,
+            damping,
+            wet,
+            dry,
+            comb_bufs: [
+                make_buf(Self::COMB_DELAYS_44K[0]),
+                make_buf(Self::COMB_DELAYS_44K[1]),
+                make_buf(Self::COMB_DELAYS_44K[2]),
+                make_buf(Self::COMB_DELAYS_44K[3]),
+            ],
+            comb_pos: [0; 4],
+            comb_last: [0.0; 4],
+            ap_bufs: [
+                make_buf(Self::AP_DELAYS_44K[0]),
+                make_buf(Self::AP_DELAYS_44K[1]),
+            ],
+            ap_pos: [0; 2],
+        }
+    }
+
+    pub fn comb_filter(
+        input: f64,
+        buffer: &mut Vec<f64>,
+        pos: &mut usize,
+        delay: usize,
+        feedback: f64,
+        damping: f64,
+    ) -> f64 {
+        let len = buffer.len().max(1);
+        let idx = *pos % len;
+        let out = buffer[idx];
+        let filtered = out * (1.0 - damping);
+        buffer[idx] = input + filtered * feedback;
+        *pos = (idx + 1) % len;
+        let _ = delay;
+        out
+    }
+
+    pub fn all_pass(
+        input: f64,
+        buffer: &mut Vec<f64>,
+        pos: &mut usize,
+        _delay: usize,
+    ) -> f64 {
+        let len = buffer.len().max(1);
+        let idx = *pos % len;
+        let delayed = buffer[idx];
+        let out = -input + delayed;
+        buffer[idx] = input + delayed * 0.5;
+        *pos = (idx + 1) % len;
+        out
+    }
+
+    pub fn process(&mut self, input: &[f64], _sample_rate: f64) -> Vec<f64> {
+        let scale = self.room_size.clamp(0.1, 1.0);
+        let fb = 0.84 * scale;
+        let damp = self.damping.clamp(0.0, 1.0);
+
+        input.iter().map(|&x| {
+            // 4 parallel comb filters
+            let mut comb_sum = 0.0;
+            for k in 0..4 {
+                let delay = self.comb_bufs[k].len();
+                let out = self.comb_bufs[k][self.comb_pos[k] % delay];
+                self.comb_last[k] = out * (1.0 - damp);
+                self.comb_bufs[k][self.comb_pos[k] % delay] = x + self.comb_last[k] * fb;
+                self.comb_pos[k] = (self.comb_pos[k] + 1) % delay;
+                comb_sum += out;
+            }
+            comb_sum /= 4.0;
+
+            // 2 series all-pass filters
+            let mut ap = comb_sum;
+            for k in 0..2 {
+                let delay = self.ap_bufs[k].len();
+                let delayed = self.ap_bufs[k][self.ap_pos[k] % delay];
+                let out = -ap + delayed;
+                self.ap_bufs[k][self.ap_pos[k] % delay] = ap + delayed * 0.5;
+                self.ap_pos[k] = (self.ap_pos[k] + 1) % delay;
+                ap = out;
+            }
+
+            x * self.dry + ap * self.wet
+        }).collect()
+    }
+}
+
+/// A trait for mutable effects (Round 27 variant).
+pub trait MutableEffect: Send {
+    fn process(&mut self, input: &[f64], sample_rate: f64) -> Vec<f64>;
+    fn name(&self) -> &str;
+}
+
+impl MutableEffect for MultiChorusEffect {
+    fn process(&mut self, input: &[f64], sample_rate: f64) -> Vec<f64> {
+        self.process(input, sample_rate, 0.0)
+    }
+    fn name(&self) -> &str { "multi_chorus" }
+}
+
+impl MutableEffect for EchoEffect {
+    fn process(&mut self, input: &[f64], sample_rate: f64) -> Vec<f64> {
+        self.process(input, sample_rate)
+    }
+    fn name(&self) -> &str { "echo" }
+}
+
+impl MutableEffect for NewReverbEffect {
+    fn process(&mut self, input: &[f64], sample_rate: f64) -> Vec<f64> {
+        self.process(input, sample_rate)
+    }
+    fn name(&self) -> &str { "reverb" }
+}
+
+impl MutableEffect for FlangerEffect {
+    fn process(&mut self, input: &[f64], sample_rate: f64) -> Vec<f64> {
+        self.process(input, sample_rate)
+    }
+    fn name(&self) -> &str { "flanger" }
+}
+
+/// Mutable effects chain (Round 27).
+pub struct EffectsChain {
+    effects: Vec<Box<dyn MutableEffect>>,
+}
+
+impl EffectsChain {
+    pub fn new() -> Self {
+        EffectsChain { effects: Vec::new() }
+    }
+
+    pub fn add_chorus(&mut self, params: MultiChorusEffect) {
+        self.effects.push(Box::new(params));
+    }
+
+    pub fn add_echo(&mut self, params: EchoEffect) {
+        self.effects.push(Box::new(params));
+    }
+
+    pub fn add_reverb(&mut self, params: NewReverbEffect) {
+        self.effects.push(Box::new(params));
+    }
+
+    pub fn process_chain(&mut self, input: &[f64], sample_rate: f64) -> Vec<f64> {
+        let mut signal = input.to_vec();
+        for effect in self.effects.iter_mut() {
+            signal = effect.process(&signal, sample_rate);
+        }
+        signal
+    }
+}
+
+impl Default for EffectsChain {
+    fn default() -> Self { Self::new() }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
