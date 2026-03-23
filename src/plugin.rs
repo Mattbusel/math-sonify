@@ -32,6 +32,8 @@ pub mod blend;
 pub mod scale_mapper;
 pub mod euclidean;
 pub mod tuning;
+pub mod markov_music;
+pub mod signal_processing;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};
