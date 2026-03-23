@@ -242,26 +242,35 @@ fn write_bifurcation_svg(
 
     let mut file = std::fs::File::create(path)?;
 
-    writeln!(file, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">"#)?;
-    writeln!(file, r#"<rect width="{width}" height="{height}" fill="#0d1117"/>"#)?;
+    // Note: hex color codes use # which doesn't conflict with format braces.
+    // Named captures like {width} ARE expanded — use positional {} instead.
     writeln!(
         file,
-        r#"<text x="{}" y="20" fill="#8b949e" font-size="13" font-family="monospace">{} bifurcation — z vs {param_name}</text>"#,
-        margin_l,
-        "math-sonify",
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}">"#,
+        width, height
+    )?;
+    writeln!(
+        file,
+        r#"<rect width="{}" height="{}" fill="#0d1117"/>"#,
+        width, height
+    )?;
+    writeln!(
+        file,
+        "<text x=\"{}\" y=\"20\" fill=\"#8b949e\" font-size=\"13\" font-family=\"monospace\">math-sonify bifurcation \u{2014} z vs {}</text>",
+        margin_l, param_name
     )?;
 
     // Axis labels.
     writeln!(
         file,
-        r#"<text x="{}" y="{}" fill="#8b949e" font-size="11" font-family="monospace">{:.2}</text>"#,
+        "<text x=\"{}\" y=\"{}\" fill=\"#8b949e\" font-size=\"11\" font-family=\"monospace\">{:.2}</text>",
         margin_l - 5.0,
         margin_t + plot_h,
         z_min
     )?;
     writeln!(
         file,
-        r#"<text x="{}" y="{}" fill="#8b949e" font-size="11" font-family="monospace">{:.2}</text>"#,
+        "<text x=\"{}\" y=\"{}\" fill=\"#8b949e\" font-size=\"11\" font-family=\"monospace\">{:.2}</text>",
         margin_l - 5.0,
         margin_t,
         z_max
@@ -276,8 +285,9 @@ fn write_bifurcation_svg(
             let py = margin_t + plot_h - (z - z_min) / (z_max - z_min) * plot_h;
             writeln!(
                 file,
-                r#"<circle cx="{:.1}" cy="{:.1}" r="0.8" fill="#58a6ff" opacity="0.5"/>"#,
-                px, py.clamp(margin_t, margin_t + plot_h)
+                "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"0.8\" fill=\"#58a6ff\" opacity=\"0.5\"/>",
+                px,
+                py.clamp(margin_t, margin_t + plot_h)
             )?;
         }
     }
@@ -285,7 +295,7 @@ fn write_bifurcation_svg(
     // Axis lines.
     writeln!(
         file,
-        r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="#30363d" stroke-width="1"/>"#,
+        "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#30363d\" stroke-width=\"1\"/>",
         margin_l,
         margin_t + plot_h,
         margin_l + plot_w,
@@ -293,8 +303,11 @@ fn write_bifurcation_svg(
     )?;
     writeln!(
         file,
-        r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="#30363d" stroke-width="1"/>"#,
-        margin_l, margin_t, margin_l, margin_t + plot_h
+        "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#30363d\" stroke-width=\"1\"/>",
+        margin_l,
+        margin_t,
+        margin_l,
+        margin_t + plot_h
     )?;
 
     writeln!(file, "</svg>")?;
