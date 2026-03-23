@@ -50,6 +50,8 @@ pub mod scale_mapper_v2;
 pub mod live_input;
 pub mod melody_generator;
 pub mod dynamic_processor;
+pub mod pitch_detector;
+pub mod audio_analyzer;
 
 use config::SonificationConfig;
 use sonification::{DirectMapping, Sonification};
