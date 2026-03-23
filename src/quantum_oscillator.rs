@@ -282,8 +282,8 @@ impl QuantumOscillator {
                 let t = (x + x_max) / (2.0 * x_max); // normalise to [0,1]
                 let frequency = base + t * range;
                 // Amplitude proportional to |Ψ(x)|² at this peak
-                let grid_idx = ((x + x_max) / (2.0 * x_max) * self.config.grid_points as f64)
-                    as usize
+                let grid_idx = (((x + x_max) / (2.0 * x_max) * self.config.grid_points as f64)
+                    as usize)
                     .min(self.config.grid_points - 1);
                 let amplitude = (self.prob_density[grid_idx] / max_pd).min(1.0);
                 // Preserve phase from matching partial if exists

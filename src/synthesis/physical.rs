@@ -172,12 +172,10 @@ impl TubeResonator {
         wg.brightness = 0.2; // bright tube
         wg.dispersion = 0.0; // ideal tube (no stiffness)
 
-        // Three body resonance peaks typical of a clarinet/oboe body.
-        let resonators = ResonatorBank::new(sample_rate, &[
-            (freq_min * 1.5, 20.0, 0.4),   // first mode
-            (freq_min * 2.5, 15.0, 0.25),  // second mode
-            (freq_min * 4.0, 10.0, 0.15),  // third mode
-        ]);
+        // Initialise resonator bank at base frequency.
+        let mut resonators = ResonatorBank::new(sample_rate);
+        resonators.tune_to_scale(freq_min, 2.0, &[0.0, 7.0, 12.0]);
+        resonators.q = 20.0;
 
         Self {
             wg,
@@ -236,7 +234,8 @@ impl PhysicalSynth for TubeResonator {
         }
 
         let wg_out = self.wg.next_sample();
-        let resonated = self.resonators.process(wg_out);
+        let (res_l, res_r) = self.resonators.process(wg_out);
+        let resonated = (res_l + res_r) * 0.5;
 
         (wg_out * 0.7 + resonated * 0.3) * self.volume
     }

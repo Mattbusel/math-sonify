@@ -33,7 +33,7 @@ use std::sync::Arc;
 
 /// How the fitness of a parameter set is judged after simulating a short
 /// trajectory.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub enum FitnessMetric {
     /// Reward overtone density: high fitness when many harmonically related
     /// frequency components are present in the resulting audio output.
@@ -50,6 +50,28 @@ pub enum FitnessMetric {
     /// (each snapshot holds up to 16 state variables, zero-padded) and
     /// returns a fitness score in [0, 1].
     UserDefined(Arc<dyn Fn(&[[f64; 16]]) -> f64 + Send + Sync>),
+}
+
+impl fmt::Debug for FitnessMetric {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FitnessMetric::HarmonicRichness => write!(f, "HarmonicRichness"),
+            FitnessMetric::RhythmicVariance => write!(f, "RhythmicVariance"),
+            FitnessMetric::TimbralDiversity => write!(f, "TimbralDiversity"),
+            FitnessMetric::UserDefined(_) => write!(f, "UserDefined(<fn>)"),
+        }
+    }
+}
+
+impl PartialEq for FitnessMetric {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (FitnessMetric::HarmonicRichness, FitnessMetric::HarmonicRichness)
+                | (FitnessMetric::RhythmicVariance, FitnessMetric::RhythmicVariance)
+                | (FitnessMetric::TimbralDiversity, FitnessMetric::TimbralDiversity)
+        )
+    }
 }
 
 impl fmt::Display for FitnessMetric {
@@ -356,12 +378,13 @@ impl ParameterEvolution {
     // ── Initialisation ────────────────────────────────────────────────────
 
     fn initialise_population(&mut self) {
-        self.population = (0..self.config.population_size)
+        let n = self.config.population_size;
+        let bounds: Vec<_> = self.bounds.iter().map(|b| (b.min, b.range())).collect();
+        self.population = (0..n)
             .map(|_| {
-                let params = self
-                    .bounds
+                let params = bounds
                     .iter()
-                    .map(|b| b.min + self.rand_f64() * b.range())
+                    .map(|(min, range)| min + self.rand_f64() * range)
                     .collect();
                 Individual::new(params)
             })
@@ -379,12 +402,17 @@ impl ParameterEvolution {
     where
         F: Fn(&mut [f64; 16], &[f64]) + Sync,
     {
-        for individual in &mut self.population {
-            if individual.fitness.is_finite() {
-                continue;
-            }
-            individual.fitness =
-                self.evaluate_individual(&individual.params.clone(), ode_step);
+        // Collect params for individuals that need evaluation to avoid borrow conflict.
+        let to_evaluate: Vec<(usize, Vec<f64>)> = self
+            .population
+            .iter()
+            .enumerate()
+            .filter(|(_, ind)| !ind.fitness.is_finite())
+            .map(|(i, ind)| (i, ind.params.clone()))
+            .collect();
+        for (i, params) in to_evaluate {
+            let fitness = self.evaluate_individual(&params, ode_step);
+            self.population[i].fitness = fitness;
         }
     }
 
@@ -459,11 +487,13 @@ impl ParameterEvolution {
     // ── Mutation ──────────────────────────────────────────────────────────
 
     fn mutate(&mut self, params: &mut Vec<f64>) {
-        for (p, b) in params.iter_mut().zip(self.bounds.iter()) {
-            if self.rand_f64() < self.config.mutation_rate {
-                let sigma = b.range() * 0.05;
+        let bounds: Vec<_> = self.bounds.iter().map(|b| (b.min, b.max, b.range())).collect();
+        let mutation_rate = self.config.mutation_rate;
+        for (p, (min, max, range)) in params.iter_mut().zip(bounds.iter()) {
+            if self.rand_f64() < mutation_rate {
+                let sigma = range * 0.05;
                 *p += self.rand_normal() * sigma;
-                *p = b.clamp(*p);
+                *p = p.clamp(*min, *max);
             }
         }
     }

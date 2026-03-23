@@ -637,12 +637,13 @@ impl OscillatorNetwork {
         let amplitudes = net.normalised_amplitudes();
         let phases = net.phases();
         let active_voices = amplitudes.iter().filter(|&&a| a > 0.01).count();
+        let order_parameter = amplitudes.iter().sum::<f64>() / n as f64;
         NetworkState {
             n,
             frequencies,
             amplitudes,
             phases,
-            order_parameter: amplitudes.iter().sum::<f64>() / n as f64,
+            order_parameter,
             amplitude_death: net.amplitude_death,
             model: OscillatorModel::StuartLandau,
             active_voices,
