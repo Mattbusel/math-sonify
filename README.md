@@ -231,14 +231,91 @@ Copy the output to your DAW plugin folder:
 
 ---
 
-## Quickstart
+## Getting started
 
 Audio starts immediately on launch using the system default output device. The Lorenz attractor runs in Direct mode with a pentatonic scale.
 
-### Headless export (no GUI)
+The GUI has four panels:
+
+- **Attractor** — system selector, parameter sliders, Lyapunov display, and phase-portrait visualisation.
+- **Sound** — sonification mode picker, scale selector, master volume, reverb/delay/EQ controls.
+- **Timeline** — arrangement editor with named scenes and morph durations.
+- **Evolution** — genetic algorithm engine; select a fitness metric, configure the population, press Run, and watch parameters evolve toward musically richer output.
+
+### Headless WAV export
 
 ```bash
 cargo run --release -- --headless --duration 60 --output clip.wav
+```
+
+### MIDI export
+
+The MIDI recorder runs alongside normal audio output.  Configure it in `config.toml`:
+
+```toml
+[midi_export]
+# Duration to capture in seconds (1–600)
+duration_secs = 30
+# BPM for the output file
+tempo_bpm = 120
+# Musical scale applied to quantize pitches
+scale = "pentatonic"
+# Root note (MIDI number; 57 = A3 = 440 Hz root)
+scale_root = 57
+# Output path (relative to CWD)
+output_path = "export.mid"
+```
+
+Or export from the GUI: **File → Export MIDI…** opens a dialog where you set the duration and press Export.  The file is written to `clips/` by default.
+
+### Parameter evolution example
+
+Evolving Lorenz parameters to maximise harmonic richness:
+
+```bash
+# In the GUI: Evolution panel → Metric: Harmonic Richness
+#             Population: 40  Generations: 50
+#             Click "Run" — the sparkline updates every generation.
+#             When finished, click "Save as Preset" to name and store the result.
+```
+
+From code:
+
+```rust
+use math_sonify_plugin::evolution::{
+    EvolutionConfig, FitnessMetric, ParameterEvolution, ParamBounds,
+};
+use std::sync::Arc;
+use parking_lot::Mutex;
+
+let bounds = vec![
+    ParamBounds::new(5.0, 15.0),   // sigma
+    ParamBounds::new(20.0, 35.0),  // rho
+    ParamBounds::new(1.0, 4.0),    // beta
+];
+let state = Arc::new(Mutex::new(Default::default()));
+let mut evo = ParameterEvolution::new(
+    EvolutionConfig { population_size: 40, generations: 50, ..Default::default() },
+    FitnessMetric::HarmonicRichness,
+    bounds,
+    Arc::clone(&state),
+);
+
+// ode_step advances state by eval_dt using RK4.
+let saved = evo.run("My Evolved Lorenz", |state, params| {
+    let dt = 0.005;
+    let dx = params[0] * (state[1] - state[0]);
+    let dy = state[0] * (params[1] - state[2]) - state[1];
+    let dz = state[0] * state[1] - params[2] * state[2];
+    state[0] += dx * dt;
+    state[1] += dy * dt;
+    state[2] += dz * dt;
+});
+
+println!("Best fitness: {:.4}", saved.fitness);
+println!("Best params: {:?}", saved.params);
+// Write to presets file:
+std::fs::write("evolved.toml", saved.to_toml_snippet()).unwrap();
 ```
 
 ---
@@ -366,6 +443,92 @@ Performance mode (`F`) switches to fullscreen phase portrait only.
 | `Escape` | Exit fullscreen |
 
 ---
+
+## Technical architecture
+
+### Threading model
+
+```
+Main thread (GUI, 60 Hz)
+  └─ egui / eframe render loop
+  └─ reads SharedState via parking_lot::Mutex
+
+Simulation thread (120 Hz)
+  └─ ODE RK4 integration
+  └─ Evolution engine (ParameterEvolution) — when running
+  └─ Sonification mapping → AudioParams
+  └─ sends AudioParams via crossbeam bounded channel (cap 16)
+
+Audio thread (cpal callback, 44100 / 48000 Hz)
+  └─ try_recv AudioParams (renders silence on miss — never blocks)
+  └─ DSP chain: Oscillator → ADSR → Waveshaper → Bitcrusher
+  └─ Master bus: EQ → BiquadFilter → Delay → Chorus → Reverb → Limiter
+  └─ MIDI recorder (MidiRecorder) — records frames when enabled
+```
+
+### Parameter evolution engine
+
+`ParameterEvolution` runs a genetic algorithm on a population of ODE parameter
+vectors.  Each individual is evaluated by running the ODE for `eval_steps`
+frames and computing one of four fitness metrics:
+
+| Metric | Signal | Implementation |
+|--------|--------|----------------|
+| Harmonic Richness | Autocorrelation peak ratio | Measures periodic content strength |
+| Rhythmic Variance | Coefficient of variation of inter-onset intervals | Rewards complex but not chaotic rhythm |
+| Timbral Diversity | Std-dev of spectral centroid over time | Rewards evolving timbre |
+| User Defined | Arbitrary closure `&[[f64; 16]] → f64` | Full user control |
+
+Selection is tournament-based (default k=3).  Crossover is uniform (per-gene coin
+flip).  Mutation applies Gaussian perturbations (σ = 5% of range) at each locus
+with probability `mutation_rate`.  Elitism preserves the best individual each
+generation.  The result is a `SavedEvolution` with parameters and fitness score,
+serializable as a TOML preset snippet.
+
+### MIDI export pipeline
+
+```
+AudioParams (120 Hz) → MidiRecorder.push(pitch, velocity)
+                              |
+                     MidiFrame ring buffer
+                              |
+                     export_midi() → midly SMF type-0 .mid file
+```
+
+`coords_to_midi` maps the normalised attractor x-coordinate to the nearest
+in-scale MIDI note over the configured octave range. Velocity is derived from
+the y-magnitude. Consecutive frames with the same pitch are merged into a
+single held note. The `midly` crate handles SMF serialization.
+
+### DSP pipeline (per audio frame)
+
+```
+ODE state → Sonification mapper (120 Hz, sim thread)
+                 ↓  AudioParams via bounded channel
+            Audio callback (sample rate Hz)
+                 ↓
+         Oscillator (PolyBLEP anti-aliased, up to 4 voices)
+                 ↓
+         ADSR envelope (per voice)
+                 ↓
+         Waveshaper (soft-clip tanh, configurable drive)
+                 ↓
+         Bitcrusher (rate/bit reduction)
+                 ↓
+         3-band EQ (shelving + peaking)
+                 ↓
+         BiquadFilter (LP/HP/BP, configurable cutoff and Q)
+                 ↓
+         Stereo delay line (ping-pong)
+                 ↓
+         Chorus (LFO-modulated delay lines)
+                 ↓
+         FDN Reverb (8-channel feedback delay network, modulated)
+                 ↓
+         Lookahead limiter (4 ms lookahead, brickwall -0.3 dBFS)
+                 ↓
+         cpal output (32-bit float stereo)
+```
 
 ## Building and testing
 

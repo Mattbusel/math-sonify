@@ -322,13 +322,13 @@ struct ExtraLayer {
 /// | **PAIR_BONDING** | Persistent preset affinity | Preferred preset gets slightly enhanced after repeated use |
 /// | **NESTING** | Session length | Session-persistent config tweaks accumulate over many sessions |
 /// | **COOLDOWN** | Shutdown signal | Audio fades to silence gracefully before process exits |
+/// Audio callback safety flag param — checked before applying hot-reload to avoid
+/// racing with the audio callback during VST3/CLAP hot-reload.
 fn sim_thread(
     shared: SharedState,
     viz: Arc<Mutex<Vec<(f32, f32, f32, f32, bool)>>>,
     tx: crossbeam_channel::Sender<[Option<AudioParams>; 3]>,
     rx_notify: std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
-    /// Audio callback safety flag — checked before applying hot-reload to avoid
-    /// racing with the audio callback during VST3/CLAP hot-reload.
     callback_active: AudioCallbackActive,
 ) {
     let initial_config = shared.lock().config.clone();
@@ -789,11 +789,27 @@ fn sim_thread(
 
         // ── Config hot-reload ─────────────────────────────────────────────────
         // Drain all pending file-change events; on any event reload config.toml.
+        // Feature 6 (audio callback safety): delay reload until the audio callback
+        // is not active to avoid racing with the DSP thread during VST3/CLAP hot-reload.
         let mut got_config_event = false;
         while let Ok(_event) = rx_notify.try_recv() {
             got_config_event = true;
         }
         if got_config_event {
+            // Spin-wait up to ~5ms for the audio callback to finish its current buffer.
+            // The callback is extremely short (< 1ms at 512 samples / 44100 Hz),
+            // so this loop will almost always exit on the first or second iteration.
+            let mut wait_iters = 0u32;
+            while callback_active.load(std::sync::atomic::Ordering::SeqCst) && wait_iters < 50 {
+                std::thread::sleep(std::time::Duration::from_micros(100));
+                wait_iters += 1;
+            }
+            if wait_iters > 0 {
+                tracing::debug!(
+                    wait_iters,
+                    "hot-reload waited for audio callback to finish"
+                );
+            }
             let new_cfg = crate::config::load_config(std::path::Path::new("config.toml"));
             let mut st = shared.lock();
             st.config = new_cfg;
