@@ -4,25 +4,31 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
-math-sonify is a real-time generative audio engine that runs mathematical dynamical systems — differential equations, maps, and coupled oscillators — and routes every variable of their evolving state directly into audio synthesis parameters. The Lorenz attractor is actually integrating at 120 Hz; the Kuramoto coupling constant is live; the Three-Body gravitational problem advances at each control frame. The result is not a preset synthesiser with math-themed names: the mathematics _is_ the music, and every parameter change propagates to sound within 8 ms.
+math-sonify is a real-time generative audio engine that runs mathematical dynamical systems (differential equations, maps, and coupled oscillators) and routes every variable of their evolving state directly into audio synthesis parameters. The Lorenz attractor is actually integrating at 120 Hz; the Kuramoto coupling constant is live; the Three-Body gravitational problem advances at each control frame. The result is not a preset synthesiser with math-themed names: the mathematics _is_ the music, and every parameter change propagates to sound within 8 ms.
+
+It is a desktop app (egui GUI, cpal audio), a VST3/CLAP plugin built from the same code, and a headless WAV renderer. Useful if you make ambient or generative music, teach dynamical systems and want students to hear chaos onset, or just want a synth whose knobs are the parameters of the Lorenz equations.
+
+| Lorenz phase portrait | Kuramoto math view | Waveform and spectrum |
+| --- | --- | --- |
+| ![Lorenz attractor phase portrait](screenshots/lorenz-phase-portrait.png) | ![Kuramoto oscillators in the math view](screenshots/kuramoto-math-view.png) | ![Waveform and FFT spectrum](screenshots/waveform-spectrum.png) |
 
 ---
 
 ## Feature highlights
 
-1. **53 dynamical systems** — Lorenz, Rossler, Double Pendulum, Kuramoto, Three-Body, Hyperchaos (Chen-Li), WINDMI, Finance, all Sprott cases, Tinkerbell map, and more (full list below).
-2. **9 sonification modes** — Direct, Orbital, Granular, Spectral, FM, AM, Vocal, Waveguide, Resonator.
-3. **20 musical scales** — Pentatonic through Microtonal, EDO-19/24/31, Harmonic Series, Just Intonation.
-4. **MIDI export** — trajectory-to-MIDI conversion; outputs Standard MIDI Files (SMF) importable into any DAW.
-5. **Preset gallery** — 16+ named presets with mood tags, complexity ratings, favorites, and a discovery mode that surfaces less-played entries.
-6. **Collaborative session mode** — real-time multi-user parameter control via a WebSocket server with per-participant colour highlights, conflict resolution, and full session replay log.
-7. **Audio-driven ODE morphing** — reverse the sonification pipeline: incoming microphone audio extracts features (RMS, spectral centroid, flux, 8-band energy) and maps them to ODE parameters in real time. Can run simultaneously with the forward synthesis path (dual mode).
-8. **Lyapunov exponent tracker** — real-time estimation of the maximal Lyapunov exponent; displayed in the MATH VIEW tab.
-9. **FFT spectral overlay** — live FFT spectrum superimposed on the phase portrait and the WAVEFORM tab.
-10. **Scene arranger** — 8-scene timeline with smooth parameter morphs; AUTO generator builds full arrangements from a mood pool.
-11. **VST3 / CLAP plugin** — load inside Ableton, FL Studio, Logic Pro, Reaper, and any other NIH-plug-compatible DAW.
-12. **Headless render** — `--headless --duration 60 --output clip.wav` with no display required.
-13. **Live config reload** — edit `config.toml` while the engine runs; changes take effect without restart.
+1. **53 dynamical systems**: Lorenz, Rossler, Double Pendulum, Kuramoto, Three-Body, Hyperchaos (Chen-Li), WINDMI, Finance, all Sprott cases, Tinkerbell map, and more (full list below).
+2. **9 sonification modes**: Direct, Orbital, Granular, Spectral, FM, AM, Vocal, Waveguide, Resonator.
+3. **20 musical scales**: Pentatonic through Microtonal, EDO-19/24/31, Harmonic Series, Just Intonation.
+4. **MIDI export**: trajectory-to-MIDI conversion; outputs Standard MIDI Files (SMF) importable into any DAW.
+5. **Preset gallery**: 16+ named presets with mood tags, complexity ratings, favorites, and a discovery mode that surfaces less-played entries.
+6. **Collaborative session mode**: real-time multi-user parameter control via a WebSocket server with per-participant colour highlights, conflict resolution, and full session replay log.
+7. **Audio-driven ODE morphing**: reverse the sonification pipeline: incoming microphone audio extracts features (RMS, spectral centroid, flux, 8-band energy) and maps them to ODE parameters in real time. Can run simultaneously with the forward synthesis path (dual mode).
+8. **Lyapunov exponent tracker**: real-time estimation of the maximal Lyapunov exponent; displayed in the MATH VIEW tab.
+9. **FFT spectral overlay**: live FFT spectrum superimposed on the phase portrait and the WAVEFORM tab.
+10. **Scene arranger**: 8-scene timeline with smooth parameter morphs; AUTO generator builds full arrangements from a mood pool.
+11. **VST3 / CLAP plugin**: load inside Ableton, FL Studio, Logic Pro, Reaper, and any other NIH-plug-compatible DAW.
+12. **Headless render**: `--headless --duration 60 --output clip.wav` with no display required.
+13. **Live config reload**: edit `config.toml` while the engine runs; changes take effect without restart.
 
 ---
 
@@ -289,7 +295,7 @@ println!("{}", analyzer.lyapunov_spectrum().summary());
 
 ### Oscillator models
 
-**Kuramoto network** — phase oscillators on an arbitrary graph:
+**Kuramoto network**: phase oscillators on an arbitrary graph:
 
 ```
 dθᵢ/dt = ωᵢ + Σⱼ Kᵢⱼ sin(θⱼ − θᵢ)
@@ -297,7 +303,7 @@ dθᵢ/dt = ωᵢ + Σⱼ Kᵢⱼ sin(θⱼ − θᵢ)
 
 Each oscillator's phase maps directly to an audio frequency. The order parameter r ∈ [0, 1] measures synchronisation.
 
-**Stuart–Landau network** — complex-amplitude oscillators (normal form of the Hopf bifurcation):
+**Stuart–Landau network**: complex-amplitude oscillators (normal form of the Hopf bifurcation):
 
 ```
 dAᵢ/dt = (μᵢ + iωᵢ − |Aᵢ|²)·Aᵢ + Σⱼ Kᵢⱼ·Aⱼ
@@ -839,7 +845,7 @@ OdePatch → simulation thread (applies sigma/rho/beta overrides)
 |------|-------------|
 | `ForwardOnly` | Classic: ODE state drives audio synthesis (default) |
 | `ReverseOnly` | Microphone input drives ODE parameters only |
-| `Both` | Both paths active simultaneously — environment modulates the attractor which modulates the sound which feeds back into the environment |
+| `Both` | Both paths active simultaneously: environment modulates the attractor which modulates the sound which feeds back into the environment |
 
 ### Usage
 
@@ -881,10 +887,10 @@ for patch in patch_rx.try_iter() {
 
 A **dynamical system** is a set of differential equations `dx/dt = f(x)` or a map `x_{n+1} = f(x_n)`. The long-term behaviour of trajectories in phase space determines the system's character:
 
-- **Fixed point** — all trajectories converge to a single point (stable equilibrium).
-- **Limit cycle** — trajectories converge to a closed loop (periodic oscillation).
-- **Quasi-periodic** — trajectories wind around a torus; the ratio of frequencies is irrational.
-- **Chaotic attractor (strange attractor)** — trajectories are bounded but never repeat; nearby trajectories diverge exponentially (sensitive dependence on initial conditions).
+- **Fixed point**: all trajectories converge to a single point (stable equilibrium).
+- **Limit cycle**: trajectories converge to a closed loop (periodic oscillation).
+- **Quasi-periodic**: trajectories wind around a torus; the ratio of frequencies is irrational.
+- **Chaotic attractor (strange attractor)**: trajectories are bounded but never repeat; nearby trajectories diverge exponentially (sensitive dependence on initial conditions).
 
 ### Lyapunov exponents
 
@@ -933,7 +939,7 @@ of an arbitrary sample sequence and returns dominant frequencies.
 - Cooley-Tukey radix-2 FFT for power-of-2 lengths; O(N²) DFT fallback.
 - Hann windowing to reduce spectral leakage.
 - `DftResult { frequencies, magnitudes, dominant_freq, spectral_centroid }`.
-- `SpectralAnalyzer::dominant_frequencies(result, top_k)` — sorted by magnitude.
+- `SpectralAnalyzer::dominant_frequencies(result, top_k)`: sorted by magnitude.
 
 ### FFT spectral analysis
 
@@ -954,14 +960,14 @@ The Lorenz system `(σ=10, β=8/3, ρ)` undergoes the following transitions as �
 | ρ < 1 | All trajectories converge to origin |
 | 1 < ρ < 13.93 | Two stable fixed points (C+ and C−) |
 | 13.93 < ρ < 24.06 | Unstable limit cycles; trajectories still attracted to C± |
-| ρ > 24.74 | Strange attractor (chaos onset) — the classic butterfly |
+| ρ > 24.74 | Strange attractor (chaos onset), the classic butterfly |
 
 ---
 
 ## Building and testing
 
 ```bash
-# Run all unit and integration tests (~1650 tests, no display required)
+# Run all unit and integration tests (1,800+ tests, no display required)
 cargo test --lib --tests
 
 # Release binary
@@ -1017,7 +1023,7 @@ The bifurcation sweeper runs a dynamical system across a continuous range of a s
 
 | Output | Description |
 |--------|-------------|
-| SVG diagram | Attractor z-coordinate vs parameter value — classic bifurcation plot rendered as a dark-background SVG. |
+| SVG diagram | Attractor z-coordinate vs parameter value: classic bifurcation plot rendered as a dark-background SVG. |
 | Sweep WAV | Each parameter step rendered as a short audio clip, concatenated into a single mono WAV file that audibly sweeps through the parameter range. |
 
 ### Usage
@@ -1050,7 +1056,7 @@ Linear interpolation between any two named presets. All numeric fields are blend
 
 | Type | Purpose |
 |------|---------|
-| `PresetInterpolator` | Single shot — interpolate between two configs at any `t` in [0, 1]. |
+| `PresetInterpolator` | Single shot: interpolate between two configs at any `t` in [0, 1]. |
 | `PresetMorphSchedule` | A sequence of `(preset_name, duration_ms)` pairs forming a morph timeline. |
 | `MorphTimeline` | Stateful player for a `PresetMorphSchedule`; call `.tick()` each frame. |
 | `MorphState` | Current position (0–1) between source and target with completion check. |
@@ -1314,14 +1320,14 @@ let entries = vec![
 let trajectory = MultiAttractorSequencer::render(&entries, 0.01);
 ```
 
-**CLI:** `--blend lorenz:rossler` — renders a blended trajectory and prints state count.
+**CLI:** `--blend lorenz:rossler`: renders a blended trajectory and prints state count.
 
 **Key types:**
-- `AttractorState { x, y, z }` — phase-space point
-- `BlendConfig { alpha }` — blend weight (0 = A, 1 = B)
-- `AttractorBlend::smooth_transition` — smoothstep S-curve crossfade
-- `AttractorBlend::morph` — alpha schedule from 0 to 1
-- `MultiAttractorSequencer::render` — full multi-segment sequencer
+- `AttractorState { x, y, z }`: phase-space point
+- `BlendConfig { alpha }`: blend weight (0 = A, 1 = B)
+- `AttractorBlend::smooth_transition`: smoothstep S-curve crossfade
+- `AttractorBlend::morph`: alpha schedule from 0 to 1
+- `MultiAttractorSequencer::render`: full multi-segment sequencer
 
 ---
 
@@ -1354,15 +1360,15 @@ println!("MIDI {} ({:.1} Hz), degree {}, chord {:?}",
 let freq = midi_to_freq(69); // 440.0
 ```
 
-**CLI:** `--scale major:60` — maps a sample Lorenz trajectory to the C major scale and prints MIDI notes.
+**CLI:** `--scale major:60`: maps a sample Lorenz trajectory to the C major scale and prints MIDI notes.
 
 **Supported modes:** `Major`, `Minor`, `Pentatonic`, `Dorian`, `Phrygian`, `Lydian`, `WholeTone`, `Chromatic`.
 
 **Key types:**
-- `MusicalScale { root_midi, mode }` — scale definition
-- `MusicalScale::pitch_class_set()` — semitone intervals above root
-- `MusicalScale::quantize(value, octaves)` — maps [-1,1] → nearest MIDI note
-- `MusicalScale::chord(value)` — returns triad `[root, third, fifth]`
+- `MusicalScale { root_midi, mode }`: scale definition
+- `MusicalScale::pitch_class_set()`: semitone intervals above root
+- `MusicalScale::quantize(value, octaves)`: maps [-1,1] → nearest MIDI note
+- `MusicalScale::chord(value)`: returns triad `[root, third, fifth]`
 - `ScaleMapper::map_state(state)` → `MappedPitch { midi_note, freq_hz, scale_degree, chord }`
 
 ---
