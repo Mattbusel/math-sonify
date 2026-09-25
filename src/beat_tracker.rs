@@ -127,7 +127,7 @@ impl TempoEstimator {
         self.onset_times.push_back(time_sec);
     }
 
-    /// Estimate BPM via autocorrelation of the IOI histogram.
+    /// Estimate BPM from the histogram of inter-onset intervals.
     ///
     /// Searches the 60–200 BPM range.  Returns `None` if fewer than 3 onsets
     /// have been recorded.
@@ -156,15 +156,12 @@ impl TempoEstimator {
                 hist[bin] += 1.0;
             }
         }
-        // Autocorrelation of the histogram.
-        let mut acf = vec![0.0f64; N_BINS];
-        for lag in 0..N_BINS {
-            let mut sum = 0.0;
-            for i in 0..N_BINS - lag {
-                sum += hist[i] * hist[i + lag];
-            }
-            acf[lag] = sum;
-        }
+        // Score each candidate period by the IOIs that land within +-10 ms of it
+        // (the raw histogram, smoothed so slightly jittered onsets still count).
+        const TOL: usize = 10;
+        let acf: Vec<f64> = (0..N_BINS)
+            .map(|b| hist[b.saturating_sub(TOL)..(b + TOL + 1).min(N_BINS)].iter().sum())
+            .collect();
         // Search 60–200 BPM → period range 0.3–1.0 s → bins 300–1000.
         let bpm_min = 60.0_f64;
         let bpm_max = 200.0_f64;
@@ -174,6 +171,9 @@ impl TempoEstimator {
         let bin_max = ((period_max / bin_width) as usize).min(N_BINS - 1);
         let best_bin = (bin_min..=bin_max)
             .max_by(|&a, &b| acf[a].partial_cmp(&acf[b]).unwrap_or(std::cmp::Ordering::Equal))?;
+        if acf[best_bin] <= 0.0 {
+            return None;
+        }
         let period = best_bin as f64 * bin_width;
         if period <= 0.0 {
             return None;

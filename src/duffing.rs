@@ -58,7 +58,7 @@ impl DuffingState {
 
 /// Compute the derivatives `(dx/dt, dy/dt)` at the given state.
 ///
-/// ```
+/// ```text
 /// dx/dt = y
 /// dy/dt = -δ·y - α·x - β·x³ + γ·cos(ω·t)
 /// ```

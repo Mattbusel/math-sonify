@@ -173,7 +173,9 @@ fn check_chaotic_lorenz(sigma: f64, rho: f64, beta: f64) -> bool {
     let mut s1 = [1.0f64, 0.0, 0.0];
     let mut s2 = [1.001f64, 0.0, 0.0];
     let dt = 0.01;
-    for _ in 0..500 {
+    // 2000 steps (t = 20) lets a 1e-3 offset grow past 1 at the Lorenz
+    // Lyapunov exponent (~0.9); 500 steps was too short to ever pass.
+    for _ in 0..2000 {
         lorenz_step(&mut s1, sigma, rho, beta, dt);
         lorenz_step(&mut s2, sigma, rho, beta, dt);
     }

@@ -122,7 +122,40 @@ const BREATHING_PERIOD_SECS: f64 = 4.5;
 /// item 15: ±0.033 linear ≈ ±0.28 dB — below the ~1 dB JND for level differences.
 const BREATHING_DEPTH: f32 = 0.033;
 
+const HELP: &str = "math-sonify: real-time procedural audio from mathematical dynamical systems
+
+USAGE:
+    math-sonify                  Open the desktop app (GUI + live audio)
+    math-sonify --headless [OPTIONS]
+                                 Render to a WAV file with no window and no playback
+
+HEADLESS OPTIONS:
+    --duration <SECS>            Length of the render (default 10)
+    --output <FILE>              Output WAV path (default headless_render.wav)
+    --patch <NAME>               Load a saved patch or built-in preset
+    --attractor <NAME>           Override the system (e.g. lorenz, rossler, hindmarsh-rose)
+    --spectrum                   Print a spectrum analysis instead of rendering
+
+OTHER:
+    -h, --help                   Print this help
+    -V, --version                Print the version
+
+The app reads config.toml from the current directory if present.
+";
+
 fn main() -> anyhow::Result<()> {
+    {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if args.iter().any(|a| a == "-h" || a == "--help") {
+            print!("{HELP}");
+            return Ok(());
+        }
+        if args.iter().any(|a| a == "-V" || a == "--version") {
+            println!("math-sonify {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+    }
+
     // Initialize tracing subscriber (reads RUST_LOG env var, falls back to info).
     tracing_subscriber::fmt()
         .with_env_filter(

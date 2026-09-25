@@ -44,12 +44,18 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use math_sonify_plugin::audio_driven::{AudioOdeBridge, BridgeConfig, DualMode, DualModeKind};
+//! use math_sonify::audio_driven::{AudioInputAnalyzer, AudioOdeBridge, BridgeConfig};
 //! use crossbeam_channel::unbounded;
+//! use std::sync::{atomic::AtomicBool, Arc};
 //!
+//! let (feature_tx, feature_rx) = unbounded();
 //! let (patch_tx, patch_rx) = unbounded();
-//! let bridge = AudioOdeBridge::new(BridgeConfig::default(), patch_tx);
-//! bridge.start_background().expect("audio input");
+//! let mut analyzer = AudioInputAnalyzer::new(BridgeConfig::default(), feature_tx);
+//! let bridge = AudioOdeBridge::from_channels(BridgeConfig::default(), feature_rx, patch_tx);
+//! std::thread::spawn(move || bridge.run_background(Arc::new(AtomicBool::new(false))));
+//!
+//! // Feed input samples from the audio callback:
+//! analyzer.feed(0.0);
 //!
 //! // In the simulation loop:
 //! for patch in patch_rx.try_iter() {

@@ -81,7 +81,7 @@ fn rk4_step(state: [f64; 2], dt: f64, deriv: impl Fn([f64; 2]) -> [f64; 2]) -> [
 ///
 /// # Example
 /// ```
-/// use math_sonify_plugin::vanderpol::{VanDerPolConfig, VanDerPolOscillator};
+/// use math_sonify::vanderpol::{VanDerPolConfig, VanDerPolOscillator};
 ///
 /// let mut osc = VanDerPolOscillator::new(VanDerPolConfig::default());
 /// osc.step(0.01);

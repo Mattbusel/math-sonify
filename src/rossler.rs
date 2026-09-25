@@ -93,7 +93,7 @@ fn rk4_step(state: [f64; 3], dt: f64, deriv: impl Fn([f64; 3]) -> [f64; 3]) -> [
 ///
 /// # Example
 /// ```
-/// use math_sonify_plugin::rossler::{RosslerAttractor, RosslerConfig};
+/// use math_sonify::rossler::{RosslerAttractor, RosslerConfig};
 ///
 /// let mut attractor = RosslerAttractor::new(RosslerConfig::default());
 /// attractor.step(0.01);

@@ -8,7 +8,7 @@
 //! ## Quick usage
 //!
 //! ```
-//! use math_sonify_plugin::preset_gallery::PresetGallery;
+//! use math_sonify::preset_gallery::PresetGallery;
 //!
 //! let mut gallery = PresetGallery::with_builtin_presets();
 //!
@@ -537,7 +537,8 @@ mod tests {
 
     #[test]
     fn search_butterfly_finds_lorenz() {
-        let results = gallery().search("butterfly");
+        let g = gallery();
+        let results = g.search("butterfly");
         assert!(!results.is_empty(), "search for 'butterfly' should find Lorenz presets");
     }
 

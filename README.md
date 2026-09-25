@@ -34,9 +34,9 @@ It is a desktop app (egui GUI, cpal audio), a VST3/CLAP plugin built from the sa
 
 ## 5-minute quickstart
 
-### Pre-built binary (Windows)
+### Pre-built binary
 
-Download `math-sonify.exe` from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest) and double-click it. Audio starts immediately on the system default output device.
+Download the file for your system from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest), unzip it and run `math-sonify`. Audio starts immediately on the system default output device. See [Installation](#installation) for which file to pick.
 
 ### Build from source
 
@@ -405,7 +405,7 @@ math-sonify can export attractor trajectories to Standard MIDI Files (SMF format
 ### From Rust code
 
 ```rust
-use math_sonify_plugin::midi_export::{MidiExporter, SCALE_PENTATONIC_C4};
+use math_sonify::midi_export::{MidiExporter, SCALE_PENTATONIC_C4};
 
 // trajectory is a Vec<(f64, f64, f64)> collected from the ODE solver
 let exporter = MidiExporter::new();   // 480 ticks per quarter note
@@ -449,7 +449,7 @@ The **SYNTH** tab has a **Presets** panel with:
 ### From Rust code
 
 ```rust
-use math_sonify_plugin::preset_gallery::PresetGallery;
+use math_sonify::preset_gallery::PresetGallery;
 
 let mut gallery = PresetGallery::with_builtin_presets();
 
@@ -532,7 +532,7 @@ The session server is a raw-TCP WebSocket-style server that accepts JSON connect
 **Starting the server:**
 
 ```rust
-use math_sonify_plugin::collab::{CollabServer, SessionEvent};
+use math_sonify::collab::{CollabServer, SessionEvent};
 use crossbeam_channel::unbounded;
 
 let (tx, rx) = unbounded::<SessionEvent>();
@@ -563,7 +563,7 @@ math-sonify also includes a JSON-based collaborative performance protocol that l
 ### Example flow
 
 ```rust
-use math_sonify_plugin::collaboration::{CollaborationClient, PerformerState};
+use math_sonify::collaboration::{CollaborationClient, PerformerState};
 
 // Create local performer
 let performer = PerformerState::new("alice-01", "Alice");
@@ -587,7 +587,7 @@ let msg = CollaborationClient::deserialize_message(incoming_json).unwrap();
 ### Server-side session tracking
 
 ```rust
-use math_sonify_plugin::collaboration::CollaborationSession;
+use math_sonify::collaboration::CollaborationSession;
 
 let mut session = CollaborationSession::new("my-session");
 
@@ -642,9 +642,34 @@ math-sonify outputs 32-bit IEEE float stereo PCM at the system default sample ra
 
 ## Installation
 
-### Pre-built binary (Windows)
+### Download
 
-Download `math-sonify.exe` from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest) and run it. No dependencies, no install.
+Grab a prebuilt app from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest). Pick the file that matches your computer:
+
+| System | File |
+|--------|------|
+| Windows (64-bit) | `math-sonify-vX.Y.Z-x86_64-pc-windows-msvc.zip` |
+| Mac with Apple Silicon (M1 and later) | `math-sonify-vX.Y.Z-aarch64-apple-darwin.tar.gz` |
+| Mac with Intel chip | `math-sonify-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
+| Linux (64-bit) | `math-sonify-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
+
+Unpack it and run `math-sonify` (`math-sonify.exe` on Windows). Keep `config.toml` next to it if you want to change the defaults. `math-sonify --help` lists the headless WAV render options. `SHA256SUMS.txt` on the release page lets you check the download.
+
+The binaries are not code-signed, so your system will be cautious the first time:
+
+- **Windows:** SmartScreen may say "Windows protected your PC" or "unknown publisher". Click **More info**, then **Run anyway**.
+- **macOS:** Gatekeeper may refuse to open it. Right-click (or Control-click) the file, choose **Open**, then **Open** again. From a terminal, `xattr -d com.apple.quarantine ./math-sonify` does the same.
+- **Linux:** needs ALSA (`libasound2`), which almost every desktop already has.
+
+### With Cargo
+
+If you have [Rust](https://rustup.rs/) installed:
+
+```bash
+cargo install math-sonify
+```
+
+On Linux, install the audio and windowing headers first, for example on Debian/Ubuntu: `sudo apt install pkg-config libasound2-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxkbcommon-dev libgl1-mesa-dev libudev-dev`.
 
 ### From source
 
@@ -658,8 +683,10 @@ cargo run --release
 
 ### Build the VST3 / CLAP plugin
 
+The plugin lives in the `plugin/` workspace crate (it is not published to crates.io because nih-plug is only available from git):
+
 ```bash
-cargo build --release --lib
+cargo build --release -p math-sonify-plugin
 ```
 
 Copy the output to your DAW plugin folder:
@@ -676,7 +703,7 @@ After copying, trigger a plugin rescan in your DAW (**Options > Plug-in Manager*
 
 ## VST/CLAP plugin setup
 
-1. Run `cargo build --release --lib`.
+1. Run `cargo build --release -p math-sonify-plugin`.
 2. Locate the output file in `target/release/`.
 3. Copy to the system VST3 folder for your platform (table above).
 4. Open your DAW and trigger a plugin rescan.
@@ -850,7 +877,7 @@ OdePatch → simulation thread (applies sigma/rho/beta overrides)
 ### Usage
 
 ```rust
-use math_sonify_plugin::audio_driven::{AudioOdeBridge, BridgeConfig, DualMode, DualModeKind};
+use math_sonify::audio_driven::{AudioOdeBridge, BridgeConfig, DualMode, DualModeKind};
 use crossbeam_channel::unbounded;
 
 // Build the reverse pipeline
@@ -974,7 +1001,7 @@ cargo test --lib --tests
 cargo build --release --bin math-sonify
 
 # Release plugin
-cargo build --release --lib
+cargo build --release -p math-sonify-plugin
 
 # Documentation
 cargo doc --no-deps --open
@@ -1009,7 +1036,7 @@ The test suite covers: ODE solver accuracy (attractor bounds, energy conservatio
 
 **VST3/CLAP not appearing**
 - Copy to the correct system folder and trigger a plugin rescan in your DAW.
-- The plugin requires `cargo build --release --lib`, not `--bin`.
+- The plugin is built from the `plugin/` crate with `cargo build --release -p math-sonify-plugin`.
 
 **MIDI export produces empty file**
 - Start recording before the session (click **Record MIDI** in the MIXER tab), then export.
@@ -1209,7 +1236,7 @@ With `a=0.2, b=0.2, c=5.7` the attractor is bounded (|x|, |y| < 30) and exhibits
 ### Example
 
 ```rust
-use math_sonify_plugin::rossler::{RosslerAttractor, RosslerConfig};
+use math_sonify::rossler::{RosslerAttractor, RosslerConfig};
 
 let mut attractor = RosslerAttractor::new(RosslerConfig::default());
 for _ in 0..1000 {
@@ -1246,7 +1273,7 @@ increasingly relaxation-oscillator-like behaviour with sharp transitions.
 ### Example
 
 ```rust
-use math_sonify_plugin::vanderpol::{VanDerPolConfig, VanDerPolOscillator};
+use math_sonify::vanderpol::{VanDerPolConfig, VanDerPolOscillator};
 
 let mut osc = VanDerPolOscillator::new(VanDerPolConfig { mu: 2.0 });
 for _ in 0..2000 {
@@ -1282,7 +1309,7 @@ DX7-style frequency modulation synthesis is now available as a `PhysicalSynth` m
 ### Usage
 
 ```rust
-use math_sonify_plugin::synthesis::{build_physical_synth, FmConfig, FmSynth, PhysicalMode};
+use math_sonify::synthesis::{build_physical_synth, FmConfig, FmSynth, PhysicalMode};
 
 let mut synth = build_physical_synth(PhysicalMode::Fm, 80.0, 1200.0, 44100.0);
 let state = [1.0f64, 0.5, 0.0];
@@ -1296,7 +1323,7 @@ let sample = synth.next_sample(&state, 44100.0);
 Smoothly interpolates between two attractor states and sequences multiple attractors with S-curve crossfades.
 
 ```rust
-use math_sonify_plugin::blend::{AttractorBlend, AttractorState, BlendConfig, MultiAttractorSequencer, SequenceEntry};
+use math_sonify::blend::{AttractorBlend, AttractorState, BlendConfig, MultiAttractorSequencer, SequenceEntry};
 
 // Linear blend at 50%
 let a = AttractorState::new(1.0, 2.0, 3.0);
@@ -1336,8 +1363,8 @@ let trajectory = MultiAttractorSequencer::render(&entries, 0.01);
 Maps attractor state values to musical pitches in a chosen scale/mode.
 
 ```rust
-use math_sonify_plugin::scale_mapper::{MusicalScale, ScaleMapper, ScaleMode, midi_to_freq};
-use math_sonify_plugin::blend::AttractorState;
+use math_sonify::scale_mapper::{MusicalScale, ScaleMapper, ScaleMode, midi_to_freq};
+use math_sonify::blend::AttractorState;
 
 // Create a D major scale
 let scale = MusicalScale::new(62, ScaleMode::Major);

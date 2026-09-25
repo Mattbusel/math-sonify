@@ -1,5 +1,34 @@
 # Math Sonify — Changelog
 
+## [1.4.0] - 2026-09-25
+
+### Added
+
+- Prebuilt downloads: a release workflow builds the desktop app for Windows (x86_64),
+  macOS (Apple Silicon and Intel) and Linux (x86_64) on every `v*` tag and attaches
+  them, with `SHA256SUMS.txt`, to the GitHub Release.
+- `--help` and `--version` flags.
+- `cargo install math-sonify` support: the VST3/CLAP plugin moved into its own
+  unpublished workspace crate (`plugin/`) because nih-plug is not on crates.io.
+
+### Changed
+
+- The core library is now `math_sonify` (`src/lib.rs`); the plugin crate builds
+  `math_sonify_plugin` with `cargo build --release -p math-sonify-plugin`.
+- CI builds and tests the whole workspace on Linux, Windows and macOS and installs the
+  Linux audio and windowing libraries it needs.
+
+### Fixed
+
+- Test suite compiles again (`evolution` and `preset_gallery` tests).
+- `collab`: `set` messages dropped their last parameter because the parser matched the
+  outer closing brace.
+- `beat_tracker`: tempo estimation always returned 60 BPM; it now picks the dominant
+  inter-onset interval.
+- `randomizer`: the chaos check ran too briefly for any Lorenz trajectory to pass.
+- Broken doc examples in `audio_driven` and `duffing`, and four tests with wrong
+  expectations (arpeggiator LFO, DC blocker, spectrum DC bin, Rule 90 symmetry).
+
 ## [Unreleased] — Production-ready pass (2026-03-18)
 
 ### Fixed
