@@ -7,7 +7,7 @@
 //! ## Example
 //!
 //! ```rust,ignore
-//! use math_sonify_plugin::convolution::{low_pass_filter, FirFilter};
+//! use math_sonify::convolution::{low_pass_filter, FirFilter};
 //!
 //! let coeffs = low_pass_filter(1000.0, 44100.0, 63);
 //! let mut filter = FirFilter::new(coeffs);

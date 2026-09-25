@@ -15,7 +15,7 @@ src/
 ├── ui.rs                # egui UI, AppState
 ├── arrangement.rs       # Scene/arrangement interpolation
 ├── presets.rs           # Preset application helpers
-├── plugin.rs            # nih-plug VST3/CLAP wrapper
+├── lib.rs               # core library (shared by app and plugin)
 ├── systems/             # Dynamical systems
 │   ├── mod.rs           # DynamicalSystem trait, rk4/rk45 helpers, re-exports
 │   ├── lorenz.rs
@@ -194,13 +194,13 @@ The binary is at `target/release/math-sonify[.exe]`. Copy alongside `config.toml
 ### VST3 / CLAP plugin
 
 ```sh
-cargo build --lib --release
+cargo build --release -p math-sonify-plugin
 ```
 
 The compiled `.dll` / `.so` / `.dylib` is the plugin binary. Use [cargo-nih-plug](https://github.com/robbert-vdh/nih-plug) or nih-plug's own bundler for proper VST3/CLAP bundle layout:
 
 ```sh
-cargo xtask bundle math_sonify_plugin --release
+cargo xtask bundle math_sonify --release
 ```
 
 ### Development build

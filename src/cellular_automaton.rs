@@ -312,9 +312,9 @@ mod tests {
         ca.step();
         // Rule 90 from a single centre cell should produce symmetric pattern
         let mid = 8;
-        for i in 0..mid {
+        for i in 1..mid {
             assert_eq!(
-                ca.row[mid - 1 - i],
+                ca.row[mid - i],
                 ca.row[mid + i],
                 "Rule 90 should be symmetric at offset {i}"
             );

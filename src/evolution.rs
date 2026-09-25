@@ -198,7 +198,7 @@ impl SavedEvolution {
     /// # Example
     ///
     /// ```
-    /// use math_sonify_plugin::evolution::SavedEvolution;
+    /// use math_sonify::evolution::SavedEvolution;
     ///
     /// let se = SavedEvolution {
     ///     name: "My Evolved Preset".into(),
@@ -294,7 +294,7 @@ impl ParamBounds {
 /// # Usage
 ///
 /// ```no_run
-/// use math_sonify_plugin::evolution::{
+/// use math_sonify::evolution::{
 ///     ParameterEvolution, EvolutionConfig, FitnessMetric, ParamBounds,
 /// };
 /// use std::sync::Arc;
@@ -782,14 +782,6 @@ mod tests {
             eval_steps: 50,
             ..Default::default()
         };
-        let state: SharedEvolutionState = Arc::new(Mutex::new(EvolutionState::default()));
-        let mut evo = ParameterEvolution::new(
-            FitnessMetric::RhythmicVariance,
-            FitnessMetric::RhythmicVariance,
-            lorenz_bounds(),
-            Arc::clone(&state),
-        );
-        // Re-create properly.
         let state2: SharedEvolutionState = Arc::new(Mutex::new(EvolutionState::default()));
         let mut evo2 = ParameterEvolution::new(
             cfg,
@@ -800,8 +792,6 @@ mod tests {
         evo2.run("h", lorenz_step);
         let hist = state2.lock().fitness_history.clone();
         assert_eq!(hist.len(), generations, "history length {}", hist.len());
-        // suppress unused warning
-        let _ = evo.config.population_size;
     }
 
     #[test]

@@ -1,10 +1,32 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: sudo apt-get install -y libasound2-dev
-      - run: cargo check
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux audio/GUI libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libjack-jackd2-dev \
+            libx11-dev libx11-xcb-dev libxcb1-dev libxcb-icccm4-dev libxcb-dri2-0-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libxkbcommon-dev libgl1-mesa-dev libudev-dev
+      - name: Build (app + plugin)
+        run: cargo build --workspace --locked
+      - name: Test
+        run: cargo test --workspace --locked

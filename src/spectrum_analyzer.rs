@@ -8,7 +8,7 @@
 //! # Example
 //!
 //! ```rust
-//! use math_sonify_plugin::spectrum_analyzer::SpectralAnalyzer;
+//! use math_sonify::spectrum_analyzer::SpectralAnalyzer;
 //!
 //! // Generate a 440 Hz sine at 44100 Hz sample rate (1024 samples)
 //! let samples: Vec<f64> = (0..1024)
@@ -318,7 +318,8 @@ mod tests {
         let samples = vec![1.0; 512];
         let result = SpectralAnalyzer::analyze(&samples, SAMPLE_RATE);
         let dc_mag = result.magnitudes[0];
-        let max_ac = result.magnitudes[1..].iter().cloned().fold(0.0_f64, f64::max);
+        // Bin 1 sits inside the analysis window's main lobe, so compare with bins 2+.
+        let max_ac = result.magnitudes[2..].iter().cloned().fold(0.0_f64, f64::max);
         assert!(
             dc_mag > max_ac,
             "DC magnitude {} should exceed max AC {}",

@@ -1,6 +1,6 @@
 [package]
 name = "math-sonify"
-version = "1.3.0"
+version = "1.4.0"
 edition = "2021"
 rust-version = "1.75"
 description = "Real-time procedural audio from mathematical dynamical systems (Lorenz, Rossler, Double Pendulum, and more)"
@@ -20,6 +20,10 @@ exclude = [
     "patch_*.py",
     "build_release.bat",
     "math_sonify_vision.pdf",
+    "plugin/",
+    "fuzz/",
+    "dist/",
+    ".claude/",
 ]
 
 [[bin]]
@@ -27,9 +31,8 @@ name = "math-sonify"
 path = "src/main.rs"
 
 [lib]
-name = "math_sonify_plugin"
-path = "src/plugin.rs"
-crate-type = ["cdylib", "rlib"]
+name = "math_sonify"
+path = "src/lib.rs"
 
 [dependencies]
 # Audio I/O
@@ -59,16 +62,16 @@ rustfft = "6"
 midly = "0.5"
 png = "0.17"
 
-# OSC collaborative sync (optional — enable with --features osc)
+# OSC collaborative sync (optional, enable with --features osc)
 rosc = { version = "0.10", optional = true }
 
 # Tracing instrumentation
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# VST3/CLAP plugin support
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", features = ["assert_process_allocs"] }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", package = "nih_plug_egui" }
+
+[workspace]
+members = [".", "plugin"]
 
 [features]
 # Enable OSC collaborative sync (adds the `rosc` dependency).

@@ -1,0 +1,20 @@
+[package]
+name = "math-sonify-plugin"
+version = "1.4.0"
+edition = "2021"
+rust-version = "1.75"
+description = "VST3 / CLAP instrument plugin for math-sonify"
+license = "MIT"
+repository = "https://github.com/Mattbusel/math-sonify"
+publish = false
+
+[lib]
+name = "math_sonify_plugin"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+math-sonify = { path = ".." }
+# nih-plug is not on crates.io, which is why the plugin lives in its own
+# unpublished crate and the desktop app can still be published.
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95", features = ["assert_process_allocs"] }

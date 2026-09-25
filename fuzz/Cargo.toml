@@ -12,6 +12,6 @@ doc = false
 
 [dependencies]
 libfuzzer-sys = "0.4"
-math_sonify_plugin = { path = "..", features = [] }
+math-sonify = { path = "..", features = [] }
 
 [workspace]

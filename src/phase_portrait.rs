@@ -21,7 +21,7 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use math_sonify_plugin::phase_portrait::{PhasePortrait, PortraitConfig};
+//! use math_sonify::phase_portrait::{PhasePortrait, PortraitConfig};
 //!
 //! let cfg = PortraitConfig::default();
 //! // In a real app you would pass a wgpu Device/Queue/Surface here.

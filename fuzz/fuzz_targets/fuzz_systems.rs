@@ -15,7 +15,7 @@ fuzz_target!(|data: &[u8]| {
     let p3 = make_f64(&data[16..24]);
 
     // Fuzz Lorenz: verify it never produces non-finite state values
-    use math_sonify_plugin::systems::Lorenz;
+    use math_sonify::systems::Lorenz;
     let mut sys = Lorenz::new(
         p1.abs().clamp(0.1, 100.0),
         p2.abs().clamp(0.1, 200.0),

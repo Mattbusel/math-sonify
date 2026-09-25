@@ -349,7 +349,8 @@ mod tests {
             lfo_depth: 1.0, // full modulation
         };
         let mut notes = arp.generate_sequence(8);
-        arp.with_lfo_velocity(&mut notes, 1.0);
+        // 1 Hz at 120 BPM samples the sine only at its zero crossings; use 0.3 Hz.
+        arp.with_lfo_velocity(&mut notes, 0.3);
         // With lfo_depth=1.0 some velocities should differ from 80.
         let all_same = notes.iter().all(|n| n.velocity == 80);
         assert!(!all_same, "LFO should have modulated velocities away from base");

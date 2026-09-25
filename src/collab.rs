@@ -29,7 +29,7 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use math_sonify_plugin::collab::{CollabServer, SessionEvent};
+//! use math_sonify::collab::{CollabServer, SessionEvent};
 //! use crossbeam_channel::unbounded;
 //!
 //! let (tx, rx) = unbounded::<SessionEvent>();
@@ -371,7 +371,7 @@ fn extract_set_pairs(json: &str) -> Vec<(String, f64)> {
     if let Some(pos) = json.find("\"set\"") {
         let after = &json[pos + 5..];
         if let Some(start) = after.find('{') {
-            if let Some(end) = after.rfind('}') {
+            if let Some(end) = after.find('}') {
                 if end > start {
                     let inner = &after[start + 1..end];
                     for pair in inner.split(',') {

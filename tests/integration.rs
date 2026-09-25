@@ -1,5 +1,5 @@
 /// Integration tests for math-sonify.
-use math_sonify_plugin::{
+use math_sonify::{
     config::{Config, SonificationConfig},
     sonification::{
         chord_intervals_for, quantize_to_scale, DirectMapping, Scale, SonifMode, Sonification,
@@ -347,7 +347,7 @@ fn chord_intervals_unknown_returns_zeros() {
 // Synthesis DSP integration tests (no audio device required)
 // ---------------------------------------------------------------------------
 
-use math_sonify_plugin::synth::{OscShape, Oscillator};
+use math_sonify::synth::{OscShape, Oscillator};
 
 /// Render `duration_secs` of mono audio at `sample_rate` from a sine oscillator.
 fn render_sine(freq_hz: f32, sample_rate: f32, duration_secs: f32) -> Vec<f32> {
@@ -412,7 +412,7 @@ fn test_two_oscillators_higher_amplitude() {
 fn test_direct_mapping_produces_non_zero_freqs() {
     // DirectMapping::map() on a Lorenz trajectory should yield non-zero voice frequencies.
     let mut mapper = DirectMapping::new();
-    let mut lorenz = math_sonify_plugin::systems::Lorenz::new(10.0, 28.0, 2.6667);
+    let mut lorenz = math_sonify::systems::Lorenz::new(10.0, 28.0, 2.6667);
     // Warm up the attractor.
     for _ in 0..1000 {
         lorenz.step(0.001);
@@ -873,7 +873,7 @@ fn audio_buffer_renders_within_latency_budget() {
     let n_samples = 512usize;
     let budget_us: u128 = (n_samples as u128 * 1_000_000) / 44100; // ~11610 us
 
-    let mut osc = math_sonify_plugin::synth::Oscillator::new(440.0, OscShape::Sine, sr);
+    let mut osc = math_sonify::synth::Oscillator::new(440.0, OscShape::Sine, sr);
     let start = Instant::now();
     for _ in 0..n_samples {
         let _ = osc.next_sample();
@@ -895,7 +895,7 @@ fn ten_consecutive_buffers_render_within_budget() {
     let n_samples = 512usize;
     let budget_us: u128 = (n_samples as u128 * 1_000_000) / 44100; // ~11610 us
 
-    let mut osc = math_sonify_plugin::synth::Oscillator::new(440.0, OscShape::Sine, sr);
+    let mut osc = math_sonify::synth::Oscillator::new(440.0, OscShape::Sine, sr);
     for buf_idx in 0..10 {
         let start = Instant::now();
         for _ in 0..n_samples {
@@ -930,7 +930,7 @@ fn synthesis_modes_all_meet_latency_sla() {
     ];
 
     for (name, shape) in &shapes {
-        let mut osc = math_sonify_plugin::synth::Oscillator::new(440.0, *shape, sr);
+        let mut osc = math_sonify::synth::Oscillator::new(440.0, *shape, sr);
         let start = Instant::now();
         for _ in 0..n_samples {
             let _ = osc.next_sample();
@@ -1843,7 +1843,7 @@ fn finance_deterministic() {
 
 #[test]
 fn all_presets_load_without_panic() {
-    use math_sonify_plugin::patches::{load_preset, PRESETS};
+    use math_sonify::patches::{load_preset, PRESETS};
     for preset in PRESETS {
         let mut config = load_preset(preset.name);
         config.validate(); // must not panic

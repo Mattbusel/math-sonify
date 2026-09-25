@@ -483,7 +483,8 @@ mod tests {
     #[test]
     fn dc_block_removes_offset() {
         let fmt = AudioFormat::mono_f32(44100);
-        let mut buf = AudioBuffer::new(100, fmt);
+        // R = 0.995 needs a few thousand samples to settle.
+        let mut buf = AudioBuffer::new(2000, fmt);
         buf.samples.iter_mut().for_each(|s| *s = 0.5); // pure DC
         let mut dc = DcBlockStage::new();
         dc.process(&mut buf, 0.0);

@@ -21,7 +21,7 @@
 //! # Example
 //!
 //! ```rust
-//! use math_sonify_plugin::hindmarsh_rose::{HindmarshRoseConfig, HindmarshRoseNeuron};
+//! use math_sonify::hindmarsh_rose::{HindmarshRoseConfig, HindmarshRoseNeuron};
 //!
 //! let cfg = HindmarshRoseConfig::default();
 //! let mut neuron = HindmarshRoseNeuron::new(cfg);
