@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.75"
 description = "VST3 / CLAP instrument plugin for math-sonify"
 license = "MIT"
-repository = "https://github.com/Mattbusel/math-sonify"
+repository = "https://gitlab.com/mattbusel/math-sonify"
 publish = false
 
 [lib]

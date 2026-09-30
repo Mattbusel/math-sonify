@@ -35,14 +35,14 @@ It is a desktop app (egui GUI, cpal audio), a VST3/CLAP plugin built from the sa
 
 ### Pre-built binary
 
-Download the file for your system from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest), unzip it and run `math-sonify`. Audio starts immediately on the system default output device. See [Installation](#installation) for which file to pick.
+Download the file for your system from the [latest release](https://gitlab.com/mattbusel/math-sonify/-/releases), unzip it and run `math-sonify`. Audio starts immediately on the system default output device. See [Installation](#installation) for which file to pick.
 
 ### Build from source
 
 Requires [Rust](https://rustup.rs/) 1.75+ and a working audio output device.
 
 ```bash
-git clone https://github.com/Mattbusel/math-sonify
+git clone https://gitlab.com/mattbusel/math-sonify
 cd math-sonify
 cargo run --release
 ```
@@ -643,7 +643,7 @@ math-sonify outputs 32-bit IEEE float stereo PCM at the system default sample ra
 
 ### Download
 
-Grab a prebuilt app from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest). Pick the file that matches your computer:
+Grab a prebuilt app from the [latest release](https://gitlab.com/mattbusel/math-sonify/-/releases). Pick the file that matches your computer:
 
 | System | File |
 |--------|------|
@@ -675,7 +675,7 @@ On Linux, install the audio and windowing headers first, for example on Debian/U
 Requires [Rust](https://rustup.rs/) 1.75+ and a working audio output device.
 
 ```bash
-git clone https://github.com/Mattbusel/math-sonify
+git clone https://gitlab.com/mattbusel/math-sonify
 cd math-sonify
 cargo run --release
 ```

@@ -698,7 +698,7 @@ impl Default for MathSonify {
 impl Plugin for MathSonify {
     const NAME: &'static str = "Math Sonify";
     const VENDOR: &'static str = "Mattbusel";
-    const URL: &'static str = "https://github.com/Mattbusel/math-sonify";
+    const URL: &'static str = "https://gitlab.com/mattbusel/math-sonify";
     const EMAIL: &'static str = "mattbusel@gmail.com";
     const VERSION: &'static str = "0.9.0";
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
