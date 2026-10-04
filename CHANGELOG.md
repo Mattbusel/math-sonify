@@ -1,5 +1,38 @@
 # Math Sonify — Changelog
 
+## [1.5.0] - 2026-10-04
+
+### Added
+
+- **Play together:** `--collab <ADDR>` starts a real WebSocket server (tungstenite) in
+  the app. Other people move parameters live from the bundled `collab.html` page or any
+  WebSocket client; every `config.toml` value is addressable by its dotted path
+  (`lorenz.rho`, `system.name`, ...), values are clamped like `config.toml`, and a player
+  can lock a parameter. Before this, `collab` was a raw-TCP server the app never started,
+  although the README called it a WebSocket feature.
+- **Microphone steering:** `--mic` lets the default input device steer the Lorenz
+  parameters (loudness to sigma, brightness to rho, mid-band energy to beta) while the
+  synth plays. Locked sliders are left alone. The module existed but the app never used it.
+- `Config::get_path` / `Config::set_path` for reading and setting any value by dotted path.
+- `collab`, `composer`, `fractal`, `network`, `midi_export`, `bifurcation`,
+  `preset_interpolation`, `recorder`, `osc_sync`, `collaboration` and `preset_gallery`
+  are now exported by the library. The README showed `use math_sonify::...` for all of
+  them, but none compiled.
+
+### Fixed
+
+- `audio_driven`: the hand-written FFT transformed only half the frame and then read it
+  as interleaved complex numbers, so the spectral centroid sat near 0.5 for every sound
+  (a 1 kHz tone read as 12 kHz) and the band energies were mirrored. It now uses
+  `rustfft`; tests check a pure tone's centroid and band.
+- Every Rust example in the README compiles and is checked by `cargo test --doc`
+  (19 of 27 failed before). The preset gallery section listed 16 presets that do not
+  exist; it now lists the 43 real ones.
+- `rust-version` is 1.85: the declared 1.75 had not built for a while (the locked
+  dependencies need 1.83 or newer).
+- Download links point at the releases that exist (GitHub), and release archives
+  include `collab.html`.
+
 ## [1.4.0] - 2026-09-25
 
 ### Added

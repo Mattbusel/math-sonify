@@ -69,7 +69,7 @@ jobs:
         run: |
           name="math-sonify-${TAG}-${{ matrix.target }}"
           mkdir "$name"
-          cp "target/${{ matrix.target }}/release/math-sonify" README.md LICENSE config.toml "$name/"
+          cp "target/${{ matrix.target }}/release/math-sonify" README.md LICENSE config.toml collab.html "$name/"
           tar czf "$name.tar.gz" "$name"
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
 
@@ -79,7 +79,7 @@ jobs:
         run: |
           $name = "math-sonify-$env:TAG-${{ matrix.target }}"
           New-Item -ItemType Directory $name | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/math-sonify.exe", README.md, LICENSE, config.toml $name
+          Copy-Item "target/${{ matrix.target }}/release/math-sonify.exe", README.md, LICENSE, config.toml, collab.html $name
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"

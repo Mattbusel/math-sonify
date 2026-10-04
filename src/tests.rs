@@ -2803,4 +2803,51 @@ mod ode_property_tests {
         assert!((r.liu.k - 4.0).abs() < 1e-9, "liu.k not interpolated: {}", r.liu.k);
         assert!((r.liu.m - 4.0).abs() < 1e-9, "liu.m not interpolated: {}", r.liu.m);
     }
+
+    // -------------------------------------------------------------------------
+    // Collaboration: remote changes reach the live app state
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn collab_set_changes_live_config_like_a_slider() {
+        use std::sync::Arc;
+        use tungstenite::Message;
+
+        let shared = Arc::new(parking_lot::Mutex::new(crate::ui::AppState::new(Config::default())));
+        let addr = crate::start_collab("127.0.0.1:0", &shared).unwrap();
+        let stream = std::net::TcpStream::connect(addr).unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let (mut ws, _) = tungstenite::client(format!("ws://{addr}"), stream).unwrap();
+
+        let msg = serde_json::json!({ "set": { "lorenz.rho": 33.0, "system.name": "rossler" } });
+        ws.send(Message::text(msg.to_string())).unwrap();
+        let mut updates = 0;
+        while updates < 2 {
+            if let Message::Text(t) = ws.read().unwrap() {
+                if t.as_str().contains("\"update\"") {
+                    updates += 1;
+                }
+            }
+        }
+        let st = shared.lock();
+        assert_eq!(st.config.lorenz.rho, 33.0);
+        assert_eq!(st.config.system.name, "rossler");
+        assert!(st.system_changed, "a system switch must tell the sim thread to rebuild");
+    }
+
+    /// Needs a real input device, so it is not run by default:
+    /// `cargo test --bin math-sonify mic_ -- --ignored`
+    #[test]
+    #[ignore]
+    fn mic_input_reaches_the_lorenz_parameters() {
+        use std::sync::Arc;
+        let shared = Arc::new(parking_lot::Mutex::new(crate::ui::AppState::new(Config::default())));
+        let _stream = crate::start_mic(&shared).expect("open default input device");
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let st = shared.lock();
+        let d = Config::default();
+        let moved = (st.config.lorenz.sigma, st.config.lorenz.rho, st.config.lorenz.beta)
+            != (d.lorenz.sigma, d.lorenz.rho, d.lorenz.beta);
+        assert!(moved, "two seconds of input should have produced at least one patch");
+    }
 }

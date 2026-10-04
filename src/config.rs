@@ -826,6 +826,49 @@ impl Default for TinkerbellConfig {
 }
 
 impl Config {
+    /// Read one value by its dotted `config.toml` path, e.g. `lorenz.rho`
+    /// or `system.name`. Returns `None` for unknown paths and for whole
+    /// sections.
+    pub fn get_path(&self, path: &str) -> Option<serde_json::Value> {
+        let root = serde_json::to_value(self).ok()?;
+        let leaf = path.split('.').try_fold(&root, |v, key| v.get(key))?;
+        (!leaf.is_object()).then(|| leaf.clone())
+    }
+
+    /// Set one value by its dotted `config.toml` path, then clamp the whole
+    /// config with [`validate`](Self::validate) so remote or scripted input
+    /// gets the same limits as `config.toml`.
+    ///
+    /// The value must have the same JSON type as the current one (a number
+    /// for a number, a string for a string); integer fields reject fractions.
+    pub fn set_path(&mut self, path: &str, value: &serde_json::Value) -> Result<(), String> {
+        use serde_json::Value;
+        let mut root = serde_json::to_value(&*self).map_err(|e| e.to_string())?;
+        let leaf = path
+            .split('.')
+            .try_fold(&mut root, |v, key| v.get_mut(key))
+            .ok_or_else(|| format!("unknown parameter '{path}'"))?;
+        let same_type = matches!(
+            (&*leaf, value),
+            (Value::Number(_), Value::Number(_))
+                | (Value::String(_), Value::String(_))
+                | (Value::Bool(_), Value::Bool(_))
+        );
+        if !same_type {
+            return Err(if leaf.is_object() {
+                format!("'{path}' is a section; set one of its fields")
+            } else {
+                format!("'{path}' expects a value like {leaf}, got {value}")
+            });
+        }
+        *leaf = value.clone();
+        let mut next: Config =
+            serde_json::from_value(root).map_err(|e| format!("'{path}': {e}"))?;
+        next.validate();
+        *self = next;
+        Ok(())
+    }
+
     /// Clamp all parameters to physically sensible bounds.
     /// Call this after deserializing from user-supplied config files.
     pub fn validate(&mut self) {
@@ -1242,6 +1285,37 @@ pub fn load_config(path: &std::path::Path) -> Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_get_and_set_round_trip() {
+        let mut c = Config::default();
+        assert_eq!(c.get_path("lorenz.rho"), Some(serde_json::json!(28.0)));
+        c.set_path("lorenz.rho", &serde_json::json!(35.5)).unwrap();
+        assert_eq!(c.lorenz.rho, 35.5);
+        c.set_path("system.name", &serde_json::json!("rossler")).unwrap();
+        assert_eq!(c.system.name, "rossler");
+    }
+
+    #[test]
+    fn path_set_rejects_unknown_paths_sections_and_wrong_types() {
+        let mut c = Config::default();
+        assert!(c.set_path("lorenz.nope", &serde_json::json!(1.0)).is_err());
+        assert!(c.set_path("lorenz", &serde_json::json!(1.0)).is_err());
+        assert!(c.set_path("lorenz.rho", &serde_json::json!("high")).is_err());
+        assert!(c.get_path("lorenz").is_none());
+        assert_eq!(c.lorenz.rho, 28.0, "failed sets leave the config unchanged");
+    }
+
+    #[test]
+    fn path_set_is_clamped_like_config_toml() {
+        let mut c = Config::default();
+        c.set_path("system.speed", &serde_json::json!(1.0e9)).unwrap();
+        let mut expected = Config::default();
+        expected.system.speed = 1.0e9;
+        expected.validate();
+        assert_eq!(c.system.speed, expected.system.speed);
+        assert!(c.system.speed <= 100.0);
+    }
 
     #[test]
     fn test_config_default_valid() {

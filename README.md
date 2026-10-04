@@ -1,7 +1,7 @@
 # math-sonify
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 math-sonify is a real-time generative audio engine that runs mathematical dynamical systems (differential equations, maps, and coupled oscillators) and routes every variable of their evolving state directly into audio synthesis parameters. The Lorenz attractor is actually integrating at 120 Hz; the Kuramoto coupling constant is live; the Three-Body gravitational problem advances at each control frame. The result is not a preset synthesiser with math-themed names: the mathematics _is_ the music, and every parameter change propagates to sound within 8 ms.
 
@@ -19,9 +19,9 @@ It is a desktop app (egui GUI, cpal audio), a VST3/CLAP plugin built from the sa
 2. **9 sonification modes**: Direct, Orbital, Granular, Spectral, FM, AM, Vocal, Waveguide, Resonator.
 3. **20 musical scales**: Pentatonic through Microtonal, EDO-19/24/31, Harmonic Series, Just Intonation.
 4. **MIDI export**: trajectory-to-MIDI conversion; outputs Standard MIDI Files (SMF) importable into any DAW.
-5. **Preset gallery**: 16+ named presets with mood tags, complexity ratings, favorites, and a discovery mode that surfaces less-played entries.
-6. **Collaborative session mode**: real-time multi-user parameter control via a WebSocket server with per-participant colour highlights, conflict resolution, and full session replay log.
-7. **Audio-driven ODE morphing**: reverse the sonification pipeline: incoming microphone audio extracts features (RMS, spectral centroid, flux, 8-band energy) and maps them to ODE parameters in real time. Can run simultaneously with the forward synthesis path (dual mode).
+5. **Presets**: 43 built-in presets in six categories, with search and favorites (see [Presets](#presets)).
+6. **Play together**: `--collab 127.0.0.1:9001` lets other people move the parameters live over WebSocket, from the bundled `collab.html` page or any WebSocket client. A player can lock a parameter so nobody else changes it.
+7. **Microphone steering**: `--mic` turns the room's sound into the Lorenz parameters while the synth keeps playing: louder means more chaos (sigma), brighter means higher rho, mid-band energy moves beta.
 8. **Lyapunov exponent tracker**: real-time estimation of the maximal Lyapunov exponent; displayed in the MATH VIEW tab.
 9. **FFT spectral overlay**: live FFT spectrum superimposed on the phase portrait and the WAVEFORM tab.
 10. **Scene arranger**: 8-scene timeline with smooth parameter morphs; AUTO generator builds full arrangements from a mood pool.
@@ -35,11 +35,11 @@ It is a desktop app (egui GUI, cpal audio), a VST3/CLAP plugin built from the sa
 
 ### Pre-built binary
 
-Download the file for your system from the [latest release](https://gitlab.com/mattbusel/math-sonify/-/releases), unzip it and run `math-sonify`. Audio starts immediately on the system default output device. See [Installation](#installation) for which file to pick.
+Download the file for your system from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest), unzip it and run `math-sonify`. Audio starts immediately on the system default output device. See [Installation](#installation) for which file to pick.
 
 ### Build from source
 
-Requires [Rust](https://rustup.rs/) 1.75+ and a working audio output device.
+Requires [Rust](https://rustup.rs/) 1.85+ and a working audio output device.
 
 ```bash
 git clone https://gitlab.com/mattbusel/math-sonify
@@ -57,7 +57,7 @@ cargo run --release -- --headless --duration 60 --output clip.wav
 
 ## Architecture
 
-```
+```text
 ODE Solver (120 Hz, sim thread)
     |
     |  53 dynamical systems -- Lorenz, Rossler, Duffing, Kuramoto, Three-Body,
@@ -203,8 +203,10 @@ The composition engine (`ComposerEngine`) turns the running attractor into a str
 
 ### MIDI export example
 
-```rust
+```rust,no_run
 use math_sonify::composer::{ComposerEngine, MusicalForm, ProgressionStyle, TimeSig};
+
+use math_sonify::systems::{DynamicalSystem, Lorenz};
 
 let mut engine = ComposerEngine::new(
     MusicalForm::Aba,
@@ -215,9 +217,16 @@ let mut engine = ComposerEngine::new(
     8,       // section length in bars
 );
 
-// Tick the engine each sim step:
-let frame = engine.tick(&state, melody_pitch, velocity, chaos_level, lyapunov);
-// frame.chord, frame.motif, frame.section_idx, frame.bar_position, …
+// Tick the engine once per control step with the attractor's state:
+let mut lorenz = Lorenz::new(10.0, 28.0, 8.0 / 3.0);
+for _ in 0..120 * 30 {
+    lorenz.step(1.0 / 120.0 / 10.0);
+    let state = lorenz.state();
+    let pitch = (60.0 + state[0].clamp(-20.0, 20.0)) as u8; // x picks the note
+    let frame = engine.tick(state, pitch, 90, 0.5, 0.9);
+    // frame.chord, frame.motif, frame.section_idx, frame.bar_position, ...
+    let _ = frame;
+}
 
 // Export when done:
 engine.export_midi("composition.mid", 120.0).ok();
@@ -239,7 +248,7 @@ The fractal analyzer characterises the geometric and dynamical structure of the 
 
 ### `AttractorCharacterization` struct
 
-```rust
+```text
 pub struct AttractorCharacterization {
     pub fractal_dim: f64,                    // Box-counting D₀
     pub correlation_dim: f64,                // Grassberger-Procaccia D₂
@@ -268,10 +277,21 @@ pub struct AttractorCharacterization {
 ```rust
 use math_sonify::fractal::FractalAnalyzer;
 
+use math_sonify::systems::{DynamicalSystem, Lorenz};
+
 let mut analyzer = FractalAnalyzer::new(3); // 3-D system
 
-// Called periodically in the sim thread:
-let ch = analyzer.analyze(&trajectory, &lorenz_deriv, dt, current_tick);
+// Collect a stretch of trajectory, then analyse it:
+let dt = 0.005;
+let mut lorenz = Lorenz::new(10.0, 28.0, 8.0 / 3.0);
+let trajectory: Vec<Vec<f64>> = (0..4000)
+    .map(|_| {
+        lorenz.step(dt);
+        lorenz.state().to_vec()
+    })
+    .collect();
+let deriv = |s: &[f64]| lorenz.deriv_at(s);
+let ch = analyzer.analyze(&trajectory, &deriv, dt, 0);
 println!("{}", analyzer.lyapunov_spectrum().summary());
 // λ = [+0.9053, -0.0001, -14.572]  D_KY=2.062  hKS=0.9053  div=-13.667
 ```
@@ -296,7 +316,7 @@ println!("{}", analyzer.lyapunov_spectrum().summary());
 
 **Kuramoto network**: phase oscillators on an arbitrary graph:
 
-```
+```text
 dθᵢ/dt = ωᵢ + Σⱼ Kᵢⱼ sin(θⱼ − θᵢ)
 ```
 
@@ -304,7 +324,7 @@ Each oscillator's phase maps directly to an audio frequency. The order parameter
 
 **Stuart–Landau network**: complex-amplitude oscillators (normal form of the Hopf bifurcation):
 
-```
+```text
 dAᵢ/dt = (μᵢ + iωᵢ − |Aᵢ|²)·Aᵢ + Σⱼ Kᵢⱼ·Aⱼ
 ```
 
@@ -316,7 +336,7 @@ With diffusive coupling and heterogeneous μ, the network exhibits:
 
 Each tick, `OscillatorNetwork::state()` returns a `NetworkState`:
 
-```rust
+```text
 pub struct NetworkState {
     pub n: usize,
     pub frequencies: Vec<f64>,   // per-voice audio frequency (Hz)
@@ -403,10 +423,19 @@ math-sonify can export attractor trajectories to Standard MIDI Files (SMF format
 
 ### From Rust code
 
-```rust
+```rust,no_run
 use math_sonify::midi_export::{MidiExporter, SCALE_PENTATONIC_C4};
+use math_sonify::systems::{DynamicalSystem, Lorenz};
 
-// trajectory is a Vec<(f64, f64, f64)> collected from the ODE solver
+// Collect (x, y, z) points from the ODE solver
+let mut lorenz = Lorenz::new(10.0, 28.0, 8.0 / 3.0);
+let trajectory: Vec<(f64, f64, f64)> = (0..2000)
+    .map(|_| {
+        lorenz.step(0.005);
+        let s = lorenz.state();
+        (s[0], s[1], s[2])
+    })
+    .collect();
 let exporter = MidiExporter::new();   // 480 ticks per quarter note
 let track = exporter.trajectory_to_track(
     "Lorenz Take 1",
@@ -414,7 +443,7 @@ let track = exporter.trajectory_to_track(
     SCALE_PENTATONIC_C4,
     120.0,   // BPM
 );
-exporter.export_to_file(&[track], "lorenz_take1.mid")?;
+exporter.export_to_file(&[track], "lorenz_take1.mid").unwrap();
 ```
 
 Multiple tracks can be passed to `export_smf` / `export_to_file`; they are merged into the single track required by SMF format 0, with each track's notes placed on a different MIDI channel (0-15) for DAW separation.
@@ -427,131 +456,59 @@ cargo run --release -- --headless --duration 30 --output take.wav --export-midi 
 
 ---
 
-## Preset gallery guide
-
-math-sonify ships with 16 named presets organised in a browsable in-memory catalogue. Each preset carries:
-
-- **System** -- which dynamical system it uses.
-- **Mood tags** -- `atmospheric`, `rhythmic`, `experimental`, `meditative`, `melodic`, `percussive`, `drone`, `eerie`, `evolving`, `hypnotic`, `minimalist`, `complex`, `electronic`, `energetic`.
-- **BPM range** -- the tempo window in which the preset sounds best.
-- **Complexity** -- 1 (minimal) to 5 (dense).
-
-### In the GUI
-
-The **SYNTH** tab has a **Presets** panel with:
-
-- A scrollable list filtered by mood or system.
-- A search box for partial name/description match.
-- A heart icon to toggle favorites.
-- A **Discover** button that picks a random preset weighted toward entries you have played least.
-
-### From Rust code
-
-```rust
-use math_sonify::preset_gallery::PresetGallery;
-
-let mut gallery = PresetGallery::with_builtin_presets();
-
-// Filter by mood
-let drones = gallery.by_mood("drone");
-
-// Search
-let results = gallery.search("butterfly");
-
-// Random discovery (weighted by inverse play count)
-if let Some(preset) = gallery.random_discovery() {
-    println!("Try: {} ({})", preset.name, preset.system);
-    gallery.record_play(&preset.name.clone());
-}
-
-// Favorites
-gallery.toggle_favorite("Lorenz Ambience");
-let favs = gallery.favorites();
-```
-
-### Built-in presets
-
-| Name | System | Moods | Complexity |
-|------|--------|-------|-----------|
-| Lorenz Ambience | Lorenz | atmospheric, meditative, melodic | 2 |
-| Pendulum Rhythm | Double Pendulum | rhythmic, percussive, energetic | 3 |
-| Torus Drone | Geodesic Torus | atmospheric, meditative, drone | 2 |
-| Kuramoto Sync | Kuramoto | experimental, evolving, hypnotic | 3 |
-| Three-Body Jazz | Three-Body | melodic, rhythmic, complex | 4 |
-| Rossler Drift | Rossler | atmospheric, melodic, meditative | 2 |
-| FM Chaos | Lorenz | experimental, electronic, energetic | 4 |
-| Pendulum Meditation | Double Pendulum | meditative, atmospheric, drone | 2 |
-| Thomas Labyrinth | Thomas | atmospheric, experimental, eerie | 3 |
-| Neural Burst | Hindmarsh-Rose | rhythmic, percussive, experimental | 4 |
-| Chemical Wave | Oregonator | atmospheric, evolving, hypnotic | 3 |
-| Sprott Minimal | Sprott E | experimental, electronic, minimalist | 2 |
-| Substorm Pulse | WINDMI | rhythmic, atmospheric, electronic | 3 |
-| Market Collapse | Finance | experimental, eerie, complex | 4 |
-| Hyperdimensional | Hyperchaos | experimental, complex, electronic | 5 |
-| Magyar Trance | Dadras | meditative, melodic, atmospheric | 3 |
-
----
-
 ## Collaborative session guide
 
-math-sonify includes two complementary collaboration features: a low-level protocol (`collaboration.rs`) for sharing attractor state between performers, and a full-featured **Collaborative Session** server (`collab.rs`) for real-time multi-user parameter editing.
+Run the app with a collaboration address and other people can play it with you:
 
-### Collaborative Session server (`collab.rs`)
+```bash
+math-sonify --collab 127.0.0.1:9001     # this machine only
+math-sonify --collab 0.0.0.0:9001       # anyone on your network
+```
 
-The session server is a raw-TCP WebSocket-style server that accepts JSON connections from any number of participants. Each participant can claim ownership of specific ODE parameters, edit them in real time, and all changes propagate immediately to every other connected client.
+Then open `collab.html` (included in the repository and the release downloads) in a browser, enter `ws://<your-ip>:9001`, and press **Connect**. Every connected player gets sliders for the main parameters, buttons to switch systems, and a box to set any `config.toml` value by its dotted path. Changes are heard within one control tick and every player sees them. The status bar shows who joined and what they changed.
 
-**Key types:**
-
-| Type | Role |
-|------|------|
-| `CollabServer` | TCP listener; spawns a thread per client |
-| `SessionEvent` | Events emitted to the simulation thread (`ParamChanged`, `ClientJoined`, `ClientLeft`) |
-| `SharedSynthState` | ODE parameters + sonification mode + scale, wrapped in `Arc<RwLock<>>` for lock-free reads |
-| `ParticipantCursor` | Each participant has a unique colour highlight on the parameter they are currently editing |
-| `SessionLog` | Full ordered history of every parameter change for post-session replay |
-
-**Wire protocol** (newline-delimited JSON):
+Any WebSocket client works too, for example `websocat ws://127.0.0.1:9001`, one JSON object per message:
 
 ```json
-// Client -> Server
-{ "claim":   ["rho", "sigma"] }
-{ "set":     { "rho": 28.5 } }
-{ "release": ["rho"] }
+// Client -> server
+{ "set":     { "lorenz.rho": 28.5, "system.name": "rossler" } }
+{ "claim":   ["lorenz.rho"] }
+{ "release": ["lorenz.rho"] }
+{ "get":     ["lorenz.rho", "system.speed"] }
 
-// Server -> Client
-{ "welcome":     { "client_id": 3 } }
-{ "update":      { "rho": 28.5, "owner": 3 } }
-{ "error":       "parameter 'rho' is owned by client 1" }
+// Server -> client
+{ "welcome":     { "client_id": 3, "peers": 2 } }
+{ "update":      { "param": "lorenz.rho", "value": 28.5, "owner": 3 } }
+{ "values":      { "lorenz.rho": 28.5, "system.speed": 1.0 } }
+{ "claimed":     ["lorenz.rho"] }
+{ "error":       "parameter 'lorenz.rho' is owned by client 1" }
 { "peer_joined": { "client_id": 4, "total": 2 } }
 { "peer_left":   { "client_id": 4, "total": 1 } }
 ```
 
-**Conflict resolution:** last-write-wins per parameter. A participant must first `claim` a parameter; attempts to `set` an unclaimed or foreign-owned parameter are rejected with an `error` message.
+Parameters are the dotted paths of `config.toml` (`lorenz.sigma`, `system.speed`, `audio.reverb_wet`, `sonification.mode`, ...). Values get the same clamping as `config.toml`, and a value of the wrong type is refused with an `error`. A claimed parameter can only be changed by its owner until they release it or disconnect.
 
-**Starting the server:**
+The server is also a library type, if you want the same thing in your own program:
 
-```rust
-use math_sonify::collab::{CollabServer, SessionEvent};
-use crossbeam_channel::unbounded;
+```rust,no_run
+use math_sonify::collab::{ApplyFn, CollabServer, GetFn};
+use math_sonify::config::Config;
+use parking_lot::Mutex;
+use std::sync::Arc;
 
-let (tx, rx) = unbounded::<SessionEvent>();
-let server = CollabServer::new("127.0.0.1:9001", tx).unwrap();
-server.run_background();
+let config = Arc::new(Mutex::new(Config::default()));
+let (c1, c2) = (config.clone(), config.clone());
+let apply: Box<ApplyFn> = Box::new(move |path, value| c1.lock().set_path(path, value));
+let get: Box<GetFn> = Box::new(move |path| c2.lock().get_path(path));
+let (events, _rx) = crossbeam_channel::unbounded();
 
-// In the simulation thread:
-for event in rx.try_iter() {
-    match event {
-        SessionEvent::ParamChanged { name, value, .. } => { /* apply to ODE */ }
-        _ => {}
-    }
-}
+let server = CollabServer::new("127.0.0.1:9001", apply, get, events).unwrap();
+server.run_background().unwrap();
 ```
-
-Connect any WebSocket client (browser, `websocat`, Python `websockets`) to `ws://127.0.0.1:9001` to join the session.
 
 ### Legacy performance protocol (`collaboration.rs`)
 
-math-sonify also includes a JSON-based collaborative performance protocol that lets multiple performers share attractor state in real time. Any transport layer (WebSocket, UDP, OSC) can carry the messages; the module itself only handles serialisation and session logic.
+`math_sonify::collaboration` is a separate building block: a JSON message format for performers who each run their own instance and share attractor state. The app does not use it (use `--collab` above); it lets multiple performers share attractor state in real time. Any transport layer (WebSocket, UDP, OSC) can carry the messages; the module itself only handles serialisation and session logic.
 
 ### Concepts
 
@@ -574,7 +531,8 @@ let json = CollaborationClient::serialize_message(&join_msg);
 // ... send json over your WebSocket / UDP socket ...
 
 // Each sim tick: push current attractor state
-let update = client.push_xyz(lorenz_x, lorenz_y, lorenz_z);
+let (x, y, z) = (1.2, -3.4, 20.5);
+let update = client.push_xyz(x, y, z);
 let json = CollaborationClient::serialize_message(&update);
 // ... send json ...
 
@@ -586,12 +544,13 @@ let msg = CollaborationClient::deserialize_message(incoming_json).unwrap();
 ### Server-side session tracking
 
 ```rust
-use math_sonify::collaboration::CollaborationSession;
+use math_sonify::collaboration::{CollaborationSession, PerformerState};
 
 let mut session = CollaborationSession::new("my-session");
 
 // On receive JoinSession
-session.join(performer_state)?;
+let performer_state = PerformerState::new("alice-01", "Alice");
+session.join(performer_state.clone()).expect("session has room");
 
 // On receive StateUpdate
 session.update_state(performer_state);
@@ -615,12 +574,53 @@ let sync_msg = session.broadcast_message();
 
 ## Presets
 
-math-sonify ships with ~40 named presets organised into four moods:
+math-sonify ships with 43 named presets in six categories. In the app, pick one from the preset list; type in the search box to filter by name, click the star to mark favorites, and tick **Favorites only** to see just those. From code, `math_sonify::patches::load_preset(name)` returns the preset's full `Config`.
 
-- **Atmospheric** -- Midnight Approach, Breathing Galaxy, Aurora Borealis, Deep Hypnosis, Cathedral Organ, Substorm, and more.
-- **Rhythmic** -- Frozen Machinery, The Phase Transition, Clockwork Insect, Industrial Heartbeat, Velocity Band, and more.
-- **Experimental** -- Neon Labyrinth, Dissociation, Jerk Circuit, Invisible Hand, Hyperchaos Engine, and more.
-- **Melodic** -- Glass Harp, Electric Kelp, The Butterfly's Aria, Solar Wind, and more.
+| Preset | Category | What it sounds like |
+|---|---|---|
+| Midnight Approach | Atmospheric | The butterfly attractor at glacial speed. A harmonic drone that never quite repeats. |
+| Collapsing Cathedral | Atmospheric | Vast reverberant chaos. The attractor orbits through minor chord space like a bell that forgot to stop ringing. |
+| The Irrational Winding | Atmospheric | A geodesic torus path that is provably ergodic: it will visit every point on the surface, eventually. A drone that mathematically cannot repeat. |
+| Breathing Galaxy | Atmospheric | Each harmonic partial drifting independently. A slowly rotating chord cluster that expands and contracts like something alive. |
+| Throat of the Storm | Atmospheric | Lorenz at high sigma with vocal formant synthesis. The attractor speaks in vowels. |
+| Siren Call | Atmospheric | Rössler spiral wandering through vowel space. Uncanny, almost human, but not. |
+| Frozen Machinery | Rhythmic | Duffing period-doubling through a bitcrusher. The mathematical route to chaos sounds like a machine breaking in slow motion. |
+| The Phase Transition | Rhythmic | Eight oscillators between noise and harmony: drag K to cross the synchronization boundary. |
+| Clockwork Insect | Rhythmic | Van der Pol limit cycle at high mu: a self-sustaining oscillation that clicks and grinds with mechanical regularity. |
+| Planetary Clockwork | Rhythmic | Three gravitational bodies locked in figure-eight orbit. The rhythm is the orbital period. The pitch is the angular velocity. |
+| Industrial Heartbeat | Rhythmic | The double pendulum's chaotic swings trigger a physical string model. Irregular tempo, real physics. |
+| Bone Structure | Rhythmic | Chua double-scroll mapped to waveguide strings. The attractor plucks: you hear the resonance of a material that doesn't exist. |
+| Glass Harp | Melodic | Aizawa attractor tracing a delicate toroidal path. Each loop is a note. Each orbit is a phrase. |
+| Electric Kelp | Melodic | Rössler spiral in FM mode. The modulation index follows the chaos level: the more chaotic, the richer the harmonic content. |
+| The Butterfly's Aria | Melodic | Lorenz at exactly the chaos boundary (rho=24.5). At this value the system is right on the edge: every trajectory is a different song. |
+| Solar Wind | Melodic | Halvorsen attractor in FM synthesis. The dense spiral trajectory drives the modulation index, producing shimmering harmonic clouds. |
+| Möbius Lead | Melodic | Aizawa in orbital mode. The attractor traces a path with half-twist topology: the melody has no beginning. |
+| Last Light | Cinematic | Rössler c-parameter near the bifurcation point. The spiral tightens. The chord opens. Something ends. |
+| Seismic Event | Cinematic | Three-body gravitational chaos at sub-bass frequencies. The figure-eight orbit produces a rhythm no human could notate. |
+| Ancient Algorithm | Cinematic | Three-body system in spectral and microtonal mode. Gravitational mathematics converted to quarter-tones. Nothing is resolved. |
+| Cathedral Organ | Cinematic | Lorenz attractor voiced through a 32-partial spectral additive synthesizer. The chaos drives the harmonic balance. |
+| Neon Labyrinth | Experimental | Chua double-scroll at high speed in spectral mode. Dense chromatic content that never resolves, never repeats. |
+| Dissociation | Experimental | Double pendulum in granular mode at high speed. The grain density tracks the trajectory: when the pendulum is most chaotic, the texture is densest. |
+| Tungsten Filament | Experimental | Chua circuit through heavy waveshaper saturation. The electronic buzz of something at its operating limit. |
+| The Double Scroll | Experimental | Chua circuit raw: the original electronic chaos. Two lobes, infinite complexity. |
+| Memory of Water | Meditative | The system depends on its history: this drone remembers where it has been. A harmonic field of extraordinary patience. |
+| Monk's Bell | Meditative | Double pendulum with long delay triggering on every zero-crossing. Irregular intervals, infinite sustain. |
+| Deep Hypnosis | Meditative | Geodesic torus at near-zero speed in microtonal scale. A drone so slow it's nearly DC. It drifts through quarter-tones glacially. |
+| Aurora Borealis | Meditative | Lorenz in FM mode with heavy chorus. The butterfly trajectory drives the modulation index: high chaos means richer sideband content. |
+| The Synchronization | Meditative | Kuramoto oscillators at the exact coupling strength where order emerges from chaos. This is a mathematical phase transition, audible. |
+| Cyclic Tangle | Experimental | Thomas attractor: three variables each driving the next in a cyclic loop. The dissipation b≈0.208 is the exact threshold between order and chaos. |
+| Polarity Reversal | Cinematic | Rikitake two-disk dynamo: the mathematical model of geomagnetic polarity flips. The irregular intervals between reversals are the pitch. |
+| Anti-Lorenz | Experimental | Chen attractor: derived from Lorenz by anti-control. The same folded band topology, but synthesized to be chaotic. A strange attractor by design. |
+| Double Convection | Atmospheric | Rucklidge double-scroll: chaos from a model of convection in a heated fluid layer. The two lobes correspond to left and right circulation. |
+| Mirror Attractor | Experimental | Shimizu-Morioka two-scroll: a left-right symmetric pair of lobes connected by unstable manifolds. The x²-bz coupling creates the scroll pinch. |
+| Xz Knot | Experimental | Sprott-D: parameter-free chaos from xz coupling and 3y² forcing. One of Sprott's 19 algebraically simplest chaotic flows. |
+| Equilibrium Fugue | Melodic | Sprott-E: chaos near the fixed point (¼, 1/16, 0). The yz product and x² feedback sustain the attractor with minimal algebra. |
+| Half-Speed Spiral | Atmospheric | Sprott-F: the 0.5y damping creates a slow inward spiral that the x² term periodically ruptures into chaos. |
+| Jerk Circuit | Experimental | Genesio-Tesi: a single x² term makes a 3rd-order ODE chaotic. Electronically realizable as a Jerk circuit. |
+| Velocity Band | Rhythmic | Liu attractor: the y² coupling to x creates a tight single-band scroll unlike Lorenz's double butterfly. |
+| Substorm | Atmospheric | WINDMI ionospheric substorm model: exponential feedback in a jerk system evokes sudden electromagnetic bursts. |
+| Invisible Hand | Experimental | Finance attractor: chaotic interest rate, investment, and price-index dynamics in a minimal 3D macroeconomic model. |
+| Hyperchaos Engine | Experimental | Chen-Li 4D hyperchaotic system: two positive Lyapunov exponents produce maximally unpredictable trajectories. |
 
 The **AUTO** arrangement generator picks 6 presets from a mood pool, scatters system parameters into varied dynamical regimes, randomises synthesis settings, and builds an 8-scene timeline with morphs as the main musical event.
 
@@ -643,7 +643,7 @@ math-sonify outputs 32-bit IEEE float stereo PCM at the system default sample ra
 
 ### Download
 
-Grab a prebuilt app from the [latest release](https://gitlab.com/mattbusel/math-sonify/-/releases). Pick the file that matches your computer:
+Grab a prebuilt app from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest). Pick the file that matches your computer:
 
 | System | File |
 |--------|------|
@@ -652,7 +652,7 @@ Grab a prebuilt app from the [latest release](https://gitlab.com/mattbusel/math-
 | Mac with Intel chip | `math-sonify-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
 | Linux (64-bit) | `math-sonify-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
 
-Unpack it and run `math-sonify` (`math-sonify.exe` on Windows). Keep `config.toml` next to it if you want to change the defaults. `math-sonify --help` lists the headless WAV render options. `SHA256SUMS.txt` on the release page lets you check the download.
+Unpack it and run `math-sonify` (`math-sonify.exe` on Windows). Keep `config.toml` next to it if you want to change the defaults. `math-sonify --help` lists the headless WAV render options. `SHA256SUMS.txt` on the release page lets you check the download. `collab.html` is the page for playing together (see the [collaborative session guide](#collaborative-session-guide)).
 
 The binaries are not code-signed, so your system will be cautious the first time:
 
@@ -672,7 +672,7 @@ On Linux, install the audio and windowing headers first, for example on Debian/U
 
 ### From source
 
-Requires [Rust](https://rustup.rs/) 1.75+ and a working audio output device.
+Requires [Rust](https://rustup.rs/) 1.85+ and a working audio output device.
 
 ```bash
 git clone https://gitlab.com/mattbusel/math-sonify
@@ -841,9 +841,17 @@ theme        = "neon" # neon | amber | ice | mono
 
 In addition to the classic forward pipeline (ODE state → audio), math-sonify can reverse the flow: use **incoming microphone audio** to continuously modify ODE parameters in real time.
 
+In the app, start it with `--mic`:
+
+```bash
+math-sonify --mic
+```
+
+The default input device then steers the Lorenz attractor (sigma from loudness, rho from brightness, beta from mid-band energy) while the synth keeps playing, so pick the Lorenz system to hear it. Lock a slider in the app to keep the microphone off that parameter. Headphones keep the speakers from feeding back into the microphone.
+
 ### How it works
 
-```
+```text
 Microphone / line-in (cpal default input)
     |
     v  per-frame (configurable hop size, default 512 samples)
@@ -876,8 +884,7 @@ OdePatch → simulation thread (applies sigma/rho/beta overrides)
 ### Usage
 
 ```rust
-use math_sonify::audio_driven::{AudioOdeBridge, BridgeConfig, DualMode, DualModeKind};
-use crossbeam_channel::unbounded;
+use math_sonify::audio_driven::{BridgeConfig, DualMode};
 
 // Build the reverse pipeline
 let dual = DualMode::new(BridgeConfig::default());
@@ -887,9 +894,10 @@ let (mut analyzer, patch_rx, _stop) = dual.build_reverse_pipeline();
 // analyzer.feed(sample);  // called per sample in the cpal callback
 
 // In the simulation thread:
+let mut lorenz = math_sonify::config::LorenzConfig::default();
 for patch in patch_rx.try_iter() {
-    if let Some(sigma) = patch.sigma { ode_params.sigma = sigma; }
-    if let Some(rho)   = patch.rho   { ode_params.rho   = rho;   }
+    if let Some(sigma) = patch.sigma { lorenz.sigma = sigma; }
+    if let Some(rho)   = patch.rho   { lorenz.rho   = rho;   }
     if patch.trigger_system_switch   { /* switch to next attractor */ }
 }
 ```
@@ -922,7 +930,7 @@ A **dynamical system** is a set of differential equations `dx/dt = f(x)` or a ma
 
 The **maximal Lyapunov exponent** λ₁ quantifies the average rate of exponential divergence of nearby trajectories:
 
-```
+```text
 ||δx(t)|| ≈ e^{λ₁ t} ||δx(0)||
 ```
 
@@ -1056,8 +1064,13 @@ The bifurcation sweeper runs a dynamical system across a continuous range of a s
 
 Trigger from the UI with the **Bifurcation Sweep** button in the **Bifurc** tab (tab 7), or call from Rust:
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
 use math_sonify::bifurcation::{BifurcationConfig, BifurcationSweeper};
+use math_sonify::config::Config;
+use std::path::Path;
+
+let base_cfg = Config::default();
 
 let config = BifurcationConfig {
     parameter_name: "rho".into(),
@@ -1068,6 +1081,8 @@ let config = BifurcationConfig {
 };
 let result = BifurcationSweeper::sweep(&config, &base_cfg, Path::new("recordings"))?;
 println!("WAV written to: {}", result.audio_path.display());
+# Ok(())
+# }
 ```
 
 Files are written to the `recordings/` directory (created automatically).
@@ -1089,23 +1104,23 @@ Linear interpolation between any two named presets. All numeric fields are blend
 
 ### Usage
 
-```rust
-use math_sonify::preset_interpolation::{interpolate, PresetMorphSchedule, MorphTimeline};
+```rust,no_run
+use math_sonify::patches::load_preset;
+use math_sonify::preset_interpolation::{interpolate, MorphTimeline, PresetMorphSchedule};
 
 // Single interpolation at t = 0.5
-let mid = interpolate(&load_preset("Lorenz Ambience"), &load_preset("FM Chaos"), 0.5);
+let mid = interpolate(&load_preset("Midnight Approach"), &load_preset("Glass Harp"), 0.5);
 
-// Full morph timeline
+// Full morph timeline (durations in milliseconds of wall time)
 let sched = PresetMorphSchedule::from_pairs(&[
-    ("Lorenz Ambience", 8_000),
-    ("FM Chaos",        6_000),
-    ("Thomas Labyrinth", 10_000),
+    ("Midnight Approach", 8_000),
+    ("Glass Harp", 6_000),
+    ("Clockwork Insect", 10_000),
 ]);
 let mut timeline = MorphTimeline::new(sched);
-loop {
-    let cfg = timeline.tick(); // call each UI frame
-    engine.apply_config(cfg);
-    if timeline.is_finished() { break; }
+while !timeline.is_finished() {
+    let cfg = timeline.tick(); // call each frame; hand cfg to your engine
+    # let _ = cfg;
 }
 ```
 
@@ -1115,7 +1130,7 @@ The **Morph** control in the **ARRANGE** tab exposes source/target preset select
 
 ## Collaborative OSC Sync (`src/osc_sync.rs`, `osc` feature)
 
-Enables real-time parameter synchronization between multiple running instances over UDP multicast.
+A library building block for syncing parameters between instances over UDP multicast. The app itself does not use it; to play together, use `--collab` (see the [collaborative session guide](#collaborative-session-guide)).
 
 Enable with `--features osc` (adds the `rosc` optional dependency).
 
@@ -1133,9 +1148,12 @@ Enable with `--features osc` (adds the `rosc` optional dependency).
 |------|------|
 | `OscSyncServer` | Listens on UDP port 9001; joins multicast group `239.0.0.1`. |
 | `OscSyncClient` | Broadcasts messages to the same multicast group. |
-| `CollaborativeSession` | Tracks connected peers by IP; applies last-writer-wins conflict resolution with monotonic timestamps. Peer count shown in status bar. |
+| `CollaborativeSession` | Tracks connected peers by IP; applies last-writer-wins conflict resolution with monotonic timestamps. |
 
-```rust
+```rust,no_run
+# #[cfg(not(feature = "osc"))] fn main() {}
+# #[cfg(feature = "osc")]
+# fn main() -> anyhow::Result<()> {
 use math_sonify::osc_sync::{OscSyncServer, OscSyncClient, CollaborativeSession};
 
 let server  = OscSyncServer::new()?;
@@ -1150,6 +1168,8 @@ if let Some((addr, msg)) = server.try_recv() {
     session.apply(addr, msg);
 }
 println!("{} peer(s) connected", session.peer_count());
+# Ok(())
+# }
 ```
 
 ---
@@ -1172,8 +1192,12 @@ Press **R** to start/stop recording. Files are saved to `recordings/YYYYMMDD_HHM
 | `AudioRecorder` | Appends live stereo interleaved f32 samples to a WAV file. |
 | `SegmentRecorder` | Fixed-duration clip (default 60 s), auto-named by system + preset. |
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
 use math_sonify::recorder::{AudioRecorder, RecordingDepth, RecordingSampleRate, SegmentRecorder};
+use std::path::Path;
+
+let stereo_f32_samples = vec![0.0f32; 2 * 44_100]; // one second of interleaved L/R
 
 // Open a rolling recorder
 let mut rec = AudioRecorder::start(
@@ -1193,8 +1217,10 @@ let mut seg = SegmentRecorder::start(
     RecordingDepth::Bits32,
     RecordingSampleRate::Hz44100,
 )?;
-let done = seg.push_samples(&samples)?;  // returns true when clip is full
+let done = seg.push_samples(&stereo_f32_samples)?;  // returns true when clip is full
 if done { seg.finish()?; }
+# Ok(())
+# }
 ```
 
 ---
@@ -1224,7 +1250,7 @@ A standalone module providing idiomatic config/state types for the Rössler spir
 
 ### Equations of motion
 
-```
+```text
 dx/dt = -y - z
 dy/dt =  x + a·y
 dz/dt =  b + z·(x - c)
@@ -1261,7 +1287,7 @@ A standalone module for the Van der Pol self-sustaining limit-cycle oscillator.
 
 ### Equations of motion
 
-```
+```text
 dx/dt = y
 dy/dt = μ·(1 − x²)·y − x
 ```

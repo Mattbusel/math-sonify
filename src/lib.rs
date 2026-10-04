@@ -59,3 +59,19 @@ pub mod score_renderer;
 pub mod synthesis_engine;
 pub mod music_theory;
 pub mod audio_pipeline;
+pub mod bifurcation;
+pub mod collab;
+pub mod collaboration;
+pub mod composer;
+pub mod fractal;
+pub mod midi_export;
+pub mod network;
+pub mod osc_sync;
+pub mod preset_gallery;
+pub mod preset_interpolation;
+pub mod recorder;
+
+/// Every Rust example in the README is compiled by `cargo test --doc`.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+mod readme_examples {}

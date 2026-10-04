@@ -214,6 +214,10 @@ pub struct AudioInputAnalyzer {
     prev_magnitudes: Vec<f32>,
     /// Hann window coefficients.
     window: Vec<f32>,
+    /// FFT planned once for `fft_size` (rustfft; any size works).
+    fft: Arc<dyn rustfft::Fft<f32>>,
+    /// Reused FFT input/output buffer.
+    spectrum: Vec<rustfft::num_complex::Complex<f32>>,
     /// Output channel — pushed to every hop.
     tx: Sender<AudioFeatures>,
 }
@@ -228,6 +232,8 @@ impl AudioInputAnalyzer {
             })
             .collect();
         Self {
+            fft: rustfft::FftPlanner::new().plan_fft_forward(n),
+            spectrum: vec![rustfft::num_complex::Complex::new(0.0, 0.0); n],
             frame_buf: vec![0.0; n],
             write_pos: 0,
             hop_counter: 0,
@@ -259,30 +265,17 @@ impl AudioInputAnalyzer {
     fn analyze(&mut self) {
         let n = self.config.fft_size;
 
-        // Build the windowed frame in order (accounting for ring-buffer wrap).
-        let mut windowed: Vec<f32> = (0..n)
-            .map(|i| {
-                let buf_idx = (self.write_pos + i) % n;
-                self.frame_buf[buf_idx] * self.window[i]
-            })
-            .collect();
+        // Windowed frame in time order (the ring buffer's oldest sample is
+        // at `write_pos`).
+        for (i, slot) in self.spectrum.iter_mut().enumerate() {
+            let sample = self.frame_buf[(self.write_pos + i) % n] * self.window[i];
+            *slot = rustfft::num_complex::Complex::new(sample, 0.0);
+        }
+        self.fft.process(&mut self.spectrum);
 
-        // In-place Cooley-Tukey FFT (radix-2 DIT, no external dependency).
-        cooley_tukey_fft(&mut windowed);
-
-        // Magnitude spectrum (first n/2+1 bins).
+        // Magnitude spectrum, bins 0..=n/2 (a real signal's upper half mirrors it).
         let half = n / 2 + 1;
-        let magnitudes: Vec<f32> = (0..half)
-            .map(|k| {
-                // `windowed` has been transformed in-place; real/imag are
-                // interleaved by the in-place transform: real[k], imag[k].
-                // For the simple magnitude we read from `windowed` treating
-                // indices 0..n as [Re0, Im0, Re1, Im1, …].
-                let re = windowed[2 * k % n];
-                let im = if 2 * k + 1 < n { windowed[2 * k + 1] } else { 0.0 };
-                (re * re + im * im).sqrt()
-            })
-            .collect();
+        let magnitudes: Vec<f32> = self.spectrum[..half].iter().map(|c| c.norm()).collect();
 
         // RMS of the time-domain frame.
         let rms_raw = {
@@ -533,89 +526,6 @@ impl DualMode {
     }
 }
 
-// ── Minimal in-place Cooley-Tukey FFT (no external dependency) ───────────────
-
-/// In-place radix-2 Cooley-Tukey FFT.
-///
-/// `buf` must have an even length (power of two is optimal). After the call,
-/// `buf[2k]` and `buf[2k+1]` contain the real and imaginary parts of bin `k`.
-/// For inputs shorter than 2 bins the function is a no-op.
-fn cooley_tukey_fft(buf: &mut Vec<f32>) {
-    let n = buf.len();
-    if n < 2 {
-        return;
-    }
-
-    // Bit-reversal permutation on pairs (real, imag) packed as flat array.
-    // We treat the input as n/2 complex numbers stored as [Re0, Im0, Re1, Im1, ...].
-    // For a real-valued signal Im_k = 0 initially.
-    // Expand to complex pairs first.
-    let half = n / 2;
-    // Re-interpret: make a complex vector of length `half` treating even indices
-    // as real and odd indices as imaginary (input is real so all Im = 0).
-    // We rebuild `buf` as interleaved complex from the real-only input.
-    // Since buf was already real (single-channel samples), set imaginary parts to 0.
-    // We work with a separate complex buffer to keep things clear.
-    let mut c: Vec<(f32, f32)> = buf[..half]
-        .iter()
-        .map(|&re| (re, 0.0))
-        .collect();
-
-    // Bit-reversal.
-    let bits = (half as f32).log2() as usize;
-    for i in 0..half {
-        let j = bit_reverse(i, bits);
-        if i < j {
-            c.swap(i, j);
-        }
-    }
-
-    // Cooley-Tukey butterfly stages.
-    let mut len = 2usize;
-    while len <= half {
-        let ang = -2.0 * std::f32::consts::PI / len as f32;
-        let w_re = ang.cos();
-        let w_im = ang.sin();
-        let mut k = 0;
-        while k < half {
-            let (mut wr, mut wi) = (1.0f32, 0.0f32);
-            for j in 0..len / 2 {
-                let (ur, ui) = c[k + j];
-                let vr = wr * c[k + j + len / 2].0 - wi * c[k + j + len / 2].1;
-                let vi = wr * c[k + j + len / 2].1 + wi * c[k + j + len / 2].0;
-                c[k + j] = (ur + vr, ui + vi);
-                c[k + j + len / 2] = (ur - vr, ui - vi);
-                let new_wr = wr * w_re - wi * w_im;
-                wi = wr * w_im + wi * w_re;
-                wr = new_wr;
-            }
-            k += len;
-        }
-        len *= 2;
-    }
-
-    // Write back as interleaved (re, im) into buf.
-    for (i, (re, im)) in c.iter().enumerate() {
-        if 2 * i < n {
-            buf[2 * i] = *re;
-        }
-        if 2 * i + 1 < n {
-            buf[2 * i + 1] = *im;
-        }
-    }
-}
-
-/// Reverse the lowest `bits` bits of `x`.
-fn bit_reverse(x: usize, bits: usize) -> usize {
-    let mut result = 0usize;
-    let mut v = x;
-    for _ in 0..bits {
-        result = (result << 1) | (v & 1);
-        v >>= 1;
-    }
-    result
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -624,6 +534,38 @@ mod tests {
 
     fn make_channels() -> (Sender<AudioFeatures>, Receiver<AudioFeatures>) {
         crossbeam_channel::unbounded()
+    }
+
+    /// Feed a pure tone and return the last analysed frame.
+    fn features_of_tone(freq: f32, sample_rate: f32) -> AudioFeatures {
+        let (tx, rx) = make_channels();
+        let mut a = AudioInputAnalyzer::new(BridgeConfig::default(), tx);
+        for i in 0..8192 {
+            a.feed(0.25 * (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate).sin());
+        }
+        rx.try_iter().last().expect("at least one frame")
+    }
+
+    #[test]
+    fn centroid_tracks_the_pitch_of_a_pure_tone() {
+        // Centroid is normalised to Nyquist (24 kHz at 48 kHz).
+        for freq in [1_000.0f32, 6_000.0, 12_000.0] {
+            let f = features_of_tone(freq, 48_000.0);
+            let expected = freq / 24_000.0;
+            assert!(
+                (f.centroid - expected).abs() < 0.02,
+                "{freq} Hz: centroid {} expected {expected}",
+                f.centroid
+            );
+        }
+    }
+
+    #[test]
+    fn tone_energy_lands_in_the_right_band() {
+        // 8 equal bands of 3 kHz over 0..24 kHz: 10.5 kHz is in band 3.
+        let f = features_of_tone(10_500.0, 48_000.0);
+        let loudest = (0..8).max_by(|&a, &b| f.bands[a].total_cmp(&f.bands[b])).unwrap();
+        assert_eq!(loudest, 3, "bands {:?}", f.bands);
     }
 
     #[test]
@@ -712,11 +654,6 @@ mod tests {
         mode.set_mode(DualModeKind::Both);
         assert!(mode.forward_active());
         assert!(mode.reverse_active());
-    }
-
-    #[test]
-    fn bit_reverse_identity_for_zero() {
-        assert_eq!(bit_reverse(0, 8), 0);
     }
 
     #[test]

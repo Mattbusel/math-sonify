@@ -136,6 +136,18 @@ HEADLESS OPTIONS:
     --attractor <NAME>           Override the system (e.g. lorenz, rossler, hindmarsh-rose)
     --spectrum                   Print a spectrum analysis instead of rendering
 
+LIVE INPUT:
+    --mic                        Let the default microphone or line-in steer the
+                                 Lorenz attractor: loudness drives sigma,
+                                 brightness drives rho, mid-band energy drives beta.
+                                 Locked sliders are left alone.
+
+COLLABORATION:
+    --collab <ADDR>              Let others play this instance over WebSocket,
+                                 e.g. --collab 127.0.0.1:9001 (0.0.0.0:9001 for
+                                 your network). Open collab.html or use any
+                                 WebSocket client; see the README.
+
 OTHER:
     -h, --help                   Print this help
     -V, --version                Print the version
@@ -183,6 +195,22 @@ fn main() -> anyhow::Result<()> {
 
     // Shared state for UI <-> sim communication
     let shared = Arc::new(Mutex::new(AppState::new(config.clone())));
+
+    // Collaborative WebSocket server (--collab ADDR)
+    if let Some(pos) = args.iter().position(|a| a == "--collab") {
+        let addr = args
+            .get(pos + 1)
+            .ok_or_else(|| anyhow::anyhow!("--collab needs an address, e.g. 127.0.0.1:9001"))?;
+        start_collab(addr, &shared)?;
+    }
+
+    // Microphone-driven morphing (--mic). The stream stops when dropped, so
+    // it lives until the window closes.
+    let _mic_stream = if args.iter().any(|a| a == "--mic") {
+        Some(start_mic(&shared)?)
+    } else {
+        None
+    };
 
     // Visualization history (shared between sim and UI)
     let viz_history: Arc<Mutex<Vec<(f32, f32, f32, f32, bool)>>> =
@@ -365,6 +393,141 @@ struct ExtraLayer {
     system: Box<dyn DynamicalSystem>,
     mapper: Box<dyn Sonification>,
     config: Config,
+}
+
+/// Open the default input device and let its sound steer the Lorenz
+/// parameters through [`audio_driven`]: input callback, then an analysis
+/// thread (FFT features), then the live config.
+fn start_mic(shared: &SharedState) -> anyhow::Result<cpal::Stream> {
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    use cpal::SampleFormat;
+    use crate::audio_driven::{AudioInputAnalyzer, AudioOdeBridge, BridgeConfig};
+
+    let device = cpal::default_host()
+        .default_input_device()
+        .ok_or_else(|| anyhow::anyhow!("--mic: no input device found"))?;
+    let supported = device.default_input_config()?;
+    let channels = supported.channels() as usize;
+    let format = supported.sample_format();
+    let stream_config: cpal::StreamConfig = supported.into();
+
+    // The callback only copies mono samples out; analysis happens elsewhere.
+    let (pcm_tx, pcm_rx) = crossbeam_channel::bounded::<Vec<f32>>(64);
+    fn mono<T: Copy>(data: &[T], channels: usize, to_f32: impl Fn(T) -> f32) -> Vec<f32> {
+        data.chunks(channels.max(1))
+            .map(|frame| frame.iter().map(|&s| to_f32(s)).sum::<f32>() / frame.len() as f32)
+            .collect()
+    }
+    let err_fn = |e: cpal::StreamError| tracing::warn!("mic input error: {e}");
+    let stream = match format {
+        SampleFormat::F32 => device.build_input_stream(
+            &stream_config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                let _ = pcm_tx.try_send(mono(data, channels, |s| s));
+            },
+            err_fn,
+            None,
+        )?,
+        SampleFormat::I16 => device.build_input_stream(
+            &stream_config,
+            move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                let _ = pcm_tx.try_send(mono(data, channels, |s| s as f32 / 32768.0));
+            },
+            err_fn,
+            None,
+        )?,
+        SampleFormat::U16 => device.build_input_stream(
+            &stream_config,
+            move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                let _ = pcm_tx.try_send(mono(data, channels, |s| (s as f32 - 32768.0) / 32768.0));
+            },
+            err_fn,
+            None,
+        )?,
+        other => anyhow::bail!("--mic: unsupported input sample format {other:?}"),
+    };
+    stream.play()?;
+
+    let (feature_tx, feature_rx) = crossbeam_channel::unbounded();
+    let (patch_tx, patch_rx) = crossbeam_channel::unbounded();
+    let mut analyzer = AudioInputAnalyzer::new(BridgeConfig::default(), feature_tx);
+    let mut bridge = AudioOdeBridge::from_channels(BridgeConfig::default(), feature_rx, patch_tx);
+    let shared = shared.clone();
+    thread::Builder::new().name("mic-analysis".into()).spawn(move || {
+        for chunk in pcm_rx {
+            for sample in chunk {
+                analyzer.feed(sample);
+            }
+            bridge.drain();
+            for patch in patch_rx.try_iter() {
+                let mut st = shared.lock();
+                let locked = |p: &str| st.locked_params.contains(p);
+                let (sigma, rho, beta) = (
+                    patch.sigma.filter(|_| !locked("lorenz.sigma")),
+                    patch.rho.filter(|_| !locked("lorenz.rho")),
+                    patch.beta.filter(|_| !locked("lorenz.beta")),
+                );
+                if let Some(v) = sigma {
+                    st.config.lorenz.sigma = v;
+                }
+                if let Some(v) = rho {
+                    st.config.lorenz.rho = v;
+                }
+                if let Some(v) = beta {
+                    st.config.lorenz.beta = v;
+                }
+            }
+        }
+    })?;
+    tracing::info!(device = %device.name().unwrap_or_default(), "microphone steering the Lorenz attractor");
+    Ok(stream)
+}
+
+/// Start the collaborative WebSocket server: remote `set` messages write
+/// straight into the live config, exactly like moving a slider.
+fn start_collab(addr: &str, shared: &SharedState) -> anyhow::Result<std::net::SocketAddr> {
+    let (s_apply, s_get) = (shared.clone(), shared.clone());
+    let apply: Box<collab::ApplyFn> = Box::new(move |path, value| {
+        let mut st = s_apply.lock();
+        st.config.set_path(path, value)?;
+        if path == "system.name" {
+            st.system_changed = true;
+        }
+        if path.starts_with("sonification.") {
+            st.mode_changed = true;
+        }
+        Ok(())
+    });
+    let get: Box<collab::GetFn> = Box::new(move |path| s_get.lock().config.get_path(path));
+    let (events_tx, events_rx) = crossbeam_channel::unbounded();
+    let server = collab::CollabServer::new(addr, apply, get, events_tx)
+        .map_err(|e| anyhow::anyhow!("--collab: cannot listen on {addr}: {e}"))?;
+    let bound = server.local_addr()?;
+    server.run_background()?;
+    tracing::info!(%bound, "collaboration server listening (ws://{bound})");
+    let status = shared.clone();
+    thread::Builder::new()
+        .name("collab-status".into())
+        .spawn(move || {
+            let mut peers = 0usize;
+            for event in events_rx {
+                let note = match event {
+                    collab::SessionEvent::ClientJoined { client_id } => {
+                        peers += 1;
+                        format!("Collab: player {client_id} joined ({peers} connected)")
+                    }
+                    collab::SessionEvent::ClientLeft { client_id } => {
+                        peers = peers.saturating_sub(1);
+                        format!("Collab: player {client_id} left ({peers} connected)")
+                    }
+                    collab::SessionEvent::ParamChanged { client_id, name, value } => {
+                        format!("Collab: player {client_id} set {name} = {value}")
+                    }
+                };
+                status.lock().clip_status = note;
+            }
+        })?;
+    Ok(bound)
 }
 
 /// The simulation thread runs at `CONTROL_RATE_HZ` (120 Hz) and drives all audio synthesis.

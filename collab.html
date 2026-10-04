@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>math-sonify collab</title>
+<style>
+  :root { --bg:#0e1116; --panel:#171b22; --text:#d8dee9; --dim:#7b8494; --accent:#7cc4ff; --warn:#ff8a7a; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; }
+  main { max-width:640px; margin:0 auto; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p.dim, .dim { color:var(--dim); }
+  section { background:var(--panel); border-radius:8px; padding:12px 14px; margin:12px 0; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  input[type=text] { flex:1; min-width:0; background:#0b0e13; color:var(--text); border:1px solid #2a313c; border-radius:6px; padding:6px 8px; }
+  button { background:#24303f; color:var(--text); border:1px solid #33465c; border-radius:6px; padding:6px 10px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  label.param { display:grid; grid-template-columns:130px 1fr 64px 28px; gap:8px; align-items:center; margin:6px 0; }
+  label.param.taken input[type=range] { opacity:.4; }
+  .lock { padding:2px 0; text-align:center; }
+  #log { font:12px/1.4 ui-monospace, monospace; max-height:180px; overflow:auto; white-space:pre-wrap; }
+  .err { color:var(--warn); }
+</style>
+</head>
+<body>
+<main>
+  <h1>math-sonify collab</h1>
+  <p class="dim">Start the app with <code>math-sonify --collab 127.0.0.1:9001</code>, then connect here. Everyone connected hears and sees every change.</p>
+
+  <section class="row">
+    <input id="url" type="text" value="ws://127.0.0.1:9001" aria-label="Server address">
+    <button id="connect">Connect</button>
+    <span id="status" class="dim">not connected</span>
+  </section>
+
+  <section id="params">
+    <div class="dim">Lock a slider to keep it yours until you release it or leave.</div>
+  </section>
+
+  <section>
+    <div class="row">
+      <input id="path" type="text" placeholder="any config.toml path, e.g. rossler.c" aria-label="Parameter path">
+      <input id="value" type="text" placeholder="value" style="max-width:110px" aria-label="Value">
+      <button id="send">Set</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button data-system="lorenz">Lorenz</button>
+      <button data-system="rossler">Rossler</button>
+      <button data-system="double_pendulum">Double pendulum</button>
+      <button data-system="kuramoto">Kuramoto</button>
+    </div>
+  </section>
+
+  <section><div id="log"></div></section>
+</main>
+<script>
+const PARAMS = [
+  ["lorenz.sigma", 1, 30, 0.1], ["lorenz.rho", 10, 50, 0.1], ["lorenz.beta", 0.5, 5, 0.01],
+  ["system.speed", 0.05, 10, 0.05], ["audio.reverb_wet", 0, 0.95, 0.01], ["audio.master_volume", 0, 1, 0.01],
+];
+let ws = null, myId = null;
+const owners = {};
+const $ = (id) => document.getElementById(id);
+const log = (text, cls) => {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = text;
+  $("log").prepend(line);
+};
+const send = (obj) => ws && ws.readyState === 1 && ws.send(JSON.stringify(obj));
+
+for (const [path, min, max, step] of PARAMS) {
+  const row = document.createElement("label");
+  row.className = "param"; row.dataset.path = path;
+  row.innerHTML = `<span>${path}</span><input type="range" min="${min}" max="${max}" step="${step}">` +
+    `<span class="v dim">-</span><button class="lock" title="Lock">&#128275;</button>`;
+  const range = row.querySelector("input");
+  range.addEventListener("input", () => send({ set: { [path]: Number(range.value) } }));
+  row.querySelector(".lock").addEventListener("click", (e) => {
+    e.preventDefault();
+    send(owners[path] === myId ? { release: [path] } : { claim: [path] });
+    if (owners[path] === myId) { delete owners[path]; paint(path); }
+  });
+  $("params").append(row);
+}
+
+function paint(path, value) {
+  const row = document.querySelector(`label.param[data-path="${path}"]`);
+  if (!row) return;
+  if (value !== undefined) { row.querySelector("input").value = value; row.querySelector(".v").textContent = Number(value).toFixed(2); }
+  const owner = owners[path];
+  row.classList.toggle("taken", owner !== undefined && owner !== myId);
+  row.querySelector(".lock").innerHTML = owner === myId ? "&#128274;" : "&#128275;";
+}
+
+$("connect").addEventListener("click", () => {
+  if (ws) ws.close();
+  ws = new WebSocket($("url").value.trim());
+  $("status").textContent = "connecting...";
+  ws.onopen = () => { send({ get: PARAMS.map((p) => p[0]) }); };
+  ws.onclose = () => { $("status").textContent = "disconnected"; myId = null; };
+  ws.onerror = () => log("could not connect: is the app running with --collab?", "err");
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.welcome) { myId = m.welcome.client_id; $("status").textContent = `you are player ${myId} (${m.welcome.peers} connected)`; }
+    if (m.values) for (const [p, v] of Object.entries(m.values)) paint(p, v);
+    if (m.update) { paint(m.update.param, m.update.value); if (m.update.owner !== myId) log(`player ${m.update.owner}: ${m.update.param} = ${m.update.value}`); }
+    if (m.claimed) for (const p of m.claimed) { owners[p] = myId; paint(p); }
+    if (m.peer_joined) log(`player ${m.peer_joined.client_id} joined (${m.peer_joined.total} connected)`);
+    if (m.peer_left) log(`player ${m.peer_left.client_id} left (${m.peer_left.total} connected)`);
+    if (m.error) log(m.error, "err");
+  };
+});
+
+$("send").addEventListener("click", () => {
+  const raw = $("value").value.trim();
+  const value = raw !== "" && !isNaN(Number(raw)) ? Number(raw) : raw;
+  send({ set: { [$("path").value.trim()]: value } });
+});
+for (const b of document.querySelectorAll("[data-system]")) {
+  b.addEventListener("click", () => send({ set: { "system.name": b.dataset.system } }));
+}
+</script>
+</body>
+</html>
