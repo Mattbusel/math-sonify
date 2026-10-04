@@ -1065,24 +1065,24 @@ The bifurcation sweeper runs a dynamical system across a continuous range of a s
 Trigger from the UI with the **Bifurcation Sweep** button in the **Bifurc** tab (tab 7), or call from Rust:
 
 ```rust,no_run
-# fn main() -> anyhow::Result<()> {
-use math_sonify::bifurcation::{BifurcationConfig, BifurcationSweeper};
-use math_sonify::config::Config;
-use std::path::Path;
+fn main() -> anyhow::Result<()> {
+    use math_sonify::bifurcation::{BifurcationConfig, BifurcationSweeper};
+    use math_sonify::config::Config;
+    use std::path::Path;
 
-let base_cfg = Config::default();
+    let base_cfg = Config::default();
 
-let config = BifurcationConfig {
-    parameter_name: "rho".into(),
-    range_start: 0.5,
-    range_end: 30.0,
-    steps: 200,
-    duration_per_step_ms: 300,
-};
-let result = BifurcationSweeper::sweep(&config, &base_cfg, Path::new("recordings"))?;
-println!("WAV written to: {}", result.audio_path.display());
-# Ok(())
-# }
+    let config = BifurcationConfig {
+        parameter_name: "rho".into(),
+        range_start: 0.5,
+        range_end: 30.0,
+        steps: 200,
+        duration_per_step_ms: 300,
+    };
+    let result = BifurcationSweeper::sweep(&config, &base_cfg, Path::new("recordings"))?;
+    println!("WAV written to: {}", result.audio_path.display());
+    Ok(())
+}
 ```
 
 Files are written to the `recordings/` directory (created automatically).
@@ -1119,8 +1119,8 @@ let sched = PresetMorphSchedule::from_pairs(&[
 ]);
 let mut timeline = MorphTimeline::new(sched);
 while !timeline.is_finished() {
-    let cfg = timeline.tick(); // call each frame; hand cfg to your engine
-    # let _ = cfg;
+    let cfg = timeline.tick(); // call once per frame
+    let _ = cfg; // hand cfg to your engine
 }
 ```
 
@@ -1150,26 +1150,25 @@ Enable with `--features osc` (adds the `rosc` optional dependency).
 | `OscSyncClient` | Broadcasts messages to the same multicast group. |
 | `CollaborativeSession` | Tracks connected peers by IP; applies last-writer-wins conflict resolution with monotonic timestamps. |
 
-```rust,no_run
-# #[cfg(not(feature = "osc"))] fn main() {}
-# #[cfg(feature = "osc")]
-# fn main() -> anyhow::Result<()> {
-use math_sonify::osc_sync::{OscSyncServer, OscSyncClient, CollaborativeSession};
+```rust,ignore
+// Needs `--features osc`.
+fn main() -> anyhow::Result<()> {
+    use math_sonify::osc_sync::{OscSyncServer, OscSyncClient, CollaborativeSession};
 
-let server  = OscSyncServer::new()?;
-let client  = OscSyncClient::new()?;
-let session = CollaborativeSession::new();
+    let server  = OscSyncServer::new()?;
+    let client  = OscSyncClient::new()?;
+    let session = CollaborativeSession::new();
 
-// Broadcast a parameter change:
-client.send_param("reverb_wet", 0.6)?;
+    // Broadcast a parameter change:
+    client.send_param("reverb_wet", 0.6)?;
 
-// Receive and apply incoming changes:
-if let Some((addr, msg)) = server.try_recv() {
-    session.apply(addr, msg);
+    // Receive and apply incoming changes:
+    if let Some((addr, msg)) = server.try_recv() {
+        session.apply(addr, msg);
+    }
+    println!("{} peer(s) connected", session.peer_count());
+    Ok(())
 }
-println!("{} peer(s) connected", session.peer_count());
-# Ok(())
-# }
 ```
 
 ---
@@ -1193,34 +1192,34 @@ Press **R** to start/stop recording. Files are saved to `recordings/YYYYMMDD_HHM
 | `SegmentRecorder` | Fixed-duration clip (default 60 s), auto-named by system + preset. |
 
 ```rust,no_run
-# fn main() -> anyhow::Result<()> {
-use math_sonify::recorder::{AudioRecorder, RecordingDepth, RecordingSampleRate, SegmentRecorder};
-use std::path::Path;
+fn main() -> anyhow::Result<()> {
+    use math_sonify::recorder::{AudioRecorder, RecordingDepth, RecordingSampleRate, SegmentRecorder};
+    use std::path::Path;
 
-let stereo_f32_samples = vec![0.0f32; 2 * 44_100]; // one second of interleaved L/R
+    let stereo_f32_samples = vec![0.0f32; 2 * 44_100]; // one second of interleaved L/R
 
-// Open a rolling recorder
-let mut rec = AudioRecorder::start(
-    Path::new("recordings"),
-    RecordingDepth::Bits32,
-    RecordingSampleRate::Hz44100,
-)?;
-rec.push_samples(&stereo_f32_samples)?;
-let path = rec.stop()?;
+    // Open a rolling recorder
+    let mut rec = AudioRecorder::start(
+        Path::new("recordings"),
+        RecordingDepth::Bits32,
+        RecordingSampleRate::Hz44100,
+    )?;
+    rec.push_samples(&stereo_f32_samples)?;
+    let path = rec.stop()?;
 
-// Auto-named segment (60 s clip)
-let mut seg = SegmentRecorder::start(
-    Path::new("recordings"),
-    "lorenz",
-    "Lorenz Ambience",
-    60,
-    RecordingDepth::Bits32,
-    RecordingSampleRate::Hz44100,
-)?;
-let done = seg.push_samples(&stereo_f32_samples)?;  // returns true when clip is full
-if done { seg.finish()?; }
-# Ok(())
-# }
+    // Auto-named segment (60 s clip)
+    let mut seg = SegmentRecorder::start(
+        Path::new("recordings"),
+        "lorenz",
+        "Lorenz Ambience",
+        60,
+        RecordingDepth::Bits32,
+        RecordingSampleRate::Hz44100,
+    )?;
+    let done = seg.push_samples(&stereo_f32_samples)?;  // returns true when clip is full
+    if done { seg.finish()?; }
+    Ok(())
+}
 ```
 
 ---
