@@ -1,5 +1,13 @@
 # math-sonify
 
+<!-- outcome-block -->
+**Hear chaos: 53 real dynamical systems (Lorenz, Three-Body, Kuramoto) drive a synth live, as a desktop app, a VST3/CLAP plugin or a WAV renderer.**
+
+**Why this over the alternatives:** Math-themed synths are presets with clever names. Here the equations are integrated in real time and every parameter change reaches the sound within 8 ms.
+
+**Guarantee:** if it doesn't do what this README says, [open an issue](https://github.com/Mattbusel/math-sonify/issues) and I'll fix it.
+<!-- outcome-block -->
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
