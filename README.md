@@ -1,19 +1,19 @@
 # math-sonify
 
 <!-- outcome-block -->
-**Hear chaos: 53 real dynamical systems (Lorenz, Three-Body, Kuramoto) drive a synth live, as a desktop app, a VST3/CLAP plugin or a WAV renderer.**
+**Hear chaos. 53 real dynamical systems (Lorenz, Three-Body, Kuramoto) play a synth live. Desktop app, VST3/CLAP plugin or WAV renderer.**
 
-**Why this over the alternatives:** Math-themed synths are presets with clever names. Here the equations are integrated in real time and every parameter change reaches the sound within 8 ms.
+Most math-themed synths are presets with clever names. Here the equations run in real time. Every parameter change reaches the sound within 8 ms.
 
-**Guarantee:** if it doesn't do what this README says, [open an issue](https://github.com/Mattbusel/math-sonify/issues) and I'll fix it.
+If it doesn't do what this README says, [open an issue](https://github.com/Mattbusel/math-sonify/issues) and I'll fix it.
 <!-- outcome-block -->
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
-math-sonify is a real-time generative audio engine that runs mathematical dynamical systems (differential equations, maps, and coupled oscillators) and routes every variable of their evolving state directly into audio synthesis parameters. The Lorenz attractor is actually integrating at 120 Hz; the Kuramoto coupling constant is live; the Three-Body gravitational problem advances at each control frame. The result is not a preset synthesiser with math-themed names: the mathematics _is_ the music, and every parameter change propagates to sound within 8 ms.
+math-sonify runs dynamical systems (differential equations, maps, coupled oscillators) and sends every variable of their state into the synth. The Lorenz attractor really integrates at 120 Hz. The Kuramoto coupling is live. The Three-Body problem steps every control frame. The math is the music.
 
-It is a desktop app (egui GUI, cpal audio), a VST3/CLAP plugin built from the same code, and a headless WAV renderer. Useful if you make ambient or generative music, teach dynamical systems and want students to hear chaos onset, or just want a synth whose knobs are the parameters of the Lorenz equations.
+Desktop app (egui GUI, cpal audio), a VST3/CLAP plugin from the same code, and a headless WAV renderer. For ambient and generative music, for teaching chaos by ear, or for a synth whose knobs are the Lorenz equations.
 
 | Lorenz phase portrait | Kuramoto math view | Waveform and spectrum |
 | --- | --- | --- |
@@ -23,19 +23,19 @@ It is a desktop app (egui GUI, cpal audio), a VST3/CLAP plugin built from the sa
 
 ## Feature highlights
 
-1. **53 dynamical systems**: Lorenz, Rossler, Double Pendulum, Kuramoto, Three-Body, Hyperchaos (Chen-Li), WINDMI, Finance, all Sprott cases, Tinkerbell map, and more (full list below).
-2. **9 sonification modes**: Direct, Orbital, Granular, Spectral, FM, AM, Vocal, Waveguide, Resonator.
-3. **20 musical scales**: Pentatonic through Microtonal, EDO-19/24/31, Harmonic Series, Just Intonation.
-4. **MIDI export**: trajectory-to-MIDI conversion; outputs Standard MIDI Files (SMF) importable into any DAW.
-5. **Presets**: 43 built-in presets in six categories, with search and favorites (see [Presets](#presets)).
-6. **Play together**: `--collab 127.0.0.1:9001` lets other people move the parameters live over WebSocket, from the bundled `collab.html` page or any WebSocket client. A player can lock a parameter so nobody else changes it.
-7. **Microphone steering**: `--mic` turns the room's sound into the Lorenz parameters while the synth keeps playing: louder means more chaos (sigma), brighter means higher rho, mid-band energy moves beta.
-8. **Lyapunov exponent tracker**: real-time estimation of the maximal Lyapunov exponent; displayed in the MATH VIEW tab.
-9. **FFT spectral overlay**: live FFT spectrum superimposed on the phase portrait and the WAVEFORM tab.
-10. **Scene arranger**: 8-scene timeline with smooth parameter morphs; AUTO generator builds full arrangements from a mood pool.
-11. **VST3 / CLAP plugin**: load inside Ableton, FL Studio, Logic Pro, Reaper, and any other NIH-plug-compatible DAW.
-12. **Headless render**: `--headless --duration 60 --output clip.wav` with no display required.
-13. **Live config reload**: edit `config.toml` while the engine runs; changes take effect without restart.
+1. **53 dynamical systems**: Lorenz, Rossler, Double Pendulum, Kuramoto, Three-Body, Hyperchaos (Chen-Li), WINDMI, Finance, all Sprott cases, Tinkerbell map and more (list below).
+2. **9 sound modes**: Direct, Orbital, Granular, Spectral, FM, AM, Vocal, Waveguide, Resonator.
+3. **20 scales**: Pentatonic through Microtonal, EDO-19/24/31, Harmonic Series, Just Intonation.
+4. **MIDI export**: turns a trajectory into a Standard MIDI File (SMF) for any DAW.
+5. **Presets**: 43 built in, six categories, with search and favorites (see [Presets](#presets)).
+6. **Play together**: `--collab 127.0.0.1:9001` lets others move the parameters live over WebSocket, from the bundled `collab.html` page or any WebSocket client. A player can lock a parameter so nobody else changes it.
+7. **Mic steering**: `--mic` turns room sound into Lorenz parameters while the synth plays. Louder means more chaos (sigma), brighter means higher rho, mid-band energy moves beta.
+8. **Lyapunov tracker**: live estimate of the largest Lyapunov exponent, shown in the MATH VIEW tab.
+9. **FFT overlay**: live spectrum over the phase portrait and in the WAVEFORM tab.
+10. **Scene arranger**: 8-scene timeline with smooth morphs. AUTO builds full arrangements from a mood pool.
+11. **VST3 / CLAP plugin**: runs in Ableton, FL Studio, Logic Pro, Reaper and any NIH-plug-compatible DAW.
+12. **Headless render**: `--headless --duration 60 --output clip.wav`, no display needed.
+13. **Live config reload**: edit `config.toml` while it runs. No restart.
 
 ---
 
@@ -43,11 +43,11 @@ It is a desktop app (egui GUI, cpal audio), a VST3/CLAP plugin built from the sa
 
 ### Pre-built binary
 
-Download the file for your system from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest), unzip it and run `math-sonify`. Audio starts immediately on the system default output device. See [Installation](#installation) for which file to pick.
+Get the file for your system from the [latest release](https://github.com/Mattbusel/math-sonify/releases/latest), unzip, run `math-sonify`. Sound starts right away on your default output. [Installation](#installation) says which file to pick.
 
 ### Build from source
 
-Requires [Rust](https://rustup.rs/) 1.85+ and a working audio output device.
+Needs [Rust](https://rustup.rs/) 1.85+ and a working audio output.
 
 ```bash
 git clone https://gitlab.com/mattbusel/math-sonify
@@ -106,7 +106,7 @@ Audio Synthesis (audio thread, 44100 / 48000 Hz)
 DAW (VST3 / CLAP plugin) or Desktop (standalone cpal output)
 ```
 
-**Thread safety:** the sim thread and audio thread communicate through a bounded `crossbeam-channel` of capacity 16. The audio callback calls `try_recv` and renders silence on a miss, so it is never blocked. The UI thread reads shared state through `parking_lot::Mutex` on the control rate.
+**Threads:** the sim and audio threads talk through a bounded `crossbeam-channel` (capacity 16). The audio callback calls `try_recv` and plays silence on a miss, so it never blocks. The UI thread reads shared state through `parking_lot::Mutex` at the control rate.
 
 ---
 
@@ -412,7 +412,7 @@ println!("r = {:.3}  voices = {}", st.order_parameter, st.active_voices);
 
 ## MIDI export guide
 
-math-sonify can export attractor trajectories to Standard MIDI Files (SMF format 0) that import cleanly into Ableton Live, FL Studio, Logic Pro, Reaper, and any other DAW.
+Exports attractor trajectories as Standard MIDI Files (SMF format 0). They open in Ableton Live, FL Studio, Logic Pro, Reaper and any other DAW.
 
 ### Mapping
 
@@ -454,7 +454,7 @@ let track = exporter.trajectory_to_track(
 exporter.export_to_file(&[track], "lorenz_take1.mid").unwrap();
 ```
 
-Multiple tracks can be passed to `export_smf` / `export_to_file`; they are merged into the single track required by SMF format 0, with each track's notes placed on a different MIDI channel (0-15) for DAW separation.
+You can pass several tracks to `export_smf` / `export_to_file`. They merge into the one track SMF format 0 needs, each on its own MIDI channel (0-15) so the DAW can split them.
 
 ### Headless export
 
@@ -473,7 +473,7 @@ math-sonify --collab 127.0.0.1:9001     # this machine only
 math-sonify --collab 0.0.0.0:9001       # anyone on your network
 ```
 
-Then open `collab.html` (included in the repository and the release downloads) in a browser, enter `ws://<your-ip>:9001`, and press **Connect**. Every connected player gets sliders for the main parameters, buttons to switch systems, and a box to set any `config.toml` value by its dotted path. Changes are heard within one control tick and every player sees them. The status bar shows who joined and what they changed.
+Then open `collab.html` (in the repo and the release downloads) in a browser, enter `ws://<your-ip>:9001`, press **Connect**. Each player gets sliders for the main parameters, buttons to switch systems, and a box to set any `config.toml` value by its dotted path. Changes play within one control tick and everyone sees them. The status bar shows who joined and what they changed.
 
 Any WebSocket client works too, for example `websocat ws://127.0.0.1:9001`, one JSON object per message:
 
@@ -494,7 +494,7 @@ Any WebSocket client works too, for example `websocat ws://127.0.0.1:9001`, one 
 { "peer_left":   { "client_id": 4, "total": 1 } }
 ```
 
-Parameters are the dotted paths of `config.toml` (`lorenz.sigma`, `system.speed`, `audio.reverb_wet`, `sonification.mode`, ...). Values get the same clamping as `config.toml`, and a value of the wrong type is refused with an `error`. A claimed parameter can only be changed by its owner until they release it or disconnect.
+Parameters are `config.toml` dotted paths (`lorenz.sigma`, `system.speed`, `audio.reverb_wet`, `sonification.mode`, ...). Values are clamped the same as in `config.toml`. A wrong type gets an `error`. A claimed parameter can only be changed by its owner until they release it or leave.
 
 The server is also a library type, if you want the same thing in your own program:
 
@@ -516,7 +516,7 @@ server.run_background().unwrap();
 
 ### Legacy performance protocol (`collaboration.rs`)
 
-`math_sonify::collaboration` is a separate building block: a JSON message format for performers who each run their own instance and share attractor state. The app does not use it (use `--collab` above); it lets multiple performers share attractor state in real time. Any transport layer (WebSocket, UDP, OSC) can carry the messages; the module itself only handles serialisation and session logic.
+`math_sonify::collaboration` is a separate building block: a JSON message format for performers who each run their own copy and share attractor state live. The app does not use it (use `--collab` above). Any transport (WebSocket, UDP, OSC) can carry the messages. The module only handles serialisation and session logic.
 
 ### Concepts
 
@@ -582,7 +582,7 @@ let sync_msg = session.broadcast_message();
 
 ## Presets
 
-math-sonify ships with 43 named presets in six categories. In the app, pick one from the preset list; type in the search box to filter by name, click the star to mark favorites, and tick **Favorites only** to see just those. From code, `math_sonify::patches::load_preset(name)` returns the preset's full `Config`.
+43 named presets in six categories. In the app, pick one from the list. Type to filter by name, click the star to favorite, tick **Favorites only** to see just those. From code, `math_sonify::patches::load_preset(name)` returns the preset's full `Config`.
 
 | Preset | Category | What it sounds like |
 |---|---|---|
@@ -630,7 +630,7 @@ math-sonify ships with 43 named presets in six categories. In the app, pick one 
 | Invisible Hand | Experimental | Finance attractor: chaotic interest rate, investment, and price-index dynamics in a minimal 3D macroeconomic model. |
 | Hyperchaos Engine | Experimental | Chen-Li 4D hyperchaotic system: two positive Lyapunov exponents produce maximally unpredictable trajectories. |
 
-The **AUTO** arrangement generator picks 6 presets from a mood pool, scatters system parameters into varied dynamical regimes, randomises synthesis settings, and builds an 8-scene timeline with morphs as the main musical event.
+**AUTO** picks 6 presets from a mood pool, spreads the system parameters across different regimes, randomises the synth settings, and builds an 8-scene timeline where the morphs are the main event.
 
 ---
 
@@ -660,7 +660,7 @@ Grab a prebuilt app from the [latest release](https://github.com/Mattbusel/math-
 | Mac with Intel chip | `math-sonify-vX.Y.Z-x86_64-apple-darwin.tar.gz` |
 | Linux (64-bit) | `math-sonify-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` |
 
-Unpack it and run `math-sonify` (`math-sonify.exe` on Windows). Keep `config.toml` next to it if you want to change the defaults. `math-sonify --help` lists the headless WAV render options. `SHA256SUMS.txt` on the release page lets you check the download. `collab.html` is the page for playing together (see the [collaborative session guide](#collaborative-session-guide)).
+Unpack and run `math-sonify` (`math-sonify.exe` on Windows). Keep `config.toml` next to it to change the defaults. `math-sonify --help` lists the headless WAV options. `SHA256SUMS.txt` on the release page checks the download. `collab.html` is for playing together (see the [collaborative session guide](#collaborative-session-guide)).
 
 The binaries are not code-signed, so your system will be cautious the first time:
 
@@ -680,7 +680,7 @@ On Linux, install the audio and windowing headers first, for example on Debian/U
 
 ### From source
 
-Requires [Rust](https://rustup.rs/) 1.85+ and a working audio output device.
+Needs [Rust](https://rustup.rs/) 1.85+ and a working audio output.
 
 ```bash
 git clone https://gitlab.com/mattbusel/math-sonify
@@ -847,7 +847,7 @@ theme        = "neon" # neon | amber | ice | mono
 
 ## Audio-driven ODE morphing guide
 
-In addition to the classic forward pipeline (ODE state → audio), math-sonify can reverse the flow: use **incoming microphone audio** to continuously modify ODE parameters in real time.
+Normally ODE state drives audio. This flips it: **microphone audio** changes the ODE parameters live.
 
 In the app, start it with `--mic`:
 
@@ -855,7 +855,7 @@ In the app, start it with `--mic`:
 math-sonify --mic
 ```
 
-The default input device then steers the Lorenz attractor (sigma from loudness, rho from brightness, beta from mid-band energy) while the synth keeps playing, so pick the Lorenz system to hear it. Lock a slider in the app to keep the microphone off that parameter. Headphones keep the speakers from feeding back into the microphone.
+Your default input then steers the Lorenz attractor (sigma from loudness, rho from brightness, beta from mid-band energy) while the synth plays. Pick the Lorenz system to hear it. Lock a slider to keep the mic off that parameter. Use headphones so the speakers don't feed back into the mic.
 
 ### How it works
 
@@ -946,7 +946,7 @@ The **maximal Lyapunov exponent** λ₁ quantifies the average rate of exponenti
 - λ₁ = 0: quasi-periodic or at a bifurcation boundary.
 - λ₁ > 0: chaotic. The Lorenz system at standard parameters has λ₁ ≈ 0.906.
 
-math-sonify estimates λ₁ using a standard rescaling algorithm: a shadow trajectory is integrated alongside the main one, the separation is measured every N steps, its logarithm is accumulated, and the separation is rescaled. This runs at `LYAP_INTERVAL_TICKS` (every 2 seconds of sim time).
+math-sonify estimates λ₁ the standard way. It runs a shadow trajectory next to the main one, measures the gap every N steps, adds up its log, and rescales the gap. This runs at `LYAP_INTERVAL_TICKS` (every 2 seconds of sim time).
 
 ### Hindmarsh-Rose Neuron
 
@@ -1022,7 +1022,7 @@ cargo build --release -p math-sonify-plugin
 cargo doc --no-deps --open
 ```
 
-The test suite covers: ODE solver accuracy (attractor bounds, energy conservation, synchronization thresholds), scale quantization, polyphony, config parsing and clamping, scene arranger timeline consistency, oscillator amplitude bounds, ADSR envelope behavior, all-presets load/validate, lerp_config correctness for every system, bifurcation parameter sweeps, MIDI frame recording and SMF export, preset gallery filtering and discovery, and collaboration session/client message round-trips.
+Tests cover: ODE solver accuracy (attractor bounds, energy conservation, sync thresholds), scale quantization, polyphony, config parsing and clamping, scene timeline consistency, oscillator amplitude bounds, ADSR envelopes, loading every preset, lerp_config for every system, bifurcation sweeps, MIDI recording and SMF export, preset filtering, and collaboration message round-trips.
 
 ---
 
@@ -1061,7 +1061,7 @@ The test suite covers: ODE solver accuracy (attractor bounds, energy conservatio
 
 ## Bifurcation Sweeper (`src/bifurcation.rs`)
 
-The bifurcation sweeper runs a dynamical system across a continuous range of a single parameter, records the steady-state attractor at each step, and exports the results in two formats.
+Sweeps one parameter of a system across a range, records the settled attractor at each step, and exports the results in two formats.
 
 | Output | Description |
 |--------|-------------|
@@ -1099,7 +1099,7 @@ Files are written to the `recordings/` directory (created automatically).
 
 ## Preset Interpolation and Morphing (`src/preset_interpolation.rs`)
 
-Linear interpolation between any two named presets. All numeric fields are blended continuously; string fields (system name, mode, scale, chord mode) switch at t = 0.5.
+Blends between any two named presets. Number fields blend smoothly. Text fields (system name, mode, scale, chord mode) switch at t = 0.5.
 
 ### Key types
 
@@ -1138,7 +1138,7 @@ The **Morph** control in the **ARRANGE** tab exposes source/target preset select
 
 ## Collaborative OSC Sync (`src/osc_sync.rs`, `osc` feature)
 
-A library building block for syncing parameters between instances over UDP multicast. The app itself does not use it; to play together, use `--collab` (see the [collaborative session guide](#collaborative-session-guide)).
+A library building block that syncs parameters between copies over UDP multicast. The app does not use it. To play together, use `--collab` (see the [collaborative session guide](#collaborative-session-guide)).
 
 Enable with `--features osc` (adds the `rosc` optional dependency).
 
@@ -1183,7 +1183,7 @@ fn main() -> anyhow::Result<()> {
 
 ## Audio Recording Mode (`src/recorder.rs`)
 
-Press **R** to start/stop recording. Files are saved to `recordings/YYYYMMDD_HHMMSS.wav` (epoch timestamp). A pulsing red **REC** indicator appears in the status bar while active.
+Press **R** to start or stop recording. Files go to `recordings/YYYYMMDD_HHMMSS.wav` (epoch timestamp). A red **REC** pulses in the status bar while recording.
 
 ### Configuration
 
